@@ -24,7 +24,7 @@ namespace ros2 {
       CarlaDepthCameraPublisher(CarlaDepthCameraPublisher&&);
       CarlaDepthCameraPublisher& operator=(CarlaDepthCameraPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       void InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify);
       bool Publish();
 
@@ -34,7 +34,7 @@ namespace ros2 {
       const char* type() const override { return "depth camera"; }
 
     private:
-      bool InitImage();
+      bool InitImage(const DomainId domain_id);
       bool InitInfo();
       bool PublishImage();
       bool PublishInfo();

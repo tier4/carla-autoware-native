@@ -23,7 +23,7 @@ namespace ros2 {
       CarlaCollisionPublisher(CarlaCollisionPublisher&&);
       CarlaCollisionPublisher& operator=(CarlaCollisionPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, uint32_t actor_id, float x, float y, float z);
       const char* type() const override { return "collision"; }

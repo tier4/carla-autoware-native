@@ -23,7 +23,7 @@ namespace ros2 {
       CarlaRadarPublisher(CarlaRadarPublisher&&);
       CarlaRadarPublisher& operator=(CarlaRadarPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, size_t elements, const uint8_t* data);
       const char* type() const override { return "radar"; }

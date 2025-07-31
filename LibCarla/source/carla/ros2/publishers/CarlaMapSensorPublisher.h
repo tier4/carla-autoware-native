@@ -22,7 +22,7 @@ namespace ros2 {
       CarlaMapSensorPublisher(CarlaMapSensorPublisher&&);
       CarlaMapSensorPublisher& operator=(CarlaMapSensorPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(const char* data);
       const char* type() const override { return "map sensor"; }

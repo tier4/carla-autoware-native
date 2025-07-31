@@ -22,7 +22,7 @@ namespace ros2 {
       CarlaIMUPublisher(CarlaIMUPublisher&&);
       CarlaIMUPublisher& operator=(CarlaIMUPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, float* accelerometer, float* gyroscope, float compass);
       const char* type() const override { return "inertial measurement unit"; }

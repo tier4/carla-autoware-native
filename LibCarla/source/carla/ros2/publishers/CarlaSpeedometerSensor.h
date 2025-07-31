@@ -23,7 +23,7 @@ namespace ros2 {
       CarlaSpeedometerSensor(CarlaSpeedometerSensor&&);
       CarlaSpeedometerSensor& operator=(CarlaSpeedometerSensor&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(float data);
       const char* type() const override { return "speedometer"; }

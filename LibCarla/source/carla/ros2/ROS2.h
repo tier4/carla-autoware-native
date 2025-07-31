@@ -151,12 +151,15 @@ void ProcessDataFromCollisionSensor(
   // sigleton
   ROS2() {};
 
+  bool ObtainDomainId();
+
   static std::shared_ptr<ROS2> _instance;
 
   bool _enabled { false };
   uint64_t _frame { 0 };
   int32_t _seconds { 0 };
   uint32_t _nanoseconds { 0 };
+  uint32_t _domain_id { 0U };
   std::unordered_map<void *, std::string> _actor_ros_name;
   std::unordered_map<void *, std::vector<void*> > _actor_parent_ros_name;
   std::shared_ptr<CarlaEgoVehicleControlSubscriber> _controller;

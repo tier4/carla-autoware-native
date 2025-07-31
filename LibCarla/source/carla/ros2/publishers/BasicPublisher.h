@@ -21,7 +21,7 @@ namespace ros2 {
       BasicPublisher(BasicPublisher&&);
       BasicPublisher& operator=(BasicPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(const char* msg);
       const char* type() const override { return "basic_publisher"; }

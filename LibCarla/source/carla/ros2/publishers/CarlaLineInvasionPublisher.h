@@ -22,7 +22,7 @@ namespace ros2 {
       CarlaLineInvasionPublisher(CarlaLineInvasionPublisher&&);
       CarlaLineInvasionPublisher& operator=(CarlaLineInvasionPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, const int32_t* data);
       const char* type() const override { return "line invasion"; }

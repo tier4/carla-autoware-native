@@ -22,7 +22,7 @@ namespace ros2 {
       CarlaGNSSPublisher(CarlaGNSSPublisher&&);
       CarlaGNSSPublisher& operator=(CarlaGNSSPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, const double* data);
       const char* type() const override { return "gnss"; }
