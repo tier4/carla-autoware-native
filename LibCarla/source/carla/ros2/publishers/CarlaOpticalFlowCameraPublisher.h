@@ -17,7 +17,7 @@ namespace ros2 {
 
   class CarlaOpticalFlowCameraPublisher : public CarlaPublisher {
     public:
-      CarlaOpticalFlowCameraPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaOpticalFlowCameraPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaOpticalFlowCameraPublisher();
       CarlaOpticalFlowCameraPublisher(const CarlaOpticalFlowCameraPublisher&);
       CarlaOpticalFlowCameraPublisher& operator=(const CarlaOpticalFlowCameraPublisher&);

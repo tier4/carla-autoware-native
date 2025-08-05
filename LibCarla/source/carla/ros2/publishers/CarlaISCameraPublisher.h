@@ -17,7 +17,7 @@ namespace ros2 {
 
   class CarlaISCameraPublisher : public CarlaPublisher {
     public:
-      CarlaISCameraPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaISCameraPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaISCameraPublisher();
       CarlaISCameraPublisher(const CarlaISCameraPublisher&);
       CarlaISCameraPublisher& operator=(const CarlaISCameraPublisher&);
