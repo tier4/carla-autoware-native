@@ -36,7 +36,7 @@ namespace ros2 {
 
     private:
       bool InitImage(const DomainId domain_id);
-      bool InitInfo();
+      bool InitInfo(const DomainId domain_id);
       bool PublishImage();
       bool PublishInfo();
 

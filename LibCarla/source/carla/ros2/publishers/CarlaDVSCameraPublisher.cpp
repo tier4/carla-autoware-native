@@ -74,7 +74,7 @@ namespace ros2 {
   }
 
   bool CarlaDVSCameraPublisher::Init(const DomainId domain_id) {
-    return InitImage(domain_id) && InitInfo() && InitPointCloud();
+    return InitImage(domain_id) && InitInfo(domain_id) && InitPointCloud(domain_id);
   }
 
   bool CarlaDVSCameraPublisher::InitImage(const DomainId domain_id) {
@@ -126,7 +126,7 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaDVSCameraPublisher::InitInfo() {
+  bool CarlaDVSCameraPublisher::InitInfo(const DomainId domain_id) {
     if (_info->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -135,7 +135,7 @@ namespace ros2 {
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _info->_participant = factory->create_participant(0, pqos);
+    _info->_participant = factory->create_participant(domain_id, pqos);
     if (_info->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -174,7 +174,7 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaDVSCameraPublisher::InitPointCloud() {
+  bool CarlaDVSCameraPublisher::InitPointCloud(const DomainId domain_id) {
     if (_point_cloud->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -183,7 +183,7 @@ namespace ros2 {
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _point_cloud->_participant = factory->create_participant(0, pqos);
+    _point_cloud->_participant = factory->create_participant(domain_id, pqos);
     if (_point_cloud->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
