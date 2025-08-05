@@ -16,7 +16,7 @@ namespace ros2 {
 
   class CarlaSpeedometerSensor : public CarlaPublisher {
     public:
-      CarlaSpeedometerSensor(const char* ros_name = "", const char* parent = "");
+      CarlaSpeedometerSensor(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaSpeedometerSensor();
       CarlaSpeedometerSensor(const CarlaSpeedometerSensor&);
       CarlaSpeedometerSensor& operator=(const CarlaSpeedometerSensor&);
