@@ -73,6 +73,9 @@ namespace ros2 {
       topic_name += _parent + "/";
     topic_name += _name;
     topic_name += publisher_type;
+    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+      topic_name = custom_topic_name.value();
+    }
     _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
     if (_impl->_topic == nullptr) {
         std::cerr << "Failed to create Topic" << std::endl;
@@ -177,12 +180,13 @@ namespace ros2 {
     return _impl->_vehicle;
   }
 
-  CarlaEgoVehicleControlSubscriber::CarlaEgoVehicleControlSubscriber(void* vehicle, const char* ros_name, const char* parent) :
+  CarlaEgoVehicleControlSubscriber::CarlaEgoVehicleControlSubscriber(void* vehicle, const char* ros_name, const char* parent, const char* ros_topic_name) :
   _impl(std::make_shared<CarlaEgoVehicleControlSubscriberImpl>()) {
     _impl->_listener.SetOwner(this);
     _impl->_vehicle = vehicle;
     _name = ros_name;
     _parent = parent;
+    _topic_name = ros_topic_name;
   }
 
   CarlaEgoVehicleControlSubscriber::~CarlaEgoVehicleControlSubscriber() {

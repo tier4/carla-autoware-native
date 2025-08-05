@@ -250,7 +250,8 @@ void ROS2::AddActorCallback(void* actor, std::string ros_name, ActorCallback cal
   _actor_callbacks.insert({actor, std::move(callback)});
 
   _controller.reset();
-  _controller = std::make_shared<CarlaEgoVehicleControlSubscriber>(actor, ros_name.c_str());
+  const auto ros_topic_name = GetActorRosTopicName(actor);
+  _controller = std::make_shared<CarlaEgoVehicleControlSubscriber>(actor, ros_name.c_str(), "", ros_topic_name.c_str());
   _controller->Init(_domain_id);
 }
 
