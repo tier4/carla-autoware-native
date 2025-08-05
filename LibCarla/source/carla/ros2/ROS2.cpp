@@ -201,6 +201,33 @@ std::string ROS2::GetActorParentRosName(void *actor) {
     return std::string("");
 }
 
+void ROS2::AddActorRosTopicName(void *actor, std::string ros_topic_name) {
+  _actor_ros_topic_name.insert({actor, ros_topic_name});
+}
+
+void ROS2::RemoveActorRosTopicName(void *actor) {
+  _actor_ros_topic_name.erase(actor);
+
+  _publishers.erase(actor);
+  _transforms.erase(actor);
+}
+
+void ROS2::UpdateActorRosTopicName(void *actor, std::string ros_topic_name) {
+  auto it = _actor_ros_topic_name.find(actor);
+  if (it != _actor_ros_topic_name.end()) {
+    it->second = ros_topic_name;
+  }
+}
+
+std::string ROS2::GetActorRosTopicName(void *actor) {
+  auto it = _actor_ros_topic_name.find(actor);
+  if (it != _actor_ros_topic_name.end()) {
+    return it->second;
+  } else {
+    return std::string("");
+  }
+}
+
 void ROS2::AddBasicSubscriberCallback(void* actor, std::string ros_name, ActorMessageCallback callback) {
   #if defined(WITH_ROS2_DEMO)
   _actor_message_callbacks.insert({actor, std::move(callback)});

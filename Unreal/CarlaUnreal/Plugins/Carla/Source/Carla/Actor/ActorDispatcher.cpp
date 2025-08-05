@@ -178,11 +178,16 @@ FCarlaActor* UActorDispatcher::RegisterActor(
     {
       // actor ros_name
       std::string RosName;
+      std::string RosTopicName;
       for (auto &&Attr : Description.Variations)
       {
         if (Attr.Key == "ros_name")
         {
           RosName = std::string(TCHAR_TO_UTF8(*Attr.Value.Value));
+        }
+        if (Attr.Key == "ros_topic_name")
+        {
+          RosTopicName = std::string(TCHAR_TO_UTF8(*Attr.Value.Value));
         }
       }
       const std::string id = std::string(TCHAR_TO_UTF8(*Description.Id));
@@ -203,6 +208,7 @@ FCarlaActor* UActorDispatcher::RegisterActor(
       } else {
         ROS2->AddActorRosName(static_cast<void*>(&Actor), RosName);
       }
+      ROS2->AddActorRosTopicName(static_cast<void*>(&Actor), RosTopicName == id ? "" : RosTopicName);  // empty is signal to generate default topic by sensor
 
       // vehicle controller for hero
       for (auto &&Attr : Description.Variations)
@@ -257,6 +263,7 @@ void UActorDispatcher::OnActorDestroyed(AActor *Actor)
   if (ROS2->IsEnabled())
   {
     ROS2->RemoveActorRosName(reinterpret_cast<void *>(Actor));
+    ROS2->RemoveActorRosTopicName(reinterpret_cast<void *>(Actor));
   }
   #endif
 }
