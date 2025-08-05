@@ -207,7 +207,7 @@ void ROS2::AddBasicSubscriberCallback(void* actor, std::string ros_name, ActorMe
 
   _basic_subscriber.reset();
   _basic_subscriber = std::make_shared<BasicSubscriber>(actor, ros_name.c_str());
-  _basic_subscriber->Init();
+  _basic_subscriber->Init(_domain_id);
   #endif
 }
 
@@ -223,7 +223,7 @@ void ROS2::AddActorCallback(void* actor, std::string ros_name, ActorCallback cal
 
   _controller.reset();
   _controller = std::make_shared<CarlaEgoVehicleControlSubscriber>(actor, ros_name.c_str());
-  _controller->Init();
+  _controller->Init(_domain_id);
 }
 
 void ROS2::RemoveActorCallback(void* actor) {

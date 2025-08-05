@@ -29,7 +29,7 @@ namespace ros2 {
       const char* GetMessage();
       void* GetActor();
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       // bool Read();
       const char* type() const override { return "basic_subscriber"; }
 
