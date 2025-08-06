@@ -5,6 +5,7 @@
 #pragma once
 
 #include <string>
+#include <optional>
 
 namespace carla {
 namespace ros2 {
