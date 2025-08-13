@@ -114,6 +114,23 @@ AutowareController::AutowareController(void* actor, const CarlaSubscriber::Domai
 }
 
 bool AutowareController::HasNewControl() const {
+  // Debug
+  if constexpr (false) {
+#define PRINT(SUBSCRIBER)                                         \
+  if (_impl->SUBSCRIBER.HasNewMessage())                          \
+    std::cerr << #SUBSCRIBER << " Has new message!" << std::endl; \
+    static_assert(true, "")
+
+    PRINT(_control_subscriber);
+    PRINT(_gear_subscriber);
+    PRINT(_turn_indicator_subscriber);
+    PRINT(_hazard_lights_subscriber);
+    PRINT(_emergency_subscriber);
+    PRINT(_engage_subscriber);
+
+#undef PRINT
+  }
+
   return _impl->_control_subscriber.HasNewMessage() ||
          _impl->_gear_subscriber.HasNewMessage() ||
          _impl->_turn_indicator_subscriber.HasNewMessage() ||
@@ -124,7 +141,49 @@ bool AutowareController::HasNewControl() const {
 
 VehicleAckermannControl AutowareController::GetControl() {
   VehicleAckermannControl control_out;
+
   const auto control_in = _impl->_control_subscriber.GetMessage();
+  const auto gear_in = _impl->_gear_subscriber.GetMessage();
+  const auto turn_indicator_in = _impl->_turn_indicator_subscriber.GetMessage();
+  const auto hazard_lights_in = _impl->_hazard_lights_subscriber.GetMessage();
+  const auto emergency_in = _impl->_emergency_subscriber.GetMessage();
+  const auto engage_in = _impl->_engage_subscriber.GetMessage();
+
+  // Debug
+  if constexpr (false) {
+    std::cerr << "=== NEW CONTROL ===" << std::endl;
+
+    std::cerr << "Control"
+      << " " << control_in.longitudinal().velocity()
+      << " " << control_in.longitudinal().acceleration()
+      << " " << control_in.longitudinal().jerk()
+      << " " << (control_in.longitudinal().is_defined_acceleration() ? "True" : "False")
+      << " " << (control_in.longitudinal().is_defined_jerk() ? "True" : "False")
+      << " " << control_in.lateral().steering_tire_angle()
+      << " " << control_in.lateral().steering_tire_rotation_rate()
+      << " " << (control_in.lateral().is_defined_steering_tire_rotation_rate() ? "True" : "False")
+      << std::endl;
+
+    std::cerr << "Gear"
+      << " " << static_cast<int>(gear_in.command())
+      << std::endl;
+
+    std::cerr << "Turn indicator"
+      << " " << static_cast<int>(turn_indicator_in.command())
+      << std::endl;
+
+    std::cerr << "Hazard lights"
+      << " " << static_cast<int>(hazard_lights_in.command())
+      << std::endl;
+
+    std::cerr << "Emergency"
+      << " " << (emergency_in.emergency() ? "True" : "False")
+      << std::endl;
+
+    std::cerr << "Engage"
+      << " " << (engage_in.engage() ? "True" : "False")
+      << std::endl;
+  }
 
   control_out.speed = control_in.longitudinal().velocity();
   if (control_in.longitudinal().is_defined_acceleration()) {
@@ -139,6 +198,8 @@ VehicleAckermannControl AutowareController::GetControl() {
   if (control_in.lateral().is_defined_steering_tire_rotation_rate()) {
     control_out.steer_speed = -control_in.lateral().steering_tire_rotation_rate();
   }
+
+  // TODO: Use input from all subscribers to perform actions in simulation
 
   return control_out;
 }
