@@ -109,11 +109,21 @@ void SubscriberListenerBase<Message>::SetOwnerData(Data* data) {
 
 // Instantiate all types
 #include "carla/ros2/types/Control.h"
+#include "carla/ros2/types/GearCommand.h"
+#include "carla/ros2/types/TurnIndicatorsCommand.h"
+#include "carla/ros2/types/HazardLightsCommand.h"
+#include "carla/ros2/types/VehicleEmergencyStamped.h"
+#include "carla/ros2/types/Engage.h"
 
 namespace carla {
 namespace ros2 {
 
-template class SubscriberListenerBase<autoware_control_msgs::msg::Control>;
+template class SubscriberListenerBase<autoware_control_msgs::msg::Control              >;
+template class SubscriberListenerBase<autoware_vehicle_msgs::msg::GearCommand          >;
+template class SubscriberListenerBase<autoware_vehicle_msgs::msg::TurnIndicatorsCommand>;
+template class SubscriberListenerBase<autoware_vehicle_msgs::msg::HazardLightsCommand  >;
+template class SubscriberListenerBase<tier4_vehicle_msgs::msg::VehicleEmergencyStamped >;
+template class SubscriberListenerBase<autoware_vehicle_msgs::msg::Engage               >;
 
 }  // namespace ros2
 }  // namespace carla
