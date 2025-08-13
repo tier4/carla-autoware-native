@@ -32,7 +32,7 @@ namespace autoware_control_msgs {
     namespace msg {
         LateralPubSubType::LateralPubSubType()
         {
-            setName("autoware_control_msgs::msg::Lateral");
+            setName("autoware_control_msgs::msg::dds_::Lateral_");
             auto type_size = Lateral::getMaxCdrSerializedSize();
             type_size += eprosima::fastcdr::Cdr::alignment(type_size, 4); /* possible submessage alignment */
             m_typeSize = static_cast<uint32_t>(type_size) + 4; /*encapsulation*/
