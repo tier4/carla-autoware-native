@@ -12,11 +12,12 @@ namespace ros2 {
 
 class AutowareController {
 public:
-  AutowareController(const CarlaSubscriber::DomainId domain_id);
+  AutowareController(void* actor, const CarlaSubscriber::DomainId domain_id);
 
   bool HasNewControl() const;
 
   VehicleAckermannControl GetControl();
+  void* GetVehicle();
 
 private:
   class Implementation;
