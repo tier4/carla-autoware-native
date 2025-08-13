@@ -12,7 +12,7 @@ class AutowareControlSubscriber
 : public AutowareSubscriber<autoware_control_msgs::msg::Control, autoware_control_msgs::msg::ControlPubSubType>
 {
 public:
-  AutowareControlSubscriber() : AutowareSubscriber("ros_name", "parent", "ros_topic_name") {}
+  AutowareControlSubscriber() : AutowareSubscriber("", "", "/control/command/control_cmd") {}
 
   virtual const char* type() const override { return "Autoware vehicle control"; }
 };
@@ -28,9 +28,20 @@ public:
 AutowareController::AutowareController(void* actor, const CarlaSubscriber::DomainId domain_id)
 : _impl(std::make_shared<Implementation>())
 {
-  AutowareSubscriberConfig config;
-  config.domain_id = domain_id;
-  _impl->_control_subscriber.Init(config);
+  const auto subscriber_config = [domain_id] {
+    AutowareSubscriberConfig config;
+
+    config.domain_id = domain_id;
+    config.reliability_qos = AutowareSubscriberConfig::ReliabilityQoS::RELIABLE;
+    config.durability_qos = AutowareSubscriberConfig::DurabilityQoS::TRANSIENT_LOCAL;
+    config.history_qos = AutowareSubscriberConfig::HistoryQoS::KEEP_LAST;
+    config.history_qos_depth = 1;
+
+    return config;
+  }();
+
+  _impl->_control_subscriber.Init(subscriber_config);
+
   _impl->_vehicle = actor;
 }
 
