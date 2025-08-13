@@ -32,7 +32,7 @@ namespace tier4_vehicle_msgs {
     namespace msg {
         VehicleEmergencyStampedPubSubType::VehicleEmergencyStampedPubSubType()
         {
-            setName("tier4_vehicle_msgs::msg::VehicleEmergencyStamped");
+            setName("tier4_vehicle_msgs::msg::dds_::VehicleEmergencyStamped_");
             auto type_size = VehicleEmergencyStamped::getMaxCdrSerializedSize();
             type_size += eprosima::fastcdr::Cdr::alignment(type_size, 4); /* possible submessage alignment */
             m_typeSize = static_cast<uint32_t>(type_size) + 4; /*encapsulation*/

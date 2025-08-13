@@ -40,7 +40,7 @@ namespace autoware_vehicle_msgs {
 
         TurnIndicatorsCommandPubSubType::TurnIndicatorsCommandPubSubType()
         {
-            setName("autoware_vehicle_msgs::msg::TurnIndicatorsCommand");
+            setName("autoware_vehicle_msgs::msg::dds_::TurnIndicatorsCommand_");
             auto type_size = TurnIndicatorsCommand::getMaxCdrSerializedSize();
             type_size += eprosima::fastcdr::Cdr::alignment(type_size, 4); /* possible submessage alignment */
             m_typeSize = static_cast<uint32_t>(type_size) + 4; /*encapsulation*/

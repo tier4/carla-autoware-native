@@ -32,7 +32,7 @@ namespace autoware_vehicle_msgs {
     namespace msg {
         EngagePubSubType::EngagePubSubType()
         {
-            setName("autoware_vehicle_msgs::msg::Engage");
+            setName("autoware_vehicle_msgs::msg::dds_::Engage_");
             auto type_size = Engage::getMaxCdrSerializedSize();
             type_size += eprosima::fastcdr::Cdr::alignment(type_size, 4); /* possible submessage alignment */
             m_typeSize = static_cast<uint32_t>(type_size) + 4; /*encapsulation*/
