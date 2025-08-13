@@ -61,7 +61,7 @@ namespace autoware_vehicle_msgs {
 
         GearCommandPubSubType::GearCommandPubSubType()
         {
-            setName("autoware_vehicle_msgs::msg::GearCommand");
+            setName("autoware_vehicle_msgs::msg::dds_::GearCommand_");
             auto type_size = GearCommand::getMaxCdrSerializedSize();
             type_size += eprosima::fastcdr::Cdr::alignment(type_size, 4); /* possible submessage alignment */
             m_typeSize = static_cast<uint32_t>(type_size) + 4; /*encapsulation*/

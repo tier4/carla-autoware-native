@@ -39,7 +39,7 @@ namespace autoware_vehicle_msgs {
 
         HazardLightsCommandPubSubType::HazardLightsCommandPubSubType()
         {
-            setName("autoware_vehicle_msgs::msg::HazardLightsCommand");
+            setName("autoware_vehicle_msgs::msg::dds_::HazardLightsCommand_");
             auto type_size = HazardLightsCommand::getMaxCdrSerializedSize();
             type_size += eprosima::fastcdr::Cdr::alignment(type_size, 4); /* possible submessage alignment */
             m_typeSize = static_cast<uint32_t>(type_size) + 4; /*encapsulation*/
