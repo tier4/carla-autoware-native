@@ -22,7 +22,7 @@
 #ifndef _FAST_DDS_GENERATED_TIER4_VEHICLE_MSGS_MSG_VEHICLEEMERGENCYSTAMPED_H_
 #define _FAST_DDS_GENERATED_TIER4_VEHICLE_MSGS_MSG_VEHICLEEMERGENCYSTAMPED_H_
 
-#include "builtin_interfaces/msg/Time.h"
+#include "Time.h"
 
 #include <fastrtps/utils/fixed_size_string.hpp>
 
