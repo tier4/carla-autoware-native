@@ -5,7 +5,6 @@
 #include <fastdds/dds/subscriber/DataReaderListener.hpp>
 #include <fastdds/dds/core/status/SubscriptionMatchedStatus.hpp>
 #include <fastdds/dds/subscriber/SampleInfo.hpp>
-#include "carla/ros2/types/Control.h"
 
 namespace carla {
 namespace ros2 {
@@ -43,12 +42,6 @@ public:
         std::unique_lock lock{_data->mutex};
         _data->data = _message;
         _data->data_changed = true;
-        if constexpr (std::is_same_v<Message, autoware_control_msgs::msg::Control>) {
-          std::cerr << "Received Control "
-          << _message.longitudinal().velocity() << ' '
-          << _message.longitudinal().acceleration() << ' '
-          << _message.longitudinal().jerk() << std::endl;
-        }
       }
     }
     if (rcode == erc::ReturnCodeValue::RETCODE_ERROR) {
