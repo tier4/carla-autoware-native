@@ -2,6 +2,17 @@
 
 #include "carla/ros2/types/Control.h"
 #include "carla/ros2/types/ControlPubSubTypes.h"
+#include "carla/ros2/types/GearCommand.h"
+#include "carla/ros2/types/GearCommandPubSubTypes.h"
+#include "carla/ros2/types/TurnIndicatorsCommand.h"
+#include "carla/ros2/types/TurnIndicatorsCommandPubSubTypes.h"
+#include "carla/ros2/types/HazardLightsCommand.h"
+#include "carla/ros2/types/HazardLightsCommandPubSubTypes.h"
+#include "carla/ros2/types/VehicleEmergencyStamped.h"
+#include "carla/ros2/types/VehicleEmergencyStampedPubSubTypes.h"
+#include "carla/ros2/types/Engage.h"
+#include "carla/ros2/types/EngagePubSubTypes.h"
+
 #include "carla/ros2/subscribers/AutowareSubscriber.h"
 
 namespace carla {
@@ -17,11 +28,63 @@ public:
   virtual const char* type() const override { return "Autoware vehicle control"; }
 };
 
+class AutowareGearCommandSubscriber
+: public AutowareSubscriber<autoware_vehicle_msgs::msg::GearCommand, autoware_vehicle_msgs::msg::GearCommandPubSubType>
+{
+public:
+  AutowareGearCommandSubscriber() : AutowareSubscriber("", "", "/control/command/gear_cmd") {}
+
+  virtual const char* type() const override { return "Autoware gear command"; }
+};
+
+class AutowareTurnIndicatorsCommandSubscriber
+: public AutowareSubscriber<autoware_vehicle_msgs::msg::TurnIndicatorsCommand, autoware_vehicle_msgs::msg::TurnIndicatorsCommandPubSubType>
+{
+public:
+  AutowareTurnIndicatorsCommandSubscriber() : AutowareSubscriber("", "", "/control/command/turn_indicators_cmd") {}
+
+  virtual const char* type() const override { return "Autoware turn indicator command"; }
+};
+
+class AutowareHazardLightsCommandSubscriber
+: public AutowareSubscriber<autoware_vehicle_msgs::msg::HazardLightsCommand, autoware_vehicle_msgs::msg::HazardLightsCommandPubSubType>
+{
+public:
+  AutowareHazardLightsCommandSubscriber() : AutowareSubscriber("", "", "/control/command/hazard_lights_cmd") {}
+
+  virtual const char* type() const override { return "Autoware hazard lights command"; }
+};
+
+class AutowareVehicleEmergencyStampedSubscriber
+: public AutowareSubscriber<tier4_vehicle_msgs::msg::VehicleEmergencyStamped, tier4_vehicle_msgs::msg::VehicleEmergencyStampedPubSubType>
+{
+public:
+  AutowareVehicleEmergencyStampedSubscriber() : AutowareSubscriber("", "", "/control/command/emergency_cmd") {}
+
+  virtual const char* type() const override { return "Autoware emergency"; }
+};
+
+class AutowareEngageSubscriber
+: public AutowareSubscriber<autoware_vehicle_msgs::msg::Engage, autoware_vehicle_msgs::msg::EngagePubSubType>
+{
+public:
+  AutowareEngageSubscriber() : AutowareSubscriber("", "", "/vehicle/engage") {}
+
+  virtual const char* type() const override { return "Autoware engage"; }
+};
+
 
 class AutowareController::Implementation {
 public:
   Implementation() = default;
-  AutowareControlSubscriber _control_subscriber{};
+
+  AutowareControlSubscriber                 _control_subscriber{};
+  AutowareGearCommandSubscriber             _gear_subscriber{};
+  AutowareTurnIndicatorsCommandSubscriber   _turn_indicator_subscriber{};
+  AutowareHazardLightsCommandSubscriber     _hazard_lights_subscriber{};
+  AutowareVehicleEmergencyStampedSubscriber _emergency_subscriber{};
+  AutowareEngageSubscriber                  _engage_subscriber{};
+
   void* _vehicle;
 };
 
@@ -41,12 +104,22 @@ AutowareController::AutowareController(void* actor, const CarlaSubscriber::Domai
   }();
 
   _impl->_control_subscriber.Init(subscriber_config);
+  _impl->_gear_subscriber.Init(subscriber_config);
+  _impl->_turn_indicator_subscriber.Init(subscriber_config);
+  _impl->_hazard_lights_subscriber.Init(subscriber_config);
+  _impl->_emergency_subscriber.Init(subscriber_config);
+  _impl->_engage_subscriber.Init(subscriber_config);
 
   _impl->_vehicle = actor;
 }
 
 bool AutowareController::HasNewControl() const {
-  return _impl->_control_subscriber.HasNewMessage();
+  return _impl->_control_subscriber.HasNewMessage() ||
+         _impl->_gear_subscriber.HasNewMessage() ||
+         _impl->_turn_indicator_subscriber.HasNewMessage() ||
+         _impl->_hazard_lights_subscriber.HasNewMessage() ||
+         _impl->_emergency_subscriber.HasNewMessage() ||
+         _impl->_engage_subscriber.HasNewMessage();
 }
 
 VehicleAckermannControl AutowareController::GetControl() {
