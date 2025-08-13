@@ -211,11 +211,26 @@ AutowareSubscriber<Message, MessagePubSubType>& AutowareSubscriber<Message, Mess
 // Instantiate all types
 #include "carla/ros2/types/Control.h"
 #include "carla/ros2/types/ControlPubSubTypes.h"
+#include "carla/ros2/types/GearCommand.h"
+#include "carla/ros2/types/GearCommandPubSubTypes.h"
+#include "carla/ros2/types/TurnIndicatorsCommand.h"
+#include "carla/ros2/types/TurnIndicatorsCommandPubSubTypes.h"
+#include "carla/ros2/types/HazardLightsCommand.h"
+#include "carla/ros2/types/HazardLightsCommandPubSubTypes.h"
+#include "carla/ros2/types/VehicleEmergencyStamped.h"
+#include "carla/ros2/types/VehicleEmergencyStampedPubSubTypes.h"
+#include "carla/ros2/types/Engage.h"
+#include "carla/ros2/types/EngagePubSubTypes.h"
 
 namespace carla {
 namespace ros2 {
 
-template class AutowareSubscriber<autoware_control_msgs::msg::Control, autoware_control_msgs::msg::ControlPubSubType>;
+template class AutowareSubscriber<autoware_control_msgs::msg::Control,               autoware_control_msgs::msg::ControlPubSubType              >;
+template class AutowareSubscriber<autoware_vehicle_msgs::msg::GearCommand,           autoware_vehicle_msgs::msg::GearCommandPubSubType          >;
+template class AutowareSubscriber<autoware_vehicle_msgs::msg::TurnIndicatorsCommand, autoware_vehicle_msgs::msg::TurnIndicatorsCommandPubSubType>;
+template class AutowareSubscriber<autoware_vehicle_msgs::msg::HazardLightsCommand,   autoware_vehicle_msgs::msg::HazardLightsCommandPubSubType  >;
+template class AutowareSubscriber<tier4_vehicle_msgs::msg::VehicleEmergencyStamped,  tier4_vehicle_msgs::msg::VehicleEmergencyStampedPubSubType >;
+template class AutowareSubscriber<autoware_vehicle_msgs::msg::Engage,                autoware_vehicle_msgs::msg::EngagePubSubType               >;
 
 }  // namespace ros2
 }  // namespace carla
