@@ -32,7 +32,7 @@ namespace autoware_control_msgs {
     namespace msg {
         LongitudinalPubSubType::LongitudinalPubSubType()
         {
-            setName("autoware_control_msgs::msg::Longitudinal");
+            setName("autoware_control_msgs::msg::dds_::Longitudinal_");
             auto type_size = Longitudinal::getMaxCdrSerializedSize();
             type_size += eprosima::fastcdr::Cdr::alignment(type_size, 4); /* possible submessage alignment */
             m_typeSize = static_cast<uint32_t>(type_size) + 4; /*encapsulation*/

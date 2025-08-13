@@ -32,7 +32,7 @@ namespace autoware_control_msgs {
     namespace msg {
         ControlPubSubType::ControlPubSubType()
         {
-            setName("autoware_control_msgs::msg::Control");
+            setName("autoware_control_msgs::msg::dds_::Control_");
             auto type_size = Control::getMaxCdrSerializedSize();
             type_size += eprosima::fastcdr::Cdr::alignment(type_size, 4); /* possible submessage alignment */
             m_typeSize = static_cast<uint32_t>(type_size) + 4; /*encapsulation*/
