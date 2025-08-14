@@ -167,6 +167,14 @@ public:
     _impl->_event = message;
   }
 
+  Message & Data() {
+    return _impl->_event;
+  }
+
+  const Message & Data() const {
+    return _impl->_event;
+  }
+
   bool Publish() {
     eprosima::fastrtps::rtps::InstanceHandle_t instance_handle;
     erc rcode = _impl->_datawriter->write(&_impl->_event, instance_handle);

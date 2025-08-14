@@ -17,15 +17,14 @@ class AutowarePublisher
 public:
   AutowarePublisher(void* vehicle, const CarlaPublisher::DomainId domain_id);
 
-  void SetVelocity(const int32_t seconds, const uint32_t nanoseconds,
-    const float longitudinal_velocity, const float lateral_velocity, const float heading_rate);
-  void SetSteering(const int32_t seconds, const uint32_t nanoseconds, const float steering_tire_angle);
-  void SetControlMode(const int32_t seconds, const uint32_t nanoseconds, const uint8_t mode);
-  void SetGear(const int32_t seconds, const uint32_t nanoseconds, const uint8_t gear);
-  void SetTurnIndicators(const int32_t seconds, const uint32_t nanoseconds, const uint8_t turn_indicators);
-  void SetHazardLights(const int32_t seconds, const uint32_t nanoseconds, const uint8_t hazard_lights);
+  void SetVelocity(const float longitudinal_velocity, const float lateral_velocity, const float heading_rate);
+  void SetSteering(const float steering_tire_angle);
+  void SetControlMode(const uint8_t mode);
+  void SetGear(const uint8_t gear);
+  void SetTurnIndicators(const uint8_t turn_indicators);
+  void SetHazardLights(const uint8_t hazard_lights);
 
-  void Publish();
+  void Publish(const int32_t seconds, const uint32_t nanoseconds);
 
 private:
   class Implementation;

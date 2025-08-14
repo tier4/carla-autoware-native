@@ -91,15 +91,10 @@ AutowarePublisher::AutowarePublisher(void* vehicle, const CarlaPublisher::Domain
   // TODO: Set QoS
 }
 
-void AutowarePublisher::SetVelocity(const int32_t seconds, const uint32_t nanoseconds,
-  const float longitudinal_velocity, const float lateral_velocity, const float heading_rate)
+void AutowarePublisher::SetVelocity(const float longitudinal_velocity, const float lateral_velocity, const float heading_rate)
 {
-  builtin_interfaces::msg::Time time;
-  time.sec(seconds);
-  time.nanosec(nanoseconds);
-
+  /// @note Leave `stamp` in header empty, because Publish() populates stamps
   std_msgs::msg::Header header;
-  header.stamp(std::move(time));
   header.frame_id(_impl->_velocity_publisher.frame_id());
 
   autoware_vehicle_msgs::msg::VelocityReport report;
@@ -111,78 +106,69 @@ void AutowarePublisher::SetVelocity(const int32_t seconds, const uint32_t nanose
   _impl->_velocity_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetSteering(const int32_t seconds, const uint32_t nanoseconds, const float steering_tire_angle)
+void AutowarePublisher::SetSteering(const float steering_tire_angle)
 {
-  builtin_interfaces::msg::Time time;
-  time.sec(seconds);
-  time.nanosec(nanoseconds);
-
   autoware_vehicle_msgs::msg::SteeringReport report;
-  report.stamp(std::move(time));
   report.steering_tire_angle(steering_tire_angle);
 
   _impl->_steering_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetControlMode(const int32_t seconds, const uint32_t nanoseconds, const uint8_t mode)
+void AutowarePublisher::SetControlMode(const uint8_t mode)
 {
-  builtin_interfaces::msg::Time time;
-  time.sec(seconds);
-  time.nanosec(nanoseconds);
-
   autoware_vehicle_msgs::msg::ControlModeReport report;
-  report.stamp(std::move(time));
   report.mode(mode);
 
   _impl->_control_mode_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetGear(const int32_t seconds, const uint32_t nanoseconds, const uint8_t gear)
+void AutowarePublisher::SetGear(const uint8_t gear)
 {
-  builtin_interfaces::msg::Time time;
-  time.sec(seconds);
-  time.nanosec(nanoseconds);
-
   autoware_vehicle_msgs::msg::GearReport report;
-  report.stamp(std::move(time));
   report.report(gear);
 
   _impl->_gear_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetTurnIndicators(const int32_t seconds, const uint32_t nanoseconds, const uint8_t turn_indicators)
+void AutowarePublisher::SetTurnIndicators(const uint8_t turn_indicators)
 {
-  builtin_interfaces::msg::Time time;
-  time.sec(seconds);
-  time.nanosec(nanoseconds);
-
   autoware_vehicle_msgs::msg::TurnIndicatorsReport report;
-  report.stamp(std::move(time));
   report.report(turn_indicators);
 
   _impl->_turn_indicator_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetHazardLights(const int32_t seconds, const uint32_t nanoseconds, const uint8_t hazard_lights)
+void AutowarePublisher::SetHazardLights(const uint8_t hazard_lights)
 {
-  builtin_interfaces::msg::Time time;
-  time.sec(seconds);
-  time.nanosec(nanoseconds);
-
   autoware_vehicle_msgs::msg::HazardLightsReport report;
-  report.stamp(std::move(time));
   report.report(hazard_lights);
 
   _impl->_hazard_lights_publisher.SetData(report);
 }
 
-void AutowarePublisher::Publish()
+void AutowarePublisher::Publish(const int32_t seconds, const uint32_t nanoseconds)
 {
   /**
    * @note All publishing is done at once based on assumption that all reports should be published
    * with the same frequency.
    * @sa https://github.com/tier4/AWSIM/blob/v1.3.1/docs/Components/ROS2/ROS2TopicAndServiceList/index.md
    */
+
+  const auto current_time = [seconds, nanoseconds] {
+    builtin_interfaces::msg::Time time;
+    time.sec(seconds);
+    time.nanosec(nanoseconds);
+
+    return time;
+  }();
+
+  _impl->_velocity_publisher.Data().header().stamp(current_time);
+  _impl->_steering_publisher.Data().stamp(current_time);
+  _impl->_control_mode_publisher.Data().stamp(current_time);
+  _impl->_gear_publisher.Data().stamp(current_time);
+  _impl->_turn_indicator_publisher.Data().stamp(current_time);
+  _impl->_hazard_lights_publisher.Data().stamp(current_time);
+
   _impl->_velocity_publisher.Publish();
   _impl->_steering_publisher.Publish();
   _impl->_control_mode_publisher.Publish();
