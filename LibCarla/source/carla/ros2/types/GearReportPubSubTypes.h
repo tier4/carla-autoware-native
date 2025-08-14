@@ -28,7 +28,7 @@
 
 #include "GearReport.h"
 
-#include "builtin_interfaces/msg/TimePubSubTypes.h"
+#include "TimePubSubTypes.h"
 
 #if !defined(GEN_API_VER) || (GEN_API_VER != 1)
 #error \
