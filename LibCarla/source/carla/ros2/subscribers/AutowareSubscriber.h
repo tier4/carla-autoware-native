@@ -10,24 +10,15 @@
 #include <mutex>
 #include "CarlaSubscriber.h"
 #include "carla/ros2/listeners/SubscriberListenerBase.h"
+#include "carla/ros2/data_types.h"
 
 namespace carla {
 namespace ros2 {
 
 struct AutowareSubscriberConfig {
-  CarlaSubscriber::DomainId domain_id{0U};
-  std::string publisher_type{ "" };  // Has to either start with '/' or be empty
+  std::string type{ "" };  // Has to either start with '/' or be empty
 
-  enum class ReliabilityQoS { RELIABLE, BEST_EFFORT };
-  ReliabilityQoS reliability_qos;
-
-  enum class DurabilityQoS { TRANSIENT_LOCAL, VOLATILE };
-  DurabilityQoS durability_qos;
-
-  enum class HistoryQoS { KEEP_LAST, KEEP_ALL };
-  HistoryQoS history_qos;
-
-  int32_t history_qos_depth;
+  TopicConfig topic;
 };
 
 

@@ -88,7 +88,7 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
   pqos.name(_name);
   auto factory = efd::DomainParticipantFactory::get_instance();
-  _impl->_participant = factory->create_participant(config.domain_id, pqos);
+  _impl->_participant = factory->create_participant(config.topic.domain_id, pqos);
   if (!_impl->_participant) {
     std::cerr << "Failed to create DomainParticipant" << std::endl;
     return false;
@@ -108,9 +108,9 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   if (!_parent.empty())
     topic_name += _parent + "/";
   topic_name += _name;
-  topic_name += config.publisher_type;
+  topic_name += config.type;
 
-  if (const auto custom_topic_name = ValidTopicName(config.publisher_type)) {
+  if (const auto custom_topic_name = ValidTopicName(config.type)) {
     topic_name = custom_topic_name.value();
   }
 
@@ -121,34 +121,34 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   }
 
   efd::DataReaderQos rqos = efd::DATAREADER_QOS_DEFAULT;
-  switch (config.reliability_qos) {
-    case AutowareSubscriberConfig::ReliabilityQoS::RELIABLE:
+  switch (config.topic.reliability_qos) {
+    case ReliabilityQoS::RELIABLE:
       rqos.reliability().kind = efd::RELIABLE_RELIABILITY_QOS;
       break;
-    case AutowareSubscriberConfig::ReliabilityQoS::BEST_EFFORT:
+    case ReliabilityQoS::BEST_EFFORT:
       rqos.reliability().kind = efd::BEST_EFFORT_RELIABILITY_QOS;
       break;
   }
 
-  switch (config.durability_qos) {
-    case AutowareSubscriberConfig::DurabilityQoS::TRANSIENT_LOCAL:
+  switch (config.topic.durability_qos) {
+    case DurabilityQoS::TRANSIENT_LOCAL:
       rqos.durability().kind = efd::TRANSIENT_LOCAL_DURABILITY_QOS;
       break;
-    case AutowareSubscriberConfig::DurabilityQoS::VOLATILE:
+    case DurabilityQoS::VOLATILE:
       rqos.durability().kind = efd::VOLATILE_DURABILITY_QOS;
       break;
   }
 
-  switch (config.history_qos) {
-    case AutowareSubscriberConfig::HistoryQoS::KEEP_LAST:
+  switch (config.topic.history_qos) {
+    case HistoryQoS::KEEP_LAST:
       rqos.history().kind = efd::KEEP_LAST_HISTORY_QOS;
       break;
-    case AutowareSubscriberConfig::HistoryQoS::KEEP_ALL:
+    case HistoryQoS::KEEP_ALL:
       rqos.history().kind = efd::KEEP_ALL_HISTORY_QOS;
       break;
   }
 
-  rqos.history().depth = config.history_qos_depth;
+  rqos.history().depth = config.topic.history_qos_depth;
 
   efd::DataReaderListener* listener = (efd::DataReaderListener*)_impl->_listener._impl.get();
   _impl->_datareader = _impl->_subscriber->create_datareader(_impl->_topic, rqos, listener);
