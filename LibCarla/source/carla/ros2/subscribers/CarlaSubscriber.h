@@ -13,8 +13,6 @@ namespace ros2 {
 
   class CarlaSubscriber {
     public:
-      using DomainId = uint32_t;
-
       const std::string& frame_id() const { return _frame_id; }
       const std::string& topic_name() const { return _topic_name; }
       const std::string& name() const { return _name; }
