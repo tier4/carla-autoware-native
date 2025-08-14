@@ -112,7 +112,7 @@ public:
     return *this;
   }
 
-  bool Init(const DomainId domain_id = 0U) {
+  bool Init(const TopicConfig config) {
     if (_impl->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -121,7 +121,7 @@ public:
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl->_participant = factory->create_participant(domain_id, pqos);
+    _impl->_participant = factory->create_participant(config.domain_id, pqos);
     if (_impl->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -151,6 +151,35 @@ public:
     }
 
     efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
+    switch (config.reliability_qos) {
+      case ReliabilityQoS::RELIABLE:
+        wqos.reliability().kind = efd::RELIABLE_RELIABILITY_QOS;
+        break;
+      case ReliabilityQoS::BEST_EFFORT:
+        wqos.reliability().kind = efd::BEST_EFFORT_RELIABILITY_QOS;
+        break;
+    }
+
+    switch (config.durability_qos) {
+      case DurabilityQoS::TRANSIENT_LOCAL:
+        wqos.durability().kind = efd::TRANSIENT_LOCAL_DURABILITY_QOS;
+        break;
+      case DurabilityQoS::VOLATILE:
+        wqos.durability().kind = efd::VOLATILE_DURABILITY_QOS;
+        break;
+    }
+
+    switch (config.history_qos) {
+      case HistoryQoS::KEEP_LAST:
+        wqos.history().kind = efd::KEEP_LAST_HISTORY_QOS;
+        break;
+      case HistoryQoS::KEEP_ALL:
+        wqos.history().kind = efd::KEEP_ALL_HISTORY_QOS;
+        break;
+    }
+
+    wqos.history().depth = config.history_qos_depth;
+
     wqos.endpoint().history_memory_policy = eprosima::fastrtps::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
     efd::DataWriterListener* listener = (efd::DataWriterListener*)_impl->_listener._impl.get();
     _impl->_datawriter = _impl->_publisher->create_datawriter(_impl->_topic, wqos, listener);
