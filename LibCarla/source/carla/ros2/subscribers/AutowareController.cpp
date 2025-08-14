@@ -88,17 +88,17 @@ public:
   void* _vehicle;
 };
 
-AutowareController::AutowareController(void* actor, const CarlaSubscriber::DomainId domain_id)
+AutowareController::AutowareController(void* actor, const DomainId domain_id)
 : _impl(std::make_shared<Implementation>())
 {
   const auto subscriber_config = [domain_id] {
     AutowareSubscriberConfig config;
 
-    config.domain_id = domain_id;
-    config.reliability_qos = AutowareSubscriberConfig::ReliabilityQoS::RELIABLE;
-    config.durability_qos = AutowareSubscriberConfig::DurabilityQoS::TRANSIENT_LOCAL;
-    config.history_qos = AutowareSubscriberConfig::HistoryQoS::KEEP_LAST;
-    config.history_qos_depth = 1;
+    config.topic.domain_id = domain_id;
+    config.topic.reliability_qos = ReliabilityQoS::RELIABLE;
+    config.topic.durability_qos = DurabilityQoS::TRANSIENT_LOCAL;
+    config.topic.history_qos = HistoryQoS::KEEP_LAST;
+    config.topic.history_qos_depth = 1;
 
     return config;
   }();

@@ -15,7 +15,7 @@ namespace ros2 {
 class AutowarePublisher
 {
 public:
-  AutowarePublisher(void* vehicle, const CarlaPublisher::DomainId domain_id);
+  AutowarePublisher(void* vehicle, const DomainId domain_id);
 
   void SetVelocity(const float longitudinal_velocity, const float lateral_velocity, const float heading_rate);
   void SetSteering(const float steering_tire_angle);
