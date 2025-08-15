@@ -82,7 +82,16 @@ void ROS2::Enable(bool enable) {
   ObtainDomainId();
   log_info("ROS2 enabled: ", _enabled);
   _clock_publisher = std::make_shared<CarlaClockPublisher>("clock", "");
-  _clock_publisher->Init(_domain_id);
+  const auto topic_config = [this] {
+    TopicConfig config;
+    config.domain_id = _domain_id;
+    config.reliability_qos = ReliabilityQoS::BEST_EFFORT;
+    config.durability_qos = DurabilityQoS::VOLATILE;
+    config.history_qos = HistoryQoS::KEEP_LAST;
+    config.history_qos_depth = 1;
+    return config;
+  }();
+  _clock_publisher->Init(topic_config);
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher = std::make_shared<BasicPublisher>("basic_publisher", "");
   _basic_publisher->Init(_domain_id);
