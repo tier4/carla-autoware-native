@@ -24,9 +24,9 @@ class AutowareGNSSPublisher : public CarlaPublisher {
     AutowareGNSSPublisher(AutowareGNSSPublisher&&);
     AutowareGNSSPublisher& operator=(AutowareGNSSPublisher&&);
 
-    bool Init(const TopicConfig& config);
+    bool Init(const TopicConfig& pose_config, const TopicConfig& pose_config_with_covariance_stamped);
     bool Publish();
-    void SetData(const double* position, const double* orientation);
+    void SetData(int32_t seconds, uint32_t nanoseconds, const double* position, const double* orientation);
     const char* type() const override { return "Autoware GNSS"; }
 
   private:
