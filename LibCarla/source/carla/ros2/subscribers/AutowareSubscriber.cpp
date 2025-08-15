@@ -17,6 +17,8 @@
 #include <fastdds/dds/subscriber/qos/DataReaderQos.hpp>
 #include <fastdds/dds/subscriber/DataReaderListener.hpp>
 
+#include "carla/ros2/util/conversions.hpp"
+
 namespace carla {
 namespace ros2 {
 
@@ -125,34 +127,7 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   }
 
   efd::DataReaderQos rqos = efd::DATAREADER_QOS_DEFAULT;
-  switch (config.topic.reliability_qos) {
-    case ReliabilityQoS::RELIABLE:
-      rqos.reliability().kind = efd::RELIABLE_RELIABILITY_QOS;
-      break;
-    case ReliabilityQoS::BEST_EFFORT:
-      rqos.reliability().kind = efd::BEST_EFFORT_RELIABILITY_QOS;
-      break;
-  }
-
-  switch (config.topic.durability_qos) {
-    case DurabilityQoS::TRANSIENT_LOCAL:
-      rqos.durability().kind = efd::TRANSIENT_LOCAL_DURABILITY_QOS;
-      break;
-    case DurabilityQoS::VOLATILE:
-      rqos.durability().kind = efd::VOLATILE_DURABILITY_QOS;
-      break;
-  }
-
-  switch (config.topic.history_qos) {
-    case HistoryQoS::KEEP_LAST:
-      rqos.history().kind = efd::KEEP_LAST_HISTORY_QOS;
-      break;
-    case HistoryQoS::KEEP_ALL:
-      rqos.history().kind = efd::KEEP_ALL_HISTORY_QOS;
-      break;
-  }
-
-  rqos.history().depth = config.topic.history_qos_depth;
+  configure_qos(config.topic, rqos);
 
   efd::DataReaderListener* listener = (efd::DataReaderListener*)_impl->_listener._impl.get();
   _impl->_datareader = _impl->_subscriber->create_datareader(_impl->_topic, rqos, listener);
