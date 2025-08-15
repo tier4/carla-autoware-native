@@ -25,6 +25,7 @@
 #include <fastdds/dds/publisher/DataWriterListener.hpp>
 
 #include "CarlaPublisher.h"
+#include "carla/ros2/util/conversions.hpp"
 
 /**
  * @brief For internal use only, do not include this in any header that is not internal!!!
@@ -151,34 +152,7 @@ public:
     }
 
     efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
-    switch (config.reliability_qos) {
-      case ReliabilityQoS::RELIABLE:
-        wqos.reliability().kind = efd::RELIABLE_RELIABILITY_QOS;
-        break;
-      case ReliabilityQoS::BEST_EFFORT:
-        wqos.reliability().kind = efd::BEST_EFFORT_RELIABILITY_QOS;
-        break;
-    }
-
-    switch (config.durability_qos) {
-      case DurabilityQoS::TRANSIENT_LOCAL:
-        wqos.durability().kind = efd::TRANSIENT_LOCAL_DURABILITY_QOS;
-        break;
-      case DurabilityQoS::VOLATILE:
-        wqos.durability().kind = efd::VOLATILE_DURABILITY_QOS;
-        break;
-    }
-
-    switch (config.history_qos) {
-      case HistoryQoS::KEEP_LAST:
-        wqos.history().kind = efd::KEEP_LAST_HISTORY_QOS;
-        break;
-      case HistoryQoS::KEEP_ALL:
-        wqos.history().kind = efd::KEEP_ALL_HISTORY_QOS;
-        break;
-    }
-
-    wqos.history().depth = config.history_qos_depth;
+    configure_qos(config, wqos);
 
     wqos.endpoint().history_memory_policy = eprosima::fastrtps::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
     efd::DataWriterListener* listener = (efd::DataWriterListener*)_impl->_listener._impl.get();
