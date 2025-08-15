@@ -25,7 +25,7 @@ namespace ros2 {
       CarlaRGBCameraPublisher(CarlaRGBCameraPublisher&&);
       CarlaRGBCameraPublisher& operator=(CarlaRGBCameraPublisher&&);
 
-      bool Init(const TopicConfig& config);
+      bool Init(const TopicConfig& image_config, const TopicConfig& info_config);
       void InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify);
       bool Publish();
 
