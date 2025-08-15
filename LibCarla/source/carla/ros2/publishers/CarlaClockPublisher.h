@@ -23,7 +23,7 @@ namespace ros2 {
       CarlaClockPublisher(CarlaClockPublisher&&);
       CarlaClockPublisher& operator=(CarlaClockPublisher&&);
 
-      bool Init(const DomainId domain_id = 0U);
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t sec, uint32_t nanosec);
       const char* type() const override { return "clock"; }
