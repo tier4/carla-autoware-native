@@ -15,13 +15,6 @@
 namespace carla {
 namespace ros2 {
 
-struct AutowareSubscriberConfig {
-  std::string type{ "" };  // Has to either start with '/' or be empty
-
-  TopicConfig topic;
-};
-
-
 template <typename Message, typename MessagePubSubType>
 class AutowareSubscriber : public CarlaSubscriber {
 public:
@@ -35,7 +28,7 @@ public:
   bool HasNewMessage();
   Message GetMessage();
 
-  bool Init(const AutowareSubscriberConfig& config);
+  bool Init(const TopicConfig& config);
 
   virtual const char* type() const = 0;
 

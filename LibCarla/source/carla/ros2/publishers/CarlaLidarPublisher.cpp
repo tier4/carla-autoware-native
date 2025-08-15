@@ -67,7 +67,8 @@ namespace ros2 {
     if (!_parent.empty())
       topic_name += _parent + "/";
     topic_name += _name;
-    if (const auto custom_topic_name = ValidTopicName()) {
+    topic_name += config.suffix;
+    if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
       topic_name = custom_topic_name.value();
     }
     _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);

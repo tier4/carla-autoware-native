@@ -554,15 +554,27 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaRGBCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init([this] {
+        const auto image_topic_config = [this] {
           TopicConfig config;
           config.domain_id = _domain_id;
+          config.suffix = "/image_raw";
           config.reliability_qos = ReliabilityQoS::BEST_EFFORT;
           config.durability_qos = DurabilityQoS::VOLATILE;
           config.history_qos = HistoryQoS::KEEP_LAST;
           config.history_qos_depth = 1;
           return config;
-        }())) {
+        }();
+        const auto info_topic_config = [this] {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          config.suffix = "/camera_info";
+          config.reliability_qos = ReliabilityQoS::BEST_EFFORT;
+          config.durability_qos = DurabilityQoS::VOLATILE;
+          config.history_qos = HistoryQoS::KEEP_LAST;
+          config.history_qos_depth = 1;
+          return config;
+        }();
+        if (new_publisher->Init(image_topic_config, info_topic_config)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }

@@ -20,7 +20,17 @@ enum class DurabilityQoS { TRANSIENT_LOCAL, VOLATILE };
 enum class HistoryQoS { KEEP_LAST, KEEP_ALL };
 
 struct TopicConfig {
+  /**
+   * Equivalent to topic type, essentially a suffix added after topic name.
+   * Has to either start with '/' or be empty.
+   */
+  std::string suffix{""};
+
   DomainId domain_id{0U};
+
+  /**
+   * QoS profile
+   */
   ReliabilityQoS reliability_qos;
   DurabilityQoS durability_qos;
   HistoryQoS history_qos;

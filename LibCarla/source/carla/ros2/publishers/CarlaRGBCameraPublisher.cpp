@@ -61,8 +61,8 @@ namespace ros2 {
     _impl_info->_init = true;
   }
 
-  bool CarlaRGBCameraPublisher::Init(const TopicConfig& config) {
-    return InitImage(config) && InitInfo(config);
+  bool CarlaRGBCameraPublisher::Init(const TopicConfig& image_config, const TopicConfig& info_config) {
+    return InitImage(image_config) && InitInfo(info_config);
   }
 
   bool CarlaRGBCameraPublisher::InitImage(const TopicConfig& config) {
@@ -89,14 +89,13 @@ namespace ros2 {
     }
 
     efd::TopicQos tqos = efd::TOPIC_QOS_DEFAULT;
-    const std::string publisher_type {"/image"};
     const std::string base { "rt/carla/" };
     std::string topic_name = base;
     if (!_parent.empty())
       topic_name += _parent + "/";
     topic_name += _name;
-    topic_name += publisher_type;
-    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+    topic_name += config.suffix;
+    if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
       topic_name = custom_topic_name.value();
     }
     _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
@@ -143,14 +142,13 @@ namespace ros2 {
     }
 
     efd::TopicQos tqos = efd::TOPIC_QOS_DEFAULT;
-    const std::string publisher_type {"/camera_info"};
     const std::string base { "rt/carla/" };
     std::string topic_name = base;
     if (!_parent.empty())
       topic_name += _parent + "/";
     topic_name += _name;
-    topic_name += publisher_type;
-    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+    topic_name += config.suffix;
+    if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
       topic_name = custom_topic_name.value();
     }
     _impl_info->_topic = _impl_info->_participant->create_topic(topic_name, _impl_info->_type->getName(), tqos);

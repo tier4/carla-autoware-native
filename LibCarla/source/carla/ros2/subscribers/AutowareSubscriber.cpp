@@ -81,7 +81,7 @@ Message AutowareSubscriber<Message, MessagePubSubType>::GetMessage() {
 }
 
 template <typename Message, typename MessagePubSubType>
-bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscriberConfig& config) {
+bool AutowareSubscriber<Message, MessagePubSubType>::Init(const TopicConfig& config) {
   if (!_impl->_type) {
     std::cerr << "Invalid TypeSupport" << std::endl;
     return false;
@@ -90,7 +90,7 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
   pqos.name(_name);
   auto factory = efd::DomainParticipantFactory::get_instance();
-  _impl->_participant = factory->create_participant(config.topic.domain_id, pqos);
+  _impl->_participant = factory->create_participant(config.domain_id, pqos);
   if (!_impl->_participant) {
     std::cerr << "Failed to create DomainParticipant" << std::endl;
     return false;
@@ -110,9 +110,9 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   if (!_parent.empty())
     topic_name += _parent + "/";
   topic_name += _name;
-  topic_name += config.type;
+  topic_name += config.suffix;
 
-  if (const auto custom_topic_name = ValidTopicName(config.type)) {
+  if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
     topic_name = custom_topic_name.value();
   }
 
@@ -123,7 +123,7 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   }
 
   efd::DataReaderQos rqos = efd::DATAREADER_QOS_DEFAULT;
-  configure_qos(config.topic, rqos);
+  configure_qos(config, rqos);
 
   efd::DataReaderListener* listener = (efd::DataReaderListener*)_impl->_listener._impl.get();
   _impl->_datareader = _impl->_subscriber->create_datareader(_impl->_topic, rqos, listener);
