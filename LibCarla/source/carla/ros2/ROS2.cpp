@@ -4,6 +4,7 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
+#include <charconv>
 #include "carla/Logging.h"
 #include "carla/ros2/ROS2.h"
 #include "carla/geom/GeoLocation.h"
@@ -231,21 +232,25 @@ void ROS2::RemoveActorCallback(void* actor) {
   _actor_callbacks.erase(actor);
 }
 
-bool ROS2::ObtainDomainId() {
-  const auto domain_id = std::getenv("ROS_DOMAIN_ID");
-  if (domain_id == nullptr) {
-    return false;
+bool ROS2::ObtainDomainId() noexcept
+{
+  const char* domain_id = std::getenv("ROS_DOMAIN_ID");
+  if (!domain_id) {
+    return false; // environment variable not set
   }
 
-  int new_domain_id;
-  try {
-    new_domain_id = std::stoi(std::string{domain_id});
-  } catch (...) {
-    return false;
+  int new_domain_id{};
+  const char* end = domain_id + std::strlen(domain_id);
+
+  // parse directly with from_chars
+  auto [ptr, ec] = std::from_chars(domain_id, end, new_domain_id);
+
+  if (ec != std::errc{} || ptr != end) {
+    return false; // parse error, overflow, or leftover garbage
   }
 
   if (new_domain_id < 0) {
-    return false;
+    return false; // negative IDs are invalid
   }
 
   _domain_id = new_domain_id;
