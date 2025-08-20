@@ -145,11 +145,15 @@ void ProcessDataFromCollisionSensor(
     carla::geom::Vector3D impulse,
     void* actor);
 
+    uint32_t GetDomainId() const noexcept { return _domain_id; }
+
   private:
   std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublisher>> GetOrCreateSensor(int type, carla::streaming::detail::stream_id_type id, void* actor);
 
   // sigleton
   ROS2() {};
+
+  bool ObtainDomainId() noexcept;
 
   static std::shared_ptr<ROS2> _instance;
 
@@ -157,6 +161,7 @@ void ProcessDataFromCollisionSensor(
   uint64_t _frame { 0 };
   int32_t _seconds { 0 };
   uint32_t _nanoseconds { 0 };
+  uint32_t _domain_id { 0U };
   std::unordered_map<void *, std::string> _actor_ros_name;
   std::unordered_map<void *, std::vector<void*> > _actor_parent_ros_name;
   std::shared_ptr<CarlaEgoVehicleControlSubscriber> _controller;

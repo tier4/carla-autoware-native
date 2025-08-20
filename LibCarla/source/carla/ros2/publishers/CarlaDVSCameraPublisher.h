@@ -25,7 +25,7 @@ namespace ros2 {
       CarlaDVSCameraPublisher(CarlaDVSCameraPublisher&&);
       CarlaDVSCameraPublisher& operator=(CarlaDVSCameraPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       void InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify);
       bool Publish();
 
@@ -37,9 +37,9 @@ namespace ros2 {
 
     private:
     private:
-      bool InitImage();
-      bool InitInfo();
-      bool InitPointCloud();
+      bool InitImage(const DomainId domain_id);
+      bool InitInfo(const DomainId domain_id);
+      bool InitPointCloud(const DomainId domain_id);
 
       void SetInfoRegionOfInterest( uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify);
       void SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, std::vector<uint8_t>&& data);

@@ -23,7 +23,7 @@ namespace ros2 {
       CarlaLidarPublisher(CarlaLidarPublisher&&);
       CarlaLidarPublisher& operator=(CarlaLidarPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, float* data);
       const char* type() const override { return "lidar"; }

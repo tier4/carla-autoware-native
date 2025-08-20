@@ -23,7 +23,7 @@ namespace ros2 {
       CarlaTransformPublisher(CarlaTransformPublisher&&);
       CarlaTransformPublisher& operator=(CarlaTransformPublisher&&);
 
-      bool Init();
+      bool Init(const DomainId domain_id = 0U);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation);
       const char* type() const override { return "transform"; }

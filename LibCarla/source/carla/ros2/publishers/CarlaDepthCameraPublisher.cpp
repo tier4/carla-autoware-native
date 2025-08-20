@@ -60,11 +60,11 @@ namespace ros2 {
     _impl_info->_init = true;
   }
 
-  bool CarlaDepthCameraPublisher::Init() {
-    return InitImage() && InitInfo();
+  bool CarlaDepthCameraPublisher::Init(const DomainId domain_id) {
+    return InitImage(domain_id) && InitInfo(domain_id);
   }
 
-  bool CarlaDepthCameraPublisher::InitImage() {
+  bool CarlaDepthCameraPublisher::InitImage(const DomainId domain_id) {
     if (_impl->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -73,7 +73,7 @@ namespace ros2 {
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl->_participant = factory->create_participant(0, pqos);
+    _impl->_participant = factory->create_participant(domain_id, pqos);
     if (_impl->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -113,7 +113,7 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaDepthCameraPublisher::InitInfo() {
+  bool CarlaDepthCameraPublisher::InitInfo(const DomainId domain_id) {
     if (_impl_info->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -122,7 +122,7 @@ namespace ros2 {
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl_info->_participant = factory->create_participant(0, pqos);
+    _impl_info->_participant = factory->create_participant(domain_id, pqos);
     if (_impl_info->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;

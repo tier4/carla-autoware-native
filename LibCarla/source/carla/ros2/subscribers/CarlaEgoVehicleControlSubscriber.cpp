@@ -42,7 +42,7 @@ namespace ros2 {
     void* _vehicle {nullptr};
   };
 
-  bool CarlaEgoVehicleControlSubscriber::Init() {
+  bool CarlaEgoVehicleControlSubscriber::Init(const DomainId domain_id) {
     if (_impl->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -51,7 +51,7 @@ namespace ros2 {
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl->_participant = factory->create_participant(0, pqos);
+    _impl->_participant = factory->create_participant(domain_id, pqos);
     if (_impl->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;

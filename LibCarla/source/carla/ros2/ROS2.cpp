@@ -4,6 +4,7 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
+#include <charconv>
 #include "carla/Logging.h"
 #include "carla/ros2/ROS2.h"
 #include "carla/geom/GeoLocation.h"
@@ -76,12 +77,13 @@ enum ESensors {
 
 void ROS2::Enable(bool enable) {
   _enabled = enable;
+  ObtainDomainId();
   log_info("ROS2 enabled: ", _enabled);
   _clock_publisher = std::make_shared<CarlaClockPublisher>("clock", "");
-  _clock_publisher->Init();
+  _clock_publisher->Init(_domain_id);
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher = std::make_shared<BasicPublisher>("basic_publisher", "");
-  _basic_publisher->Init();
+  _basic_publisher->Init(_domain_id);
 #endif
 }
 
@@ -206,7 +208,7 @@ void ROS2::AddBasicSubscriberCallback(void* actor, std::string ros_name, ActorMe
 
   _basic_subscriber.reset();
   _basic_subscriber = std::make_shared<BasicSubscriber>(actor, ros_name.c_str());
-  _basic_subscriber->Init();
+  _basic_subscriber->Init(_domain_id);
   #endif
 }
 
@@ -222,12 +224,37 @@ void ROS2::AddActorCallback(void* actor, std::string ros_name, ActorCallback cal
 
   _controller.reset();
   _controller = std::make_shared<CarlaEgoVehicleControlSubscriber>(actor, ros_name.c_str());
-  _controller->Init();
+  _controller->Init(_domain_id);
 }
 
 void ROS2::RemoveActorCallback(void* actor) {
   _controller.reset();
   _actor_callbacks.erase(actor);
+}
+
+bool ROS2::ObtainDomainId() noexcept
+{
+  const char* domain_id = std::getenv("ROS_DOMAIN_ID");
+  if (!domain_id) {
+    return false; // environment variable not set
+  }
+
+  int new_domain_id{};
+  const char* end = domain_id + std::strlen(domain_id);
+
+  // parse directly with from_chars
+  auto [ptr, ec] = std::from_chars(domain_id, end, new_domain_id);
+
+  if (ec != std::errc{} || ptr != end) {
+    return false; // parse error, overflow, or leftover garbage
+  }
+
+  if (new_domain_id < 0) {
+    return false; // negative IDs are invalid
+  }
+
+  _domain_id = new_domain_id;
+  return true;
 }
 
 std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublisher>> ROS2::GetOrCreateSensor(int type, carla::streaming::detail::stream_id_type id, void* actor) {
@@ -254,12 +281,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaCollisionPublisher> new_publisher = std::make_shared<CarlaCollisionPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -272,12 +299,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaDepthCameraPublisher> new_publisher = std::make_shared<CarlaDepthCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -290,12 +317,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaNormalsCameraPublisher> new_publisher = std::make_shared<CarlaNormalsCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -308,12 +335,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaDVSCameraPublisher> new_publisher = std::make_shared<CarlaDVSCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -326,12 +353,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaGNSSPublisher> new_publisher = std::make_shared<CarlaGNSSPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -344,12 +371,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaIMUPublisher> new_publisher = std::make_shared<CarlaIMUPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -362,12 +389,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaLineInvasionPublisher> new_publisher = std::make_shared<CarlaLineInvasionPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -383,12 +410,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaOpticalFlowCameraPublisher> new_publisher = std::make_shared<CarlaOpticalFlowCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -401,12 +428,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaRadarPublisher> new_publisher = std::make_shared<CarlaRadarPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -419,12 +446,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaSemanticLidarPublisher> new_publisher = std::make_shared<CarlaSemanticLidarPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -437,12 +464,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaLidarPublisher> new_publisher = std::make_shared<CarlaLidarPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -458,12 +485,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaRGBCameraPublisher> new_publisher = std::make_shared<CarlaRGBCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -476,12 +503,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaSSCameraPublisher> new_publisher = std::make_shared<CarlaSSCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
@@ -494,12 +521,12 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         std::shared_ptr<CarlaISCameraPublisher> new_publisher = std::make_shared<CarlaISCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_publisher->Init()) {
+        if (new_publisher->Init(_domain_id)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
         std::shared_ptr<CarlaTransformPublisher> new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
-        if (new_transform->Init()) {
+        if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
           transform = new_transform;
         }
