@@ -108,6 +108,9 @@ namespace ros2 {
       topic_name += _parent + "/";
     topic_name += _name;
     topic_name += publisher_type;
+    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+      topic_name = custom_topic_name.value();
+    }
     _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
     if (_impl->_topic == nullptr) {
         std::cerr << "Failed to create Topic" << std::endl;
@@ -157,6 +160,9 @@ namespace ros2 {
       topic_name += _parent + "/";
     topic_name += _name;
     topic_name += publisher_type;
+    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+      topic_name = custom_topic_name.value();
+    }
     _info->_topic = _info->_participant->create_topic(topic_name, _info->_type->getName(), tqos);
     if (_info->_topic == nullptr) {
         std::cerr << "Failed to create Topic" << std::endl;
@@ -205,6 +211,9 @@ namespace ros2 {
       topic_name += _parent + "/";
     topic_name += _name;
     topic_name += publisher_type;
+    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+      topic_name = custom_topic_name.value();
+    }
     _point_cloud->_topic = _point_cloud->_participant->create_topic(topic_name, _point_cloud->_type->getName(), tqos);
     if (_point_cloud->_topic == nullptr) {
         std::cerr << "Failed to create Topic" << std::endl;
@@ -505,12 +514,13 @@ namespace ros2 {
     _point_cloud->_pc.data(std::move(vector_data));
   }
 
-  CarlaDVSCameraPublisher::CarlaDVSCameraPublisher(const char* ros_name, const char* parent) :
+  CarlaDVSCameraPublisher::CarlaDVSCameraPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
   _impl(std::make_shared<CarlaDVSCameraPublisherImpl>()),
   _info(std::make_shared<CarlaCameraInfoPublisherImpl>()),
   _point_cloud(std::make_shared<CarlaPointCloudPublisherImpl>()) {
     _name = ros_name;
     _parent = parent;
+    _topic_name = ros_topic_name;
   }
 
   CarlaDVSCameraPublisher::~CarlaDVSCameraPublisher() {

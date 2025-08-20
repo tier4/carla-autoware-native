@@ -67,6 +67,9 @@ namespace ros2 {
     if (!_parent.empty())
       topic_name += _parent + "/";
     topic_name += _name;
+    if (const auto custom_topic_name = ValidTopicName()) {
+      topic_name = custom_topic_name.value();
+    }
     _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
     if (_impl->_topic == nullptr) {
         std::cerr << "Failed to create Topic" << std::endl;
@@ -171,10 +174,11 @@ void CarlaCollisionPublisher::SetData(int32_t seconds, uint32_t nanoseconds, uin
     _impl->_event.normal_impulse(impulse);
   }
 
-  CarlaCollisionPublisher::CarlaCollisionPublisher(const char* ros_name, const char* parent) :
+  CarlaCollisionPublisher::CarlaCollisionPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
   _impl(std::make_shared<CarlaCollisionPublisherImpl>()) {
     _name = ros_name;
     _parent = parent;
+    _topic_name = ros_topic_name;
   }
 
   CarlaCollisionPublisher::~CarlaCollisionPublisher() {

@@ -813,6 +813,11 @@ void FCarlaServer::FPimpl::BindActions()
             const std::string value = std::string(TCHAR_TO_UTF8(*Attr.Value.Value));
             ROS2->AddActorParentRosName(static_cast<void*>(CarlaActor->GetActor()), static_cast<void*>(CurrentActor->GetActor()));
           }
+          if (Attr.Key == "ros_topic_name")
+          {
+            const std::string value = std::string(TCHAR_TO_UTF8(*Attr.Value.Value));
+            ROS2->AddActorRosTopicName(static_cast<void*>(CarlaActor->GetActor()), value);
+          }
         }
         CurrentActor = Episode->FindCarlaActor(CurrentActor->GetParent());
       }

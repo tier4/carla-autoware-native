@@ -66,6 +66,9 @@ namespace ros2 {
     if (!_parent.empty())
       topic_name += _parent + "/";
     topic_name += _name;
+    if (const auto custom_topic_name = ValidTopicName()) {
+      topic_name = custom_topic_name.value();
+    }
     _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
     if (_impl->_topic == nullptr) {
         std::cerr << "Failed to create Topic" << std::endl;
@@ -202,10 +205,11 @@ void CarlaLidarPublisher::SetData(int32_t seconds, uint32_t nanoseconds, size_t 
     _impl->_lidar.data(std::move(data));
   }
 
-  CarlaLidarPublisher::CarlaLidarPublisher(const char* ros_name, const char* parent) :
+  CarlaLidarPublisher::CarlaLidarPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
   _impl(std::make_shared<CarlaLidarPublisherImpl>()) {
     _name = ros_name;
     _parent = parent;
+    _topic_name = ros_topic_name;
   }
 
   CarlaLidarPublisher::~CarlaLidarPublisher() {
