@@ -125,7 +125,7 @@ AutowarePublisher::AutowarePublisher([[maybe_unused]]void* vehicle, const CarlaP
   // TODO: Set QoS
 }
 
-void AutowarePublisher::SetVelocity(const float longitudinal_velocity, const float lateral_velocity, const float heading_rate)
+void AutowarePublisher::SetVelocity(float longitudinal_velocity, float lateral_velocity, float heading_rate)
 {
   /// @note Leave `stamp` in header empty, because Publish() populates stamps
   std_msgs::msg::Header header;
@@ -140,7 +140,7 @@ void AutowarePublisher::SetVelocity(const float longitudinal_velocity, const flo
   _impl->_velocity_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetSteering(const float steering_tire_angle)
+void AutowarePublisher::SetSteering(float steering_tire_angle)
 {
   autoware_vehicle_msgs::msg::SteeringReport report;
   report.steering_tire_angle(steering_tire_angle);
@@ -148,7 +148,7 @@ void AutowarePublisher::SetSteering(const float steering_tire_angle)
   _impl->_steering_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetControlMode(const uint8_t mode)
+void AutowarePublisher::SetControlMode(uint8_t mode)
 {
   autoware_vehicle_msgs::msg::ControlModeReport report;
   report.mode(mode);
@@ -156,7 +156,7 @@ void AutowarePublisher::SetControlMode(const uint8_t mode)
   _impl->_control_mode_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetGear(const uint8_t gear)
+void AutowarePublisher::SetGear(uint8_t gear)
 {
   autoware_vehicle_msgs::msg::GearReport report;
   report.report(gear);
@@ -164,7 +164,7 @@ void AutowarePublisher::SetGear(const uint8_t gear)
   _impl->_gear_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetTurnIndicators(const uint8_t turn_indicators)
+void AutowarePublisher::SetTurnIndicators(uint8_t turn_indicators)
 {
   autoware_vehicle_msgs::msg::TurnIndicatorsReport report;
   report.report(turn_indicators);
@@ -172,7 +172,7 @@ void AutowarePublisher::SetTurnIndicators(const uint8_t turn_indicators)
   _impl->_turn_indicator_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetHazardLights(const uint8_t hazard_lights)
+void AutowarePublisher::SetHazardLights(uint8_t hazard_lights)
 {
   autoware_vehicle_msgs::msg::HazardLightsReport report;
   report.report(hazard_lights);
@@ -180,7 +180,7 @@ void AutowarePublisher::SetHazardLights(const uint8_t hazard_lights)
   _impl->_hazard_lights_publisher.SetData(report);
 }
 
-void AutowarePublisher::Publish(const int32_t seconds, const uint32_t nanoseconds)
+void AutowarePublisher::Publish(int32_t seconds, uint32_t nanoseconds)
 {
   /**
    * @note All publishing is done at once based on assumption that all reports should be published
