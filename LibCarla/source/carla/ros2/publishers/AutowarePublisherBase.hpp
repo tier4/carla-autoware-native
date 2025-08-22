@@ -1,0 +1,232 @@
+// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma de Barcelona (UAB).
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
+#pragma once
+
+#include <string>
+
+#include "carla/ros2/listeners/CarlaListener.h"
+
+#include <fastdds/dds/domain/DomainParticipant.hpp>
+#include <fastdds/dds/publisher/Publisher.hpp>
+#include <fastdds/dds/topic/Topic.hpp>
+#include <fastdds/dds/publisher/DataWriter.hpp>
+#include <fastdds/dds/topic/TypeSupport.hpp>
+
+#include <fastdds/dds/domain/qos/DomainParticipantQos.hpp>
+#include <fastdds/dds/domain/DomainParticipantFactory.hpp>
+#include <fastdds/dds/publisher/qos/PublisherQos.hpp>
+#include <fastdds/dds/topic/qos/TopicQos.hpp>
+
+#include <fastrtps/attributes/ParticipantAttributes.h>
+#include <fastrtps/qos/QosPolicies.h>
+#include <fastdds/dds/publisher/qos/DataWriterQos.hpp>
+#include <fastdds/dds/publisher/DataWriterListener.hpp>
+
+#include "CarlaPublisher.h"
+
+/**
+ * @brief For internal use only, do not include this in any header that is not internal!!!
+ * @note This file has .hpp (rather than .h) extension on purpose to avoid it being included by *.h wildcard in cmake
+ */
+
+namespace carla {
+namespace ros2 {
+
+namespace efd = eprosima::fastdds::dds;
+using erc = eprosima::fastrtps::types::ReturnCode_t;
+
+template<typename Message, typename PubSubType>
+class AutowarePublisherBase : public CarlaPublisher
+{
+private:
+  struct Implementation
+  {
+    efd::DomainParticipant* _participant { nullptr };
+    efd::Publisher* _publisher { nullptr };
+    efd::Topic* _topic { nullptr };
+    efd::DataWriter* _datawriter { nullptr };
+    efd::TypeSupport _type { new PubSubType() };
+    CarlaListener _listener {};
+    Message _event {};
+    
+    void Reset() 
+    {
+      if (_datawriter && _publisher) {
+            _publisher->delete_datawriter(_datawriter);
+            _datawriter = nullptr;
+        }
+        if (_publisher && _participant) {
+            _participant->delete_publisher(_publisher);
+            _publisher = nullptr;
+        }
+        if (_topic && _participant) {
+            _participant->delete_topic(_topic);
+            _topic = nullptr;
+        }
+        if (_participant) {
+            efd::DomainParticipantFactory::get_instance()->delete_participant(_participant);
+            _participant = nullptr;
+        }
+    }
+    
+    ~Implementation() 
+    {
+      Reset();
+    }
+  };
+  
+  std::shared_ptr<Implementation> _impl;
+
+public:
+  AutowarePublisherBase(const char* ros_name, const char* parent, const char* ros_topic_name)
+  : _impl(std::make_shared<Implementation>())
+  {
+    _name = ros_name;
+    _parent = parent;
+    _topic_name = ros_topic_name;
+  }
+
+  // destructor does nothing -> cleanup is in Implementation dtor.
+  ~AutowarePublisherBase() = default;
+
+  AutowarePublisherBase(const AutowarePublisherBase&)            = default;
+  AutowarePublisherBase& operator=(const AutowarePublisherBase&) = default;
+  AutowarePublisherBase(AutowarePublisherBase&&)                 = default;
+  AutowarePublisherBase& operator=(AutowarePublisherBase&&)      = default;
+
+  bool Init(const DomainId domain_id = 0U) 
+  {
+    _impl->Reset();
+    
+    if (_impl->_type == nullptr) {
+        std::cerr << "Invalid TypeSupport" << std::endl;
+        return false;
+    }
+
+    efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
+    pqos.name(_name);
+    auto factory = efd::DomainParticipantFactory::get_instance();
+    _impl->_participant = factory->create_participant(domain_id, pqos);
+    if (_impl->_participant == nullptr) {
+        std::cerr << "Failed to create DomainParticipant" << std::endl;
+        return false;
+    }
+    _impl->_type.register_type(_impl->_participant);
+
+    efd::PublisherQos pubqos = efd::PUBLISHER_QOS_DEFAULT;
+    _impl->_publisher = _impl->_participant->create_publisher(pubqos, nullptr);
+    if (_impl->_publisher == nullptr) {
+      std::cerr << "Failed to create Publisher" << std::endl;
+      _impl->Reset();
+      return false;
+    }
+
+    efd::TopicQos tqos = efd::TOPIC_QOS_DEFAULT;
+    const std::string base { "rt/carla/" };
+    std::string topic_name = base;
+    if (!_parent.empty())
+      topic_name += _parent + "/";
+    topic_name += _name;
+    if (const auto custom_topic_name = ValidTopicName()) {
+      topic_name = custom_topic_name.value();
+    }
+    _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
+    if (_impl->_topic == nullptr) {
+        std::cerr << "Failed to create Topic" << std::endl;
+        return false;
+    }
+
+    efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
+    wqos.endpoint().history_memory_policy = eprosima::fastrtps::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
+    efd::DataWriterListener* listener = (efd::DataWriterListener*)_impl->_listener._impl.get();
+    _impl->_datawriter = _impl->_publisher->create_datawriter(_impl->_topic, wqos, listener);
+    if (_impl->_datawriter == nullptr) {
+        std::cerr << "Failed to create DataWriter" << std::endl;
+        return false;
+    }
+
+    _frame_id = _name;
+    return true;
+  }
+
+  void SetData(const Message & message) {
+    _impl->_event = message;
+  }
+
+  Message & Data() {
+    return _impl->_event;
+  }
+
+  const Message & Data() const {
+    return _impl->_event;
+  }
+
+  bool Publish() {
+    eprosima::fastrtps::rtps::InstanceHandle_t instance_handle;
+    erc rcode = _impl->_datawriter->write(&_impl->_event, instance_handle);
+    if (rcode == erc::ReturnCodeValue::RETCODE_OK) {
+        return true;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_ERROR) {
+        std::cerr << "RETCODE_ERROR" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_UNSUPPORTED) {
+        std::cerr << "RETCODE_UNSUPPORTED" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_BAD_PARAMETER) {
+        std::cerr << "RETCODE_BAD_PARAMETER" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_PRECONDITION_NOT_MET) {
+        std::cerr << "RETCODE_PRECONDITION_NOT_MET" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_OUT_OF_RESOURCES) {
+        std::cerr << "RETCODE_OUT_OF_RESOURCES" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_NOT_ENABLED) {
+        std::cerr << "RETCODE_NOT_ENABLED" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_IMMUTABLE_POLICY) {
+        std::cerr << "RETCODE_IMMUTABLE_POLICY" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_INCONSISTENT_POLICY) {
+        std::cerr << "RETCODE_INCONSISTENT_POLICY" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_ALREADY_DELETED) {
+        std::cerr << "RETCODE_ALREADY_DELETED" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_TIMEOUT) {
+        std::cerr << "RETCODE_TIMEOUT" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_NO_DATA) {
+        std::cerr << "RETCODE_NO_DATA" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_ILLEGAL_OPERATION) {
+        std::cerr << "RETCODE_ILLEGAL_OPERATION" << std::endl;
+        return false;
+    }
+    if (rcode == erc::ReturnCodeValue::RETCODE_NOT_ALLOWED_BY_SECURITY) {
+        std::cerr << "RETCODE_NOT_ALLOWED_BY_SECURITY" << std::endl;
+        return false;
+    }
+    std::cerr << "UNKNOWN" << std::endl;
+    return false;
+  }
+
+  virtual const char* type() const = 0;
+};
+
+}  // namespace carla
+}  // namespace ros2

@@ -17,6 +17,7 @@
 #include "carla/sensor/s11n/ImageSerializer.h"
 #include "carla/sensor/s11n/SensorHeaderSerializer.h"
 
+#include "publishers/AutowarePublisher.h"
 #include "publishers/CarlaPublisher.h"
 #include "publishers/CarlaClockPublisher.h"
 #include "publishers/CarlaRGBCameraPublisher.h"
@@ -267,11 +268,15 @@ void ROS2::AddActorCallback(void* actor, std::string ros_name, ActorCallback cal
 
   _autoware_controller.reset();
   _autoware_controller = std::make_shared<AutowareController>(actor, _domain_id);
+
+  _autoware_publisher.reset();
+  _autoware_publisher = std::make_shared<AutowarePublisher>(actor, _domain_id);
 }
 
 void ROS2::RemoveActorCallback(void* actor) {
   _controller.reset();
   _autoware_controller.reset();
+  _autoware_publisher.reset();
   _actor_callbacks.erase(actor);
 }
 
@@ -958,6 +963,7 @@ void ROS2::Shutdown() {
   _clock_publisher.reset();
   _controller.reset();
   _autoware_controller.reset();
+  _autoware_publisher.reset();
   _enabled = false;
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher.reset();
