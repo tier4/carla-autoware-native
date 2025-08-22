@@ -36,10 +36,10 @@ class AutowareSubscriber : public CarlaSubscriber {
 public:
   AutowareSubscriber(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
   ~AutowareSubscriber();
-  AutowareSubscriber(const AutowareSubscriber& other);
-  AutowareSubscriber& operator=(const AutowareSubscriber& other);
-  AutowareSubscriber(AutowareSubscriber&& other);
-  AutowareSubscriber& operator=(AutowareSubscriber&& other);
+  AutowareSubscriber(const AutowareSubscriber&) = default;
+  AutowareSubscriber& operator=(const AutowareSubscriber&) = default;
+  AutowareSubscriber(AutowareSubscriber&&) = default;
+  AutowareSubscriber& operator=(AutowareSubscriber&&) = default;
 
   bool HasNewMessage();
   Message GetMessage();

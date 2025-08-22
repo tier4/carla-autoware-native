@@ -31,8 +31,12 @@ public:
   efd::DataReader* _datareader{nullptr};
   efd::TypeSupport _type{new MessagePubSubType()};
 
-  typename SubscriberListenerBase<Message>::Data _data;
-  SubscriberListenerBase<Message> _listener{&_data};
+  std::shared_ptr<typename SubscriberListenerBase<Message>::Data> _data;
+  SubscriberListenerBase<Message> _listener;
+
+  Implementation()
+    : _data(std::make_shared<typename SubscriberListenerBase<Message>::Data>()),
+      _listener(_data.get()) {}
 };
 
 template <typename Message, typename MessagePubSubType>
@@ -40,7 +44,7 @@ AutowareSubscriber<Message, MessagePubSubType>::AutowareSubscriber(
   const char* ros_name, const char* parent, const char* ros_topic_name)
 : _impl(std::make_shared<Implementation>())
 {
-  _impl->_listener.SetOwnerData(&_impl->_data);
+  // _impl->_listener.SetOwnerData(&_impl->_data);
   _name = ros_name;
   _parent = parent;
   _topic_name = ros_topic_name;
@@ -67,15 +71,15 @@ AutowareSubscriber<Message, MessagePubSubType>::~AutowareSubscriber()
 
 template <typename Message, typename MessagePubSubType>
 bool AutowareSubscriber<Message, MessagePubSubType>::HasNewMessage() {
-  std::unique_lock lock{_impl->_data.mutex};
-  return _impl->_data.data_changed;
+  std::unique_lock lock{_impl->_data->mutex};
+  return _impl->_data->data_changed;
 }
 
 template <typename Message, typename MessagePubSubType>
 Message AutowareSubscriber<Message, MessagePubSubType>::GetMessage() {
-  std::unique_lock lock{_impl->_data.mutex};
-  _impl->_data.data_changed = false;
-  return _impl->_data.data;
+  std::unique_lock lock{_impl->_data->mutex};
+  _impl->_data->data_changed = false;
+  return _impl->_data->data;
 }
 
 template <typename Message, typename MessagePubSubType>
@@ -158,51 +162,6 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   }
 
   return true;
-}
-
-// Copy and move constructors, and assignment operators
-template <typename Message, typename MessagePubSubType>
-AutowareSubscriber<Message, MessagePubSubType>::AutowareSubscriber(const AutowareSubscriber& other)
-{
-  _frame_id = other._frame_id;
-  _name = other._name;
-  _parent = other._parent;
-  _impl = other._impl;
-  _impl->_listener.SetOwnerData(&_impl->_data);
-}
-
-template <typename Message, typename MessagePubSubType>
-AutowareSubscriber<Message, MessagePubSubType>& AutowareSubscriber<Message, MessagePubSubType>::operator=(const AutowareSubscriber& other) {
-  if (this != &other) {
-    _frame_id = other._frame_id;
-    _name = other._name;
-    _parent = other._parent;
-    _impl = other._impl;
-    _impl->_listener.SetOwnerData(&_impl->_data);
-  }
-  return *this;
-}
-
-template <typename Message, typename MessagePubSubType>
-AutowareSubscriber<Message, MessagePubSubType>::AutowareSubscriber(AutowareSubscriber&& other)
-{
-  _frame_id = std::move(other._frame_id);
-  _name = std::move(other._name);
-  _parent = std::move(other._parent);
-  _impl = std::move(other._impl);
-  _impl->_listener.SetOwnerData(&_impl->_data);
-}
-
-template <typename Message, typename MessagePubSubType>
-AutowareSubscriber<Message, MessagePubSubType>& AutowareSubscriber<Message, MessagePubSubType>::operator=(AutowareSubscriber&& other) {
-  if (this != &other) {
-    _frame_id = std::move(other._frame_id);
-    _name = std::move(other._name);
-    _parent = std::move(other._parent);
-    _impl = std::move(other._impl);
-    _impl->_listener.SetOwnerData(&_impl->_data);
-  }
-  return *this;
 }
 
 }  // namespace ros2
