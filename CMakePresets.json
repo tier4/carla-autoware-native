@@ -10,12 +10,14 @@
   [
     {
       "name": "Common",
+      "description": "ROS2 enabled",
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/Build/${presetName}",
-      "installDir": "${sourceDir}/Install/${presetName}",
-      "cacheVariables":
-      {
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/CMake/Toolchain.cmake"
+      "binaryDir": "${sourceDir}/Build",
+      "toolchainFile": "${sourceDir}/CMake/Toolchain.cmake",
+
+      "cacheVariables": {
+        "ENABLE_ROS2": "ON",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
       },
       "hidden": true
     },
