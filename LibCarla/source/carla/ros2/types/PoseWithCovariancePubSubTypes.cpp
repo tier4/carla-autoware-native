@@ -136,7 +136,7 @@ namespace geometry_msgs {
                 InstanceHandle_t* handle,
                 bool force_md5)
         {
-            if (!m_isGetKeyDefined)
+            if (!m_isGetKeyDefined || !data || !handle)
             {
                 return false;
             }
@@ -150,22 +150,20 @@ namespace geometry_msgs {
             // Object that serializes the data.
             eprosima::fastcdr::Cdr ser(fastbuffer, eprosima::fastcdr::Cdr::BIG_ENDIANNESS);
             p_type->serializeKey(ser);
+
+            const size_t serialized_len = ser.getSerializedDataLength();
+
             if (force_md5 || PoseWithCovariance::getKeyMaxCdrSerializedSize() > 16)
             {
                 m_md5.init();
-                m_md5.update(m_keyBuffer, static_cast<unsigned int>(ser.getSerializedDataLength()));
+                m_md5.update(m_keyBuffer, static_cast<unsigned int>(serialized_len));
                 m_md5.finalize();
-                for (uint8_t i = 0; i < 16; ++i)
-                {
-                    handle->value[i] = m_md5.digest[i];
-                }
+                std::memcpy(handle->value, m_md5.digest, 16);
             }
             else
             {
-                for (uint8_t i = 0; i < 16; ++i)
-                {
-                    handle->value[i] = m_keyBuffer[i];
-                }
+                std::memset(handle->value, 0, 16); // zero-pad first
+                std::memcpy(handle->value, m_keyBuffer, std::min<size_t>(16, serialized_len));
             }
             return true;
         }
