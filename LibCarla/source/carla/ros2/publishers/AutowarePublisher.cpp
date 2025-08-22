@@ -113,7 +113,7 @@ public:
   HazardLightsReportPublisher   _hazard_lights_publisher{};
 };
 
-AutowarePublisher::AutowarePublisher(void* vehicle, const CarlaPublisher::DomainId domain_id)
+AutowarePublisher::AutowarePublisher([[maybe_unused]]void* vehicle, const CarlaPublisher::DomainId domain_id)
 : _impl(std::make_shared<Implementation>())
 {
   _impl->_velocity_publisher.Init(domain_id);
