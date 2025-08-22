@@ -39,6 +39,7 @@
 #include "publishers/BasicPublisher.h"
 
 #include "subscribers/CarlaSubscriber.h"
+#include "subscribers/AutowareController.h"
 #include "subscribers/CarlaEgoVehicleControlSubscriber.h"
 #if defined(WITH_ROS2_DEMO)
   #include "subscribers/BasicSubscriber.h"
@@ -104,6 +105,16 @@ void ROS2::SetFrame(uint64_t frame) {
       RemoveActorCallback(actor);
     }
    }
+  if (_autoware_controller) {  // Autoware input has priority
+    void* actor = _autoware_controller->GetVehicle();
+    if (_autoware_controller->HasNewControl()) {
+      auto it = _actor_callbacks.find(actor);
+      if (it != _actor_callbacks.cend()) {
+        const auto control = _autoware_controller->GetControl();
+        it->second(actor, control);
+      }
+    }
+  }
 #if defined(WITH_ROS2_DEMO)
    if (_basic_subscriber)
    {
@@ -253,10 +264,14 @@ void ROS2::AddActorCallback(void* actor, std::string ros_name, ActorCallback cal
   const auto ros_topic_name = GetActorRosTopicName(actor);
   _controller = std::make_shared<CarlaEgoVehicleControlSubscriber>(actor, ros_name.c_str(), "", ros_topic_name.c_str());
   _controller->Init(_domain_id);
+
+  _autoware_controller.reset();
+  _autoware_controller = std::make_shared<AutowareController>(actor, _domain_id);
 }
 
 void ROS2::RemoveActorCallback(void* actor) {
   _controller.reset();
+  _autoware_controller.reset();
   _actor_callbacks.erase(actor);
 }
 
@@ -942,6 +957,7 @@ void ROS2::Shutdown() {
   }
   _clock_publisher.reset();
   _controller.reset();
+  _autoware_controller.reset();
   _enabled = false;
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher.reset();

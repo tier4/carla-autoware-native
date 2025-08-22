@@ -24,8 +24,6 @@ namespace ros2 {
       void name(std::string&& name) { _name = std::move(name); }
       void parent(std::string&& parent) { _parent = std::move(parent); }
 
-      virtual const char* type() const = 0;
-
       /// @return user specified valid FastDDS topic name
       std::optional<std::string> ValidTopicName(const std::string& suffix = "") const {
         if (_topic_name.empty()) {
@@ -43,6 +41,8 @@ namespace ros2 {
         topic_name += suffix;
         return topic_name;
       }
+
+      virtual const char* type() const = 0;
 
     public:
       CarlaPublisher() = default;
