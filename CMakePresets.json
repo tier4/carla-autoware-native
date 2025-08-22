@@ -10,15 +10,13 @@
   [
     {
       "name": "Common",
-      "description": "Ninja generator, Carla custom toolchain, ROS2 enabled",
+      "description": "ROS2 enabled",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/Build",
       "toolchainFile": "${sourceDir}/CMake/Toolchain.cmake",
 
       "cacheVariables": {
         "ENABLE_ROS2": "ON",
-        "Python_ROOT_DIR": "/absolute/path/to/python",
-        "Python3_ROOT_DIR": "/absolute/path/to/python",
         "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
       },
       "hidden": true
