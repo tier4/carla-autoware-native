@@ -50,26 +50,30 @@ private:
     efd::TypeSupport _type { new PubSubType() };
     CarlaListener _listener {};
     Message _event {};
-
+    
+    void Reset() 
+    {
+      if (_datawriter && _publisher) {
+            _publisher->delete_datawriter(_datawriter);
+            _datawriter = nullptr;
+        }
+        if (_publisher && _participant) {
+            _participant->delete_publisher(_publisher);
+            _publisher = nullptr;
+        }
+        if (_topic && _participant) {
+            _participant->delete_topic(_topic);
+            _topic = nullptr;
+        }
+        if (_participant) {
+            efd::DomainParticipantFactory::get_instance()->delete_participant(_participant);
+            _participant = nullptr;
+        }
+    }
+    
     ~Implementation() 
     {
-      // Delete in reverse order of creation, guard every step.
-      if (_datawriter && _publisher) {
-        _publisher->delete_datawriter(_datawriter);
-        _datawriter = nullptr;
-      }
-      if (_publisher && _participant) {
-        _participant->delete_publisher(_publisher);
-        _publisher = nullptr;
-      }
-      if (_topic && _participant) {
-        _participant->delete_topic(_topic);
-        _topic = nullptr;
-      }
-      if (_participant) {
-        efd::DomainParticipantFactory::get_instance()->delete_participant(_participant);
-        _participant = nullptr;
-      }
+      Reset();
     }
   };
   
@@ -92,7 +96,10 @@ public:
   AutowarePublisherBase(AutowarePublisherBase&&)                 = default;
   AutowarePublisherBase& operator=(AutowarePublisherBase&&)      = default;
 
-  bool Init(const DomainId domain_id = 0U) {
+  bool Init(const DomainId domain_id = 0U) 
+  {
+    _impl->Reset();
+    
     if (_impl->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -112,6 +119,7 @@ public:
     _impl->_publisher = _impl->_participant->create_publisher(pubqos, nullptr);
     if (_impl->_publisher == nullptr) {
       std::cerr << "Failed to create Publisher" << std::endl;
+      _impl->Reset();
       return false;
     }
 
