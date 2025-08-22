@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "CarlaPublisher.h"
+#include "carla/ros2/data_types.h"
 
 namespace carla {
 namespace ros2 {
@@ -22,7 +23,7 @@ namespace ros2 {
       CarlaIMUPublisher(CarlaIMUPublisher&&);
       CarlaIMUPublisher& operator=(CarlaIMUPublisher&&);
 
-      bool Init(const DomainId domain_id = 0U);
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, float* accelerometer, float* gyroscope, float compass);
       const char* type() const override { return "inertial measurement unit"; }

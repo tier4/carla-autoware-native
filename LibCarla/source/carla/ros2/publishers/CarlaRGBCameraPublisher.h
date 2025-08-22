@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "CarlaPublisher.h"
+#include "carla/ros2/data_types.h"
 
 namespace carla {
 namespace ros2 {
@@ -24,7 +25,7 @@ namespace ros2 {
       CarlaRGBCameraPublisher(CarlaRGBCameraPublisher&&);
       CarlaRGBCameraPublisher& operator=(CarlaRGBCameraPublisher&&);
 
-      bool Init(const DomainId domain_id = 0U);
+      bool Init(const TopicConfig& image_config, const TopicConfig& info_config);
       void InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify);
       bool Publish();
 
@@ -34,8 +35,8 @@ namespace ros2 {
       const char* type() const override { return "rgb camera"; }
 
     private:
-      bool InitImage(const DomainId domain_id);
-      bool InitInfo(const DomainId domain_id);
+      bool InitImage(const TopicConfig& config);
+      bool InitInfo(const TopicConfig& config);
       bool PublishImage();
       bool PublishInfo();
 

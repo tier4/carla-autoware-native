@@ -4,6 +4,7 @@
 
 #include "carla/ros2/types/ImuPubSubTypes.h"
 #include "carla/ros2/listeners/CarlaListener.h"
+#include "carla/ros2/util/conversions.hpp"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 #include <fastdds/dds/publisher/Publisher.hpp>
@@ -37,7 +38,7 @@ namespace ros2 {
     sensor_msgs::msg::Imu _imu {};
   };
 
-  bool CarlaIMUPublisher::Init(const DomainId domain_id) {
+  bool CarlaIMUPublisher::Init(const TopicConfig& config) {
     if (_impl->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -46,7 +47,7 @@ namespace ros2 {
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl->_participant = factory->create_participant(domain_id, pqos);
+    _impl->_participant = factory->create_participant(config.domain_id, pqos);
     if (_impl->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -66,7 +67,8 @@ namespace ros2 {
     if (!_parent.empty())
       topic_name += _parent + "/";
     topic_name += _name;
-    if (const auto custom_topic_name = ValidTopicName()) {
+    topic_name += config.suffix;
+    if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
       topic_name = custom_topic_name.value();
     }
     _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
@@ -76,6 +78,8 @@ namespace ros2 {
     }
 
     efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
+    configure_qos(config, wqos);
+
     wqos.endpoint().history_memory_policy = eprosima::fastrtps::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
     efd::DataWriterListener* listener = (efd::DataWriterListener*)_impl->_listener._impl.get();
     _impl->_datawriter = _impl->_publisher->create_datawriter(_impl->_topic, wqos, listener);

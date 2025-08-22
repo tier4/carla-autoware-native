@@ -6,13 +6,14 @@
 
 #include "carla/ros2/ROS2CallbackData.h"
 #include "carla/ros2/subscribers/AutowareSubscriber.h"
+#include "carla/ros2/data_types.h"
 
 namespace carla {
 namespace ros2 {
 
 class AutowareController {
 public:
-  AutowareController(void* actor, const CarlaSubscriber::DomainId domain_id);
+  AutowareController(void* actor, const DomainId domain_id);
 
   bool HasNewControl() const;
 

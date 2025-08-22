@@ -116,13 +116,24 @@ public:
 AutowarePublisher::AutowarePublisher([[maybe_unused]]void* vehicle, const CarlaPublisher::DomainId domain_id)
 : _impl(std::make_shared<Implementation>())
 {
-  _impl->_velocity_publisher.Init(domain_id);
-  _impl->_steering_publisher.Init(domain_id);
-  _impl->_control_mode_publisher.Init(domain_id);
-  _impl->_gear_publisher.Init(domain_id);
-  _impl->_turn_indicator_publisher.Init(domain_id);
-  _impl->_hazard_lights_publisher.Init(domain_id);
-  // TODO: Set QoS
+  const auto topic_config = [domain_id] {
+    TopicConfig config;
+
+    config.domain_id = domain_id;
+    config.reliability_qos = ReliabilityQoS::RELIABLE;
+    config.durability_qos = DurabilityQoS::VOLATILE;
+    config.history_qos = HistoryQoS::KEEP_LAST;
+    config.history_qos_depth = 1;
+
+    return config;
+  }();
+
+  _impl->_velocity_publisher.Init(topic_config);
+  _impl->_steering_publisher.Init(topic_config);
+  _impl->_control_mode_publisher.Init(topic_config);
+  _impl->_gear_publisher.Init(topic_config);
+  _impl->_turn_indicator_publisher.Init(topic_config);
+  _impl->_hazard_lights_publisher.Init(topic_config);
 }
 
 void AutowarePublisher::SetVelocity(float longitudinal_velocity, float lateral_velocity, float heading_rate)

@@ -17,6 +17,8 @@
 #include <fastdds/dds/subscriber/qos/DataReaderQos.hpp>
 #include <fastdds/dds/subscriber/DataReaderListener.hpp>
 
+#include "carla/ros2/util/conversions.hpp"
+
 namespace carla {
 namespace ros2 {
 
@@ -83,7 +85,7 @@ Message AutowareSubscriber<Message, MessagePubSubType>::GetMessage() {
 }
 
 template <typename Message, typename MessagePubSubType>
-bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscriberConfig& config) {
+bool AutowareSubscriber<Message, MessagePubSubType>::Init(const TopicConfig& config) {
   if (!_impl->_type) {
     std::cerr << "Invalid TypeSupport" << std::endl;
     return false;
@@ -112,9 +114,9 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   if (!_parent.empty())
     topic_name += _parent + "/";
   topic_name += _name;
-  topic_name += config.publisher_type;
+  topic_name += config.suffix;
 
-  if (const auto custom_topic_name = ValidTopicName(config.publisher_type)) {
+  if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
     topic_name = custom_topic_name.value();
   }
 
@@ -125,34 +127,7 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const AutowareSubscrib
   }
 
   efd::DataReaderQos rqos = efd::DATAREADER_QOS_DEFAULT;
-  switch (config.reliability_qos) {
-    case AutowareSubscriberConfig::ReliabilityQoS::RELIABLE:
-      rqos.reliability().kind = efd::RELIABLE_RELIABILITY_QOS;
-      break;
-    case AutowareSubscriberConfig::ReliabilityQoS::BEST_EFFORT:
-      rqos.reliability().kind = efd::BEST_EFFORT_RELIABILITY_QOS;
-      break;
-  }
-
-  switch (config.durability_qos) {
-    case AutowareSubscriberConfig::DurabilityQoS::TRANSIENT_LOCAL:
-      rqos.durability().kind = efd::TRANSIENT_LOCAL_DURABILITY_QOS;
-      break;
-    case AutowareSubscriberConfig::DurabilityQoS::VOLATILE:
-      rqos.durability().kind = efd::VOLATILE_DURABILITY_QOS;
-      break;
-  }
-
-  switch (config.history_qos) {
-    case AutowareSubscriberConfig::HistoryQoS::KEEP_LAST:
-      rqos.history().kind = efd::KEEP_LAST_HISTORY_QOS;
-      break;
-    case AutowareSubscriberConfig::HistoryQoS::KEEP_ALL:
-      rqos.history().kind = efd::KEEP_ALL_HISTORY_QOS;
-      break;
-  }
-
-  rqos.history().depth = config.history_qos_depth;
+  configure_qos(config, rqos);
 
   efd::DataReaderListener* listener = (efd::DataReaderListener*)_impl->_listener._impl.get();
   _impl->_datareader = _impl->_subscriber->create_datareader(_impl->_topic, rqos, listener);

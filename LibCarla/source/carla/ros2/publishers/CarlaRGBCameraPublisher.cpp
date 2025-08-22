@@ -5,6 +5,7 @@
 #include "carla/ros2/types/ImagePubSubTypes.h"
 #include "carla/ros2/types/CameraInfoPubSubTypes.h"
 #include "carla/ros2/listeners/CarlaListener.h"
+#include "carla/ros2/util/conversions.hpp"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 #include <fastdds/dds/publisher/Publisher.hpp>
@@ -60,11 +61,11 @@ namespace ros2 {
     _impl_info->_init = true;
   }
 
-  bool CarlaRGBCameraPublisher::Init(const DomainId domain_id) {
-    return InitImage(domain_id) && InitInfo(domain_id);
+  bool CarlaRGBCameraPublisher::Init(const TopicConfig& image_config, const TopicConfig& info_config) {
+    return InitImage(image_config) && InitInfo(info_config);
   }
 
-  bool CarlaRGBCameraPublisher::InitImage(const DomainId domain_id) {
+  bool CarlaRGBCameraPublisher::InitImage(const TopicConfig& config) {
     if (_impl->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -73,7 +74,7 @@ namespace ros2 {
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl->_participant = factory->create_participant(domain_id, pqos);
+    _impl->_participant = factory->create_participant(config.domain_id, pqos);
     if (_impl->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -88,14 +89,13 @@ namespace ros2 {
     }
 
     efd::TopicQos tqos = efd::TOPIC_QOS_DEFAULT;
-    const std::string publisher_type {"/image"};
     const std::string base { "rt/carla/" };
     std::string topic_name = base;
     if (!_parent.empty())
       topic_name += _parent + "/";
     topic_name += _name;
-    topic_name += publisher_type;
-    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+    topic_name += config.suffix;
+    if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
       topic_name = custom_topic_name.value();
     }
     _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
@@ -104,6 +104,8 @@ namespace ros2 {
         return false;
     }
     efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
+    configure_qos(config, wqos);
+
     wqos.endpoint().history_memory_policy = eprosima::fastrtps::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
     efd::DataWriterListener* listener = (efd::DataWriterListener*)_impl->_listener._impl.get();
     _impl->_datawriter = _impl->_publisher->create_datawriter(_impl->_topic, wqos, listener);
@@ -116,7 +118,7 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaRGBCameraPublisher::InitInfo(const DomainId domain_id) {
+  bool CarlaRGBCameraPublisher::InitInfo(const TopicConfig& config) {
     if (_impl_info->_type == nullptr) {
         std::cerr << "Invalid TypeSupport" << std::endl;
         return false;
@@ -125,7 +127,7 @@ namespace ros2 {
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl_info->_participant = factory->create_participant(domain_id, pqos);
+    _impl_info->_participant = factory->create_participant(config.domain_id, pqos);
     if (_impl_info->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -140,14 +142,13 @@ namespace ros2 {
     }
 
     efd::TopicQos tqos = efd::TOPIC_QOS_DEFAULT;
-    const std::string publisher_type {"/camera_info"};
     const std::string base { "rt/carla/" };
     std::string topic_name = base;
     if (!_parent.empty())
       topic_name += _parent + "/";
     topic_name += _name;
-    topic_name += publisher_type;
-    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+    topic_name += config.suffix;
+    if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
       topic_name = custom_topic_name.value();
     }
     _impl_info->_topic = _impl_info->_participant->create_topic(topic_name, _impl_info->_type->getName(), tqos);
@@ -156,6 +157,8 @@ namespace ros2 {
         return false;
     }
     efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
+    configure_qos(config, wqos);
+
     efd::DataWriterListener* listener = (efd::DataWriterListener*)_impl_info->_listener._impl.get();
     _impl_info->_datawriter = _impl_info->_publisher->create_datawriter(_impl_info->_topic, wqos, listener);
     if (_impl_info->_datawriter == nullptr) {

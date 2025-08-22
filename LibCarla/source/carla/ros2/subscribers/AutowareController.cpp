@@ -88,27 +88,27 @@ public:
   void* _vehicle;
 };
 
-AutowareController::AutowareController(void* actor, const CarlaSubscriber::DomainId domain_id)
+AutowareController::AutowareController(void* actor, const DomainId domain_id)
 : _impl(std::make_shared<Implementation>())
 {
-  const auto subscriber_config = [domain_id] {
-    AutowareSubscriberConfig config;
+  const auto topic_config = [domain_id] {
+    TopicConfig config;
 
     config.domain_id = domain_id;
-    config.reliability_qos = AutowareSubscriberConfig::ReliabilityQoS::RELIABLE;
-    config.durability_qos = AutowareSubscriberConfig::DurabilityQoS::TRANSIENT_LOCAL;
-    config.history_qos = AutowareSubscriberConfig::HistoryQoS::KEEP_LAST;
+    config.reliability_qos = ReliabilityQoS::RELIABLE;
+    config.durability_qos = DurabilityQoS::TRANSIENT_LOCAL;
+    config.history_qos = HistoryQoS::KEEP_LAST;
     config.history_qos_depth = 1;
 
     return config;
   }();
 
-  _impl->_control_subscriber.Init(subscriber_config);
-  _impl->_gear_subscriber.Init(subscriber_config);
-  _impl->_turn_indicator_subscriber.Init(subscriber_config);
-  _impl->_hazard_lights_subscriber.Init(subscriber_config);
-  _impl->_emergency_subscriber.Init(subscriber_config);
-  _impl->_engage_subscriber.Init(subscriber_config);
+  _impl->_control_subscriber.Init(topic_config);
+  _impl->_gear_subscriber.Init(topic_config);
+  _impl->_turn_indicator_subscriber.Init(topic_config);
+  _impl->_hazard_lights_subscriber.Init(topic_config);
+  _impl->_emergency_subscriber.Init(topic_config);
+  _impl->_engage_subscriber.Init(topic_config);
 
   _impl->_vehicle = actor;
 }

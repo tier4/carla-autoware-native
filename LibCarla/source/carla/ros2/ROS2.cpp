@@ -82,7 +82,16 @@ void ROS2::Enable(bool enable) {
   ObtainDomainId();
   log_info("ROS2 enabled: ", _enabled);
   _clock_publisher = std::make_shared<CarlaClockPublisher>("clock", "");
-  _clock_publisher->Init(_domain_id);
+  const auto topic_config = [this] {
+    TopicConfig config;
+    config.domain_id = _domain_id;
+    config.reliability_qos = ReliabilityQoS::BEST_EFFORT;
+    config.durability_qos = DurabilityQoS::VOLATILE;
+    config.history_qos = HistoryQoS::KEEP_LAST;
+    config.history_qos_depth = 1;
+    return config;
+  }();
+  _clock_publisher->Init(topic_config);
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher = std::make_shared<BasicPublisher>("basic_publisher", "");
   _basic_publisher->Init(_domain_id);
@@ -420,7 +429,15 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaIMUPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
+        if (new_publisher->Init([this] {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          config.reliability_qos = ReliabilityQoS::RELIABLE;
+          config.durability_qos = DurabilityQoS::VOLATILE;
+          config.history_qos = HistoryQoS::KEEP_LAST;
+          config.history_qos_depth = 1000;
+          return config;
+        }())) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -513,7 +530,15 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaLidarPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
+        if (new_publisher->Init([this] {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          config.reliability_qos = ReliabilityQoS::BEST_EFFORT;
+          config.durability_qos = DurabilityQoS::VOLATILE;
+          config.history_qos = HistoryQoS::KEEP_LAST;
+          config.history_qos_depth = 5;
+          return config;
+        }())) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -534,7 +559,27 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaRGBCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
+        const auto image_topic_config = [this] {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          config.suffix = "/image_raw";
+          config.reliability_qos = ReliabilityQoS::BEST_EFFORT;
+          config.durability_qos = DurabilityQoS::VOLATILE;
+          config.history_qos = HistoryQoS::KEEP_LAST;
+          config.history_qos_depth = 1;
+          return config;
+        }();
+        const auto info_topic_config = [this] {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          config.suffix = "/camera_info";
+          config.reliability_qos = ReliabilityQoS::BEST_EFFORT;
+          config.durability_qos = DurabilityQoS::VOLATILE;
+          config.history_qos = HistoryQoS::KEEP_LAST;
+          config.history_qos_depth = 1;
+          return config;
+        }();
+        if (new_publisher->Init(image_topic_config, info_topic_config)) {
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
