@@ -1,6 +1,5 @@
 #include "AutowarePublisher.h"
-
-#include "AutowarePublisherBase.hpp"
+#include <string>
 
 #include "carla/ros2/types/VelocityReport.h"
 #include "carla/ros2/types/VelocityReportPubSubTypes.h"
@@ -15,57 +14,92 @@
 #include "carla/ros2/types/HazardLightsReport.h"
 #include "carla/ros2/types/HazardLightsReportPubSubTypes.h"
 
+#include "AutowarePublisherBase.hpp"
+
+
 namespace carla {
 namespace ros2 {
 
-// Autoware specific publisher classes
-class VelocityReportPublisher
-: public AutowarePublisherBase<autoware_vehicle_msgs::msg::VelocityReport, autoware_vehicle_msgs::msg::VelocityReportPubSubType>
-{
-public:
-  VelocityReportPublisher() : AutowarePublisherBase("base_line", "", "/vehicle/status/velocity_status") {}
-  const char * type() const override { return "Autoware velocity report"; }
+// Generic traits template (forward-declared, specialized below)
+template <typename Msg>
+struct PublisherTraits;
+
+// Specializations for each Autoware report type
+
+template <>
+struct PublisherTraits<autoware_vehicle_msgs::msg::VelocityReport> {
+  using PubSub = autoware_vehicle_msgs::msg::VelocityReportPubSubType;
+  static constexpr const char* topic = "/vehicle/status/velocity_status";
+  static constexpr const char* human_name = "Autoware velocity report";
 };
 
-class SteeringReportPublisher
-: public AutowarePublisherBase<autoware_vehicle_msgs::msg::SteeringReport, autoware_vehicle_msgs::msg::SteeringReportPubSubType>
-{
-public:
-  SteeringReportPublisher() : AutowarePublisherBase("", "", "/vehicle/status/steering_status") {}
-  const char * type() const override { return "Autoware steering report"; }
+template <>
+struct PublisherTraits<autoware_vehicle_msgs::msg::SteeringReport> {
+  using PubSub = autoware_vehicle_msgs::msg::SteeringReportPubSubType;
+  static constexpr const char* topic = "/vehicle/status/steering_status";
+  static constexpr const char* human_name = "Autoware steering report";
 };
 
-class ControlModeReportPublisher
-: public AutowarePublisherBase<autoware_vehicle_msgs::msg::ControlModeReport, autoware_vehicle_msgs::msg::ControlModeReportPubSubType>
-{
-public:
-  ControlModeReportPublisher() : AutowarePublisherBase("", "", "/vehicle/status/control_mode") {}
-  const char * type() const override { return "Autoware control mode report"; }
+template <>
+struct PublisherTraits<autoware_vehicle_msgs::msg::ControlModeReport> {
+  using PubSub = autoware_vehicle_msgs::msg::ControlModeReportPubSubType;
+  static constexpr const char* topic = "/vehicle/status/control_mode";
+  static constexpr const char* human_name = "Autoware control mode report";
 };
 
-class GearReportPublisher
-: public AutowarePublisherBase<autoware_vehicle_msgs::msg::GearReport, autoware_vehicle_msgs::msg::GearReportPubSubType>
-{
-public:
-  GearReportPublisher() : AutowarePublisherBase("", "", "/vehicle/status/gear_status") {}
-  const char * type() const override { return "Autoware gear report"; }
+template <>
+struct PublisherTraits<autoware_vehicle_msgs::msg::GearReport> {
+  using PubSub = autoware_vehicle_msgs::msg::GearReportPubSubType;
+  static constexpr const char* topic = "/vehicle/status/gear_status";
+  static constexpr const char* human_name = "Autoware gear report";
 };
 
-class TurnIndicatorsReportPublisher
-: public AutowarePublisherBase<autoware_vehicle_msgs::msg::TurnIndicatorsReport, autoware_vehicle_msgs::msg::TurnIndicatorsReportPubSubType>
-{
-public:
-  TurnIndicatorsReportPublisher() : AutowarePublisherBase("", "", "/vehicle/status/turn_indicators_status") {}
-  const char * type() const override { return "Autoware turn indicators report"; }
+template <>
+struct PublisherTraits<autoware_vehicle_msgs::msg::TurnIndicatorsReport> {
+  using PubSub = autoware_vehicle_msgs::msg::TurnIndicatorsReportPubSubType;
+  static constexpr const char* topic = "/vehicle/status/turn_indicators_status";
+  static constexpr const char* human_name = "Autoware turn indicators report";
 };
 
-class HazardLightsReportPublisher
-: public AutowarePublisherBase<autoware_vehicle_msgs::msg::HazardLightsReport, autoware_vehicle_msgs::msg::HazardLightsReportPubSubType>
-{
-public:
-  HazardLightsReportPublisher() : AutowarePublisherBase("", "", "/vehicle/status/hazard_lights_status") {}
-  const char * type() const override { return "Autoware hazard lights report"; }
+template <>
+struct PublisherTraits<autoware_vehicle_msgs::msg::HazardLightsReport> {
+  using PubSub = autoware_vehicle_msgs::msg::HazardLightsReportPubSubType;
+  static constexpr const char* topic = "/vehicle/status/hazard_lights_status";
+  static constexpr const char* human_name = "Autoware hazard lights report";
 };
+
+template <typename Msg>
+class ReportPublisher
+  : public AutowarePublisherBase<Msg, typename PublisherTraits<Msg>::PubSub> {
+public:
+  using Base = AutowarePublisherBase<Msg, typename PublisherTraits<Msg>::PubSub>;
+
+  ReportPublisher()
+    : Base("", "", PublisherTraits<Msg>::topic) {}
+
+  const char* type() const override {
+    return PublisherTraits<Msg>::human_name;
+  }
+};
+
+// Type aliases for convenience
+using VelocityReportPublisher =
+  ReportPublisher<autoware_vehicle_msgs::msg::VelocityReport>;
+
+using SteeringReportPublisher =
+  ReportPublisher<autoware_vehicle_msgs::msg::SteeringReport>;
+
+using ControlModeReportPublisher =
+  ReportPublisher<autoware_vehicle_msgs::msg::ControlModeReport>;
+
+using GearReportPublisher =
+  ReportPublisher<autoware_vehicle_msgs::msg::GearReport>;
+
+using TurnIndicatorsReportPublisher =
+  ReportPublisher<autoware_vehicle_msgs::msg::TurnIndicatorsReport>;
+
+using HazardLightsReportPublisher =
+  ReportPublisher<autoware_vehicle_msgs::msg::HazardLightsReport>;
 
 
 class AutowarePublisher::Implementation
