@@ -136,11 +136,11 @@ namespace geometry_msgs {
                 InstanceHandle_t* handle,
                 bool force_md5)
         {
-            if (!m_isGetKeyDefined)
+            if (!m_isGetKeyDefined || !data || !handle)
             {
                 return false;
             }
-
+ 
             PoseStamped* p_type = static_cast<PoseStamped*>(data);
 
             // Object that manages the raw buffer.
