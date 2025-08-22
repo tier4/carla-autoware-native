@@ -25,6 +25,7 @@
 #include <fastdds/dds/publisher/DataWriterListener.hpp>
 
 #include "CarlaPublisher.h"
+#include "carla/ros2/util/conversions.hpp"
 
 /**
  * @brief For internal use only, do not include this in any header that is not internal!!!
@@ -96,7 +97,7 @@ public:
   AutowarePublisherBase(AutowarePublisherBase&&)                 = default;
   AutowarePublisherBase& operator=(AutowarePublisherBase&&)      = default;
 
-  bool Init(const DomainId domain_id = 0U) 
+  bool Init(const TopicConfig config) 
   {
     _impl->Reset();
     
@@ -108,7 +109,7 @@ public:
     efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
     pqos.name(_name);
     auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl->_participant = factory->create_participant(domain_id, pqos);
+    _impl->_participant = factory->create_participant(config.domain_id, pqos);
     if (_impl->_participant == nullptr) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -140,6 +141,7 @@ public:
     }
 
     efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
+    configure_qos(config, wqos);
     wqos.endpoint().history_memory_policy = eprosima::fastrtps::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
     efd::DataWriterListener* listener = (efd::DataWriterListener*)_impl->_listener._impl.get();
     _impl->_datawriter = _impl->_publisher->create_datawriter(_impl->_topic, wqos, listener);

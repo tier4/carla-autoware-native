@@ -43,24 +43,6 @@ namespace ros2 {
 
       virtual const char* type() const = 0;
 
-      /// @return user specified valid FastDDS topic name
-      std::optional<std::string> ValidTopicName(const std::string& suffix = "") const {
-        if (_topic_name.empty()) {
-          return std::nullopt;
-        }
-        std::string topic_name = "rt";
-        if (_topic_name.front() != '/') {
-          topic_name += "/";
-        }
-        topic_name += _topic_name;
-
-        if (!suffix.empty() && suffix.front() != '/') {
-          topic_name += "/";
-        }
-        topic_name += suffix;
-        return topic_name;
-      }
-
     public:
       CarlaPublisher() = default;
       virtual ~CarlaPublisher() = default;
