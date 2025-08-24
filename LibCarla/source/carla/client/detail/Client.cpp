@@ -287,6 +287,14 @@ namespace detail {
     return _pimpl->CallAndWait<bool>("is_weather_enabled");
   }
 
+  void Client::SetPublishTF(bool publish_tf) {
+    _pimpl->AsyncCall("set_publish_tf", publish_tf);
+  }
+
+  bool Client::GetPublishTF() const {
+    return _pimpl->CallAndWait<bool>("get_publish_tf");
+  }
+
   std::vector<rpc::Actor> Client::GetActorsById(
       const std::vector<ActorId> &ids) {
     using return_t = std::vector<rpc::Actor>;

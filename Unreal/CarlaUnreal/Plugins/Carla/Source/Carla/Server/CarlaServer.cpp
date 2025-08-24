@@ -726,6 +726,37 @@ void FCarlaServer::FPimpl::BindActions()
     return true;
   };
 
+  // ~~ ROS2 TF ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  BIND_SYNC(set_publish_tf) << [this](bool publish_tf) -> R<void>
+  {
+    #if defined(WITH_ROS2)
+    REQUIRE_CARLA_EPISODE();
+    auto ROS2 = carla::ros2::ROS2::GetInstance();
+    if (ROS2 && ROS2->IsEnabled()) {
+      ROS2->SetPublishTF(publish_tf);
+      return R<void>::Success();
+    }
+    RESPOND_ERROR("set_publish_tf: ROS2 is not enabled");
+    #else
+    RESPOND_ERROR("set_publish_tf: Server was compiled without ROS2 support");
+    #endif
+  };
+
+  BIND_SYNC(get_publish_tf) << [this]() -> R<bool>
+  {
+    #if defined(WITH_ROS2)
+    REQUIRE_CARLA_EPISODE();
+    auto ROS2 = carla::ros2::ROS2::GetInstance();
+    if (ROS2 && ROS2->IsEnabled()) {
+      return ROS2->GetPublishTF();
+    }
+    return false;
+    #else
+    return false;
+    #endif
+  };
+
   // ~~ Actor operations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   BIND_SYNC(get_actors_by_id) << [this](

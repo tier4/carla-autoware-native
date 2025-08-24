@@ -159,7 +159,11 @@ namespace detail {
 
     void SetWeatherParameters(const rpc::WeatherParameters &weather);
 
-    bool IsWeatherEnabled(); 
+    bool IsWeatherEnabled();
+
+    void SetPublishTF(bool publish_tf);
+
+    bool GetPublishTF() const; 
 
     std::vector<rpc::Actor> GetActorsById(const std::vector<ActorId> &ids);
 

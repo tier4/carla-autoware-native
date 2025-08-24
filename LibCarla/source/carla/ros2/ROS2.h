@@ -65,6 +65,10 @@ class ROS2
   void SetFrame(uint64_t frame);
   void SetTimestamp(double timestamp);
 
+  // TF publishing control
+  void SetPublishTF(bool publish_tf);
+  bool GetPublishTF() const { return _publish_tf; }
+
   // ros_name managing
   void AddActorRosName(void *actor, std::string ros_name);
   void AddActorParentRosName(void *actor, void* parent);
@@ -166,6 +170,7 @@ void ProcessDataFromCollisionSensor(
   static std::shared_ptr<ROS2> _instance;
 
   bool _enabled { false };
+  bool _publish_tf { true };
   uint64_t _frame { 0 };
   int32_t _seconds { 0 };
   uint32_t _nanoseconds { 0 };

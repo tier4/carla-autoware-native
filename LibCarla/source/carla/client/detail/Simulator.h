@@ -263,6 +263,14 @@ namespace detail {
       return _client.IsWeatherEnabled();
     }
 
+    void SetPublishTF(bool publish_tf) {
+      _client.SetPublishTF(publish_tf);
+    }
+
+    bool GetPublishTF() const {
+      return _client.GetPublishTF();
+    }
+
     rpc::VehiclePhysicsControl GetVehiclePhysicsControl(const Vehicle &vehicle) const {
       return _client.GetVehiclePhysicsControl(vehicle.GetId());
     }
