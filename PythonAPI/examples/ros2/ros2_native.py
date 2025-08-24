@@ -76,6 +76,13 @@ def main(args):
 
         world = client.get_world()
 
+        # Disable TF publishing if requested
+        if hasattr(args, 'disable_tf') and args.disable_tf:
+            world.set_publish_tf(False)
+            logging.info("TF publishing disabled")
+        else:
+            logging.info("TF publishing enabled: %s", world.get_publish_tf())
+
         original_settings = world.get_settings()
         settings = world.get_settings()
         settings.synchronous_mode = True
@@ -120,6 +127,7 @@ if __name__ == '__main__':
     argparser.add_argument('--port', metavar='P', default=2000, type=int, help='TCP port of CARLA Simulator (default: 2000)')
     argparser.add_argument('-f', '--file', default='', required=True, help='File to be executed')
     argparser.add_argument('-v', '--verbose', action='store_true', dest='debug', help='print debug information')
+    argparser.add_argument('--disable-tf', action='store_true', dest='disable_tf', help='disable ROS2 TF publishing')
 
     args = argparser.parse_args()
 
