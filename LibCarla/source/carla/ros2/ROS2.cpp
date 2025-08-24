@@ -175,6 +175,7 @@ void ROS2::AddActorParentRosName(void *actor, void* parent) {
 void ROS2::RemoveActorRosName(void *actor) {
   _actor_ros_name.erase(actor);
   _actor_parent_ros_name.erase(actor);
+  _actor_ros_frame_id.erase(actor);
 
   _publishers.erase(actor);
   _transforms.erase(actor);
@@ -244,6 +245,30 @@ void ROS2::UpdateActorRosTopicName(void *actor, std::string ros_topic_name) {
 std::string ROS2::GetActorRosTopicName(void *actor) {
   auto it = _actor_ros_topic_name.find(actor);
   if (it != _actor_ros_topic_name.end()) {
+    return it->second;
+  } else {
+    return std::string("");
+  }
+}
+
+void ROS2::AddActorRosFrameId(void *actor, std::string ros_frame_id) {
+  _actor_ros_frame_id.insert({actor, ros_frame_id});
+}
+
+void ROS2::RemoveActorRosFrameId(void *actor) {
+  _actor_ros_frame_id.erase(actor);
+}
+
+void ROS2::UpdateActorRosFrameId(void *actor, std::string ros_frame_id) {
+  auto it = _actor_ros_frame_id.find(actor);
+  if (it != _actor_ros_frame_id.end()) {
+    it->second = ros_frame_id;
+  }
+}
+
+std::string ROS2::GetActorRosFrameId(void *actor) {
+  auto it = _actor_ros_frame_id.find(actor);
+  if (it != _actor_ros_frame_id.end()) {
     return it->second;
   } else {
     return std::string("");
@@ -330,6 +355,7 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
     std::string ros_name = GetActorRosName(actor);
     std::string parent_ros_name = GetActorParentRosName(actor);
     std::string ros_topic_name = GetActorRosTopicName(actor);
+    std::string ros_frame_id = GetActorRosFrameId(actor);
     switch(type) {
       case ESensors::CollisionSensor: {
         if (ros_name == "collision__") {
@@ -340,6 +366,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaCollisionPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -358,6 +387,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaDepthCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -376,6 +408,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaNormalsCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -394,6 +429,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaDVSCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -412,6 +450,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaGNSSPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -438,6 +479,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           config.history_qos_depth = 1000;
           return config;
         }())) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -456,6 +500,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaLineInvasionPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -477,6 +524,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaOpticalFlowCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -495,6 +545,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaRadarPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -513,6 +566,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaSemanticLidarPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -539,6 +595,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           config.history_qos_depth = 5;
           return config;
         }())) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -580,6 +639,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           return config;
         }();
         if (new_publisher->Init(image_topic_config, info_topic_config)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -598,6 +660,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaSSCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
@@ -616,6 +681,9 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
         }
         auto new_publisher = std::make_shared<CarlaISCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
         if (new_publisher->Init(_domain_id)) {
+          if (!ros_frame_id.empty()) {
+            new_publisher->frame_id(std::string(ros_frame_id));
+          }
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }

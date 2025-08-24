@@ -79,6 +79,12 @@ class ROS2
   void UpdateActorRosTopicName(void *actor, std::string ros_name);
   std::string GetActorRosTopicName(void *actor);
 
+  // ros_frame_id managing
+  void AddActorRosFrameId(void *actor, std::string ros_frame_id);
+  void RemoveActorRosFrameId(void *actor);
+  void UpdateActorRosFrameId(void *actor, std::string ros_frame_id);
+  std::string GetActorRosFrameId(void *actor);
+
   // callbacks
   void AddActorCallback(void* actor, std::string ros_name, ActorCallback callback);
   void RemoveActorCallback(void* actor);
@@ -172,6 +178,7 @@ void ProcessDataFromCollisionSensor(
   uint32_t _domain_id { 0U };
   std::unordered_map<void *, std::string> _actor_ros_name;
   std::unordered_map<void *, std::string> _actor_ros_topic_name;
+  std::unordered_map<void *, std::string> _actor_ros_frame_id;
   std::unordered_map<void *, std::vector<void*> > _actor_parent_ros_name;
   std::shared_ptr<CarlaEgoVehicleControlSubscriber> _controller;
   std::shared_ptr<AutowareController> _autoware_controller;

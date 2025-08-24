@@ -229,6 +229,15 @@ static void FillIdAndTags(FActorDefinition &Def, TStrs &&...Strings)
     Var.bRestrictToRecommended = false;
     Def.Variations.Emplace(Var);
   }
+
+  {
+    FActorVariation Var;
+    Var.Id = TEXT("ros_frame_id");
+    Var.Type = EActorAttributeType::String;
+    Var.RecommendedValues = {Def.Id};
+    Var.bRestrictToRecommended = false;
+    Def.Variations.Emplace(Var);
+  }
 }
 
 static void AddRecommendedValuesForActorRoleName(
