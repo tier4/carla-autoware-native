@@ -159,34 +159,100 @@ void AutowarePublisher::SetSteering(float steering_tire_angle)
   _impl->_steering_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetControlMode(uint8_t mode)
+void AutowarePublisher::SetControlMode(const ControlMode mode)
 {
   autoware_vehicle_msgs::msg::ControlModeReport report;
-  report.mode(mode);
+
+  switch (mode) {
+#define CASE(DATUM)                                                              \
+  case ControlMode::DATUM:                                                       \
+    report.mode(autoware_vehicle_msgs::msg::ControlModeReport_Constants::DATUM); \
+    break;                                                                       \
+    static_assert(true, "")
+
+    CASE(NO_COMMAND);
+    CASE(AUTONOMOUS);
+    CASE(AUTONOMOUS_STEER_ONLY);
+    CASE(AUTONOMOUS_VELOCITY_ONLY);
+    CASE(MANUAL);
+    CASE(DISENGAGED);
+    CASE(NOT_READY);
+
+#undef CASE
+  }
 
   _impl->_control_mode_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetGear(uint8_t gear)
+void AutowarePublisher::SetGear(const Gear gear)
 {
   autoware_vehicle_msgs::msg::GearReport report;
-  report.report(gear);
+
+  switch (gear) {
+#define CASE(DATUM)                                                         \
+  case Gear::DATUM:                                                         \
+    report.report(autoware_vehicle_msgs::msg::GearReport_Constants::DATUM); \
+    break;                                                                  \
+    static_assert(true, "")
+
+    CASE(NONE);
+    CASE(NEUTRAL);
+    CASE(DRIVE);
+    CASE(DRIVE_2);
+    CASE(DRIVE_3);
+    CASE(DRIVE_4);
+    CASE(DRIVE_5);
+    CASE(DRIVE_6);
+    CASE(DRIVE_7);
+    CASE(DRIVE_8);
+    CASE(DRIVE_9);
+    CASE(DRIVE_10);
+    CASE(DRIVE_11);
+    CASE(DRIVE_12);
+    CASE(DRIVE_13);
+    CASE(DRIVE_14);
+    CASE(DRIVE_15);
+    CASE(DRIVE_16);
+    CASE(DRIVE_17);
+    CASE(DRIVE_18);
+    CASE(REVERSE);
+    CASE(REVERSE_2);
+    CASE(PARK);
+    CASE(LOW);
+    CASE(LOW_2);
+
+#undef CASE
+  }
 
   _impl->_gear_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetTurnIndicators(uint8_t turn_indicators)
+void AutowarePublisher::SetTurnIndicators(const TurnIndicatorsStatus status)
 {
   autoware_vehicle_msgs::msg::TurnIndicatorsReport report;
-  report.report(turn_indicators);
+
+  switch (status) {
+    case TurnIndicatorsStatus::OFF:
+      report.report(autoware_vehicle_msgs::msg::TurnIndicatorsReport_Constants::DISABLE);
+      break;
+    case TurnIndicatorsStatus::LEFT:
+      report.report(autoware_vehicle_msgs::msg::TurnIndicatorsReport_Constants::ENABLE_LEFT);
+      break;
+    case TurnIndicatorsStatus::RIGHT:
+      report.report(autoware_vehicle_msgs::msg::TurnIndicatorsReport_Constants::ENABLE_RIGHT);
+      break;
+  }
 
   _impl->_turn_indicator_publisher.SetData(report);
 }
 
-void AutowarePublisher::SetHazardLights(uint8_t hazard_lights)
+void AutowarePublisher::SetHazardLights(const bool hazard_lights_enabled)
 {
   autoware_vehicle_msgs::msg::HazardLightsReport report;
-  report.report(hazard_lights);
+
+  report.report(
+    hazard_lights_enabled ? autoware_vehicle_msgs::msg::HazardLightsReport_Constants::ENABLE
+                          : autoware_vehicle_msgs::msg::HazardLightsReport_Constants::DISABLE);
 
   _impl->_hazard_lights_publisher.SetData(report);
 }

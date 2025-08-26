@@ -14,6 +14,7 @@
 #include "carla/sensor/data/SemanticLidarData.h"
 #include "carla/sensor/data/RadarData.h"
 #include "carla/sensor/data/Image.h"
+#include "carla/sensor/data/VehicleStatusEvent.h"
 #include "carla/sensor/s11n/ImageSerializer.h"
 #include "carla/sensor/s11n/SensorHeaderSerializer.h"
 
@@ -146,11 +147,7 @@ void ROS2::SetFrame(uint64_t frame) {
 }
 
 void ROS2::SetTimestamp(double timestamp) {
-  double integral;
-  const double fractional = modf(timestamp, &integral);
-  const double multiplier = 1000000000.0;
-  _seconds = static_cast<int32_t>(integral);
-  _nanoseconds = static_cast<uint32_t>(fractional * multiplier);
+  std::tie(_seconds, _nanoseconds) = Carla2RosTime(timestamp);
   _clock_publisher->SetData(_seconds, _nanoseconds);
   _clock_publisher->Publish();
 #if defined(WITH_ROS2_DEMO)
@@ -996,6 +993,112 @@ void ROS2::ProcessDataFromCollisionSensor(
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
   }
+}
+
+void ROS2::ProcessDataFromStatusSensor(
+    uint64_t sensor_type,
+    carla::streaming::detail::stream_id_type stream_id,
+    const carla::geom::Transform sensor_transform,
+    const carla::sensor::data::VehicleStatusEvent &data,
+    void *actor)
+{
+  // This callback is only for the Ego vehicle
+  if (!_autoware_controller || actor != _autoware_controller->GetVehicle()) {
+    return;
+  }
+
+  if (!_autoware_publisher) {
+    return;
+  }
+
+  constexpr uint8_t reverse_mask     = 0b00000001;
+  constexpr uint8_t manual_gear_mask = 0b00000010;
+
+  constexpr uint8_t left_blinker_mask  = 0b00000001;
+  constexpr uint8_t right_blinker_mask = 0b00000010;
+  constexpr uint8_t hazard_lights_mask = 0b00000100;
+
+  // Decode data
+  const bool is_reverse = data.GetControlFlags() & reverse_mask;
+  const bool is_manual_gear = data.GetControlFlags() & manual_gear_mask;
+
+  const bool is_left_blinker_on = data.GetTurnMask() & left_blinker_mask;
+  const bool is_right_blinker_on = data.GetTurnMask() & right_blinker_mask;
+  const bool is_hazard_lights_on = data.GetTurnMask() & hazard_lights_mask;
+
+  // TODO: Verify whether the velocity data is in World or Vehicle frame
+  _autoware_publisher->SetVelocity(data.GetVelX(), data.GetVelY(), 0.0f /* TODO: Add heading rate */);
+
+  // TODO: Check if steering should be set reversed
+  _autoware_publisher->SetSteering(data.GetSteer());
+
+  // TODO: Add logic to use the input of control mode and base don that set output
+  _autoware_publisher->SetControlMode(ControlMode::AUTONOMOUS);
+
+  // TODO: Verify what is the incoming gear from data.GetGear()
+  _autoware_publisher->SetGear(Gear::NONE);
+  if (is_reverse) {
+    switch (data.GetGear()) {
+      case 1:
+        _autoware_publisher->SetGear(Gear::REVERSE);
+        break;
+      case 2:
+        _autoware_publisher->SetGear(Gear::REVERSE_2);
+        break;
+    }
+  } else {
+    switch (data.GetGear()) {
+      case 1:
+        _autoware_publisher->SetGear(Gear::DRIVE);
+        break;
+
+#define CASE(DRIVE_GEAR)                                    \
+  case DRIVE_GEAR:                                          \
+    _autoware_publisher->SetGear(Gear::DRIVE_##DRIVE_GEAR); \
+    break;                                                  \
+    static_assert(true, "")
+
+      CASE(2);
+      CASE(3);
+      CASE(4);
+      CASE(5);
+      CASE(6);
+      CASE(7);
+      CASE(8);
+      CASE(9);
+      CASE(10);
+      CASE(11);
+      CASE(12);
+      CASE(13);
+      CASE(14);
+      CASE(15);
+      CASE(16);
+      CASE(17);
+      CASE(18);
+
+#undef CASE
+    }
+  }
+
+  // Turn indicators
+  if (!is_left_blinker_on && !is_right_blinker_on) {
+    _autoware_publisher->SetTurnIndicators(TurnIndicatorsStatus::OFF);
+  } else if (is_left_blinker_on && !is_right_blinker_on) {
+    _autoware_publisher->SetTurnIndicators(TurnIndicatorsStatus::LEFT);
+  } else if (is_right_blinker_on && !is_left_blinker_on) {
+    _autoware_publisher->SetTurnIndicators(TurnIndicatorsStatus::RIGHT);
+  } else {
+    log_error("Both left and right blinkers are on. This should not happen!");
+    // std::ostringstream oss;
+    // oss << __FILE__ << ":" << __LINE__ << " "
+    //     << "Both left and right blinkers are on!";
+    // throw std::runtime_error(oss.str());
+  }
+
+  _autoware_publisher->SetHazardLights(is_hazard_lights_on);
+
+  const auto [seconds, nanoseconds] = Carla2RosTime(data.GetTimestamp());
+  _autoware_publisher->Publish(seconds, nanoseconds);
 }
 
 void ROS2::Shutdown() {

@@ -30,6 +30,7 @@ namespace carla {
       class LidarData;
       class SemanticLidarData;
       class RadarData;
+      class VehicleStatusEvent;
     }
   }
 }
@@ -56,6 +57,17 @@ class ROS2
     if (!_instance)
       _instance = std::shared_ptr<ROS2>(new ROS2);
     return _instance;
+  }
+
+  // utility
+  static std::pair<int32_t, uint32_t> Carla2RosTime(double timestamp) {
+    double integral;
+    const double fractional = modf(timestamp, &integral);
+    const double multiplier = 1000000000.0;
+    const auto seconds = static_cast<int32_t>(integral);
+    const auto nanoseconds = static_cast<uint32_t>(fractional * multiplier);
+
+    return std::make_pair(seconds, nanoseconds);
   }
 
   // general
@@ -152,6 +164,12 @@ void ProcessDataFromCollisionSensor(
     uint32_t other_actor,
     carla::geom::Vector3D impulse,
     void* actor);
+void ProcessDataFromStatusSensor(
+    uint64_t sensor_type,
+    carla::streaming::detail::stream_id_type stream_id,
+    const carla::geom::Transform sensor_transform,
+    const carla::sensor::data::VehicleStatusEvent &data,
+    void *actor);
 
     uint32_t GetDomainId() const noexcept { return _domain_id; }
 
