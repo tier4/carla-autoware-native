@@ -119,9 +119,12 @@ def spawn_ego_with_sensors(world, spawn_point):
     blueprint_library = world.get_blueprint_library()
 
     ego_blueprint = blueprint_library.find("vehicle.lincoln.mkz")
-    empty_blueprint = blueprint_library.find("util.actor.empty")
+    ego_blueprint.set_attribute("role_name", "ego")
+    ego_blueprint.set_attribute("ros_topic_name", "/carla/input")  # Default Carla ROS input topic name
 
     ego = world.spawn_actor(ego_blueprint, spawn_point)
+
+    empty_blueprint = blueprint_library.find("util.actor.empty")
 
     # Transformation between vehicle pivot and projection of the rear
     # axis on the ground (base link) as measured in Unreal Editor
