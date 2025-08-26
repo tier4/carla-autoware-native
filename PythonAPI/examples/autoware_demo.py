@@ -23,6 +23,10 @@ def generate_vlp16_blueprint(blueprint_library):
 
     blueprint.set_attribute("sensor_tick", "0.1")
 
+    # ROS settings
+    blueprint.set_attribute("ros_name", "sensor_kit_base_link")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/lidar/top/pointcloud_raw")
+
     return blueprint
 
 def generate_traffic_light_camera_blueprint(blueprint_library):
@@ -40,6 +44,36 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
     blueprint.set_attribute("image_size_y", "1080")
     blueprint.set_attribute("sensor_tick", "0.1")
 
+    # ROS settings
+    blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_link")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/camera/traffic_light")
+
+    return blueprint
+
+def generate_imu_blueprint(blueprint_library):
+    """Generates a blueprint for IMU"""
+
+    blueprint = blueprint_library.find("sensor.other.imu")
+
+    blueprint.set_attribute("sensor_tick", f"{1.0 / 30.0}")
+
+    # ROS settings
+    blueprint.set_attribute("ros_name", "tamagawa/imu_link")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/imu/tamagawa/imu_raw")
+
+    return blueprint
+
+def generate_gnss_blueprint(blueprint_library):
+    """Generates a blueprint for GNSS"""
+
+    blueprint = blueprint_library.find("sensor.other.gnss")
+
+    blueprint.set_attribute("sensor_tick", "1.0")
+
+    # ROS settings
+    blueprint.set_attribute("ros_name", "gnss_link")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/gnss/pose")
+
     return blueprint
 
 def spawn_sensors(world, base_link):
@@ -55,8 +89,8 @@ def spawn_sensors(world, base_link):
     vlp16_blueprint = generate_vlp16_blueprint(blueprint_library)
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
-    imu_blueprint = blueprint_library.find("sensor.other.imu")
-    gnss_receiver_blueprint = blueprint_library.find("sensor.other.gnss")
+    imu_blueprint = generate_imu_blueprint(blueprint_library)
+    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library)
 
     sensor_kit_to_base_link_transform = carla.Transform(
         carla.Location(x=0.9, z=2.0),
