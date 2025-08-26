@@ -197,6 +197,9 @@ def main():
     argparser.add_argument(
         '-p', '--port', metavar='P', default=2000, type=int,
         help='TCP port of the host server (default: 2000)')
+    argparser.add_argument(
+        '--follow', action='store_true',
+        help='Follow Ego vehicle')
     args = argparser.parse_args()
 
     client = carla.Client(args.host, args.port)
@@ -208,6 +211,12 @@ def main():
     move_spectator(world, ego)
 
     print('Ego spawned!')
+
+    if args.follow:
+        print('Kill this script before stopping simulation!')
+    while args.follow:
+        world.wait_for_tick()
+        move_spectator(world, ego)
 
 if __name__ == '__main__':
     main()
