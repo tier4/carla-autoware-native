@@ -173,6 +173,18 @@ def spawn_ego_with_sensors(world, spawn_point):
 
     return ego
 
+def move_spectator(world, ego_vehicle):
+    spectator = world.get_spectator()
+
+    spectator_tf = ego_vehicle.get_transform()
+    spectator_offset = carla.Transform(carla.Location(x=-6.0, z=1.5))
+
+    spectator_with_offset_position = spectator_tf.transform(spectator_offset.location)
+
+    spectator_tf = carla.Transform(spectator_with_offset_position, spectator_tf.rotation)
+
+    spectator.set_transform(spectator_tf)
+
 def main():
     argparser = argparse.ArgumentParser(
         description='CARLA Automatic Control Client')
@@ -192,7 +204,9 @@ def main():
     world = client.get_world()
 
     spawn_point = random.choice(world.get_map().get_spawn_points())
-    spawn_ego_with_sensors(world, spawn_point)
+    ego = spawn_ego_with_sensors(world, spawn_point)
+    move_spectator(world, ego)
+
     print('Ego spawned!')
 
 if __name__ == '__main__':
