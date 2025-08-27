@@ -49,11 +49,21 @@ void AVehicleStatusSensor::BeginPlay()
   Super::BeginPlay();
   Parent = GetAttachParentActor();
   ResolveVehicle();
+  SecondsPerUpdate = 1.0f / TargetRateHz;
 }
 
 void AVehicleStatusSensor::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
 {
   Super::PostPhysTick(World, TickType, DeltaSeconds);
+
+  // Throttle publishing to defined Hz rate
+  const double CurrentTime = GetWorld()->GetTimeSeconds();
+  if (CurrentTime - LastSentTimestamp < SecondsPerUpdate)
+  {
+    return;
+  }
+  LastSentTimestamp = CurrentTime;
+  
   CollectAndStream(DeltaSeconds);
 }
 

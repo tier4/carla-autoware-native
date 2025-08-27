@@ -49,20 +49,27 @@ public:
 	static FActorDefinition GetSensorDefinition();
 
 	// Called by Carla’s spawning pipeline with user attributes
-	void Set(const FActorDescription &ActorDescription) override;
+	virtual void Set(const FActorDescription &ActorDescription) override;
+	
+	// virtual void TickActor(float DeltaTime, ELevelTick TickType, FActorTickFunction& ThisTickFunction) override; //todo might need to change into this tick if PostPhysTick() is failing
+	virtual void PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds) override;
 
 protected:
 	virtual void BeginPlay() override;
-
-public:
-	// virtual void TickActor(float DeltaTime, ELevelTick TickType, FActorTickFunction& ThisTickFunction) override; //todo might need to change into this tick if PostPhysTick() is failing
-	virtual void PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds) override;
+	
+	// Publish frequency
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor")
+	float TargetRateHz = 30.0f;
 
 private:
 	// Cached parent vehicle
 	TWeakObjectPtr<AActor> Parent;
 	TWeakObjectPtr<ACarlaWheeledVehicle> Vehicle; // AWheeledVehicle
 	FVelocityInfo VelocityInfo;
+
+	// Publish frequency
+	float SecondsPerUpdate = 1.0f / TargetRateHz;
+	double LastSentTimestamp = 0.0;
 
 	// Helpers
 	bool ResolveVehicle();
