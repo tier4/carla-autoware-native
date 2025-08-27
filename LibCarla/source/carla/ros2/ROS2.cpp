@@ -911,7 +911,7 @@ void ROS2::ProcessDataFromLidar(
     std::shared_ptr<CarlaLidarPublisher> publisher = std::dynamic_pointer_cast<CarlaLidarPublisher>(sensors.first);
     size_t width = data._points.size();
     size_t height = 1;
-    publisher->SetData(_seconds, _nanoseconds, height, width, (float*)data._points.data());
+    publisher->SetDataEx(_seconds, _nanoseconds, height, width, (float*)data._points.data());
     publisher->Publish();
   }
   if (sensors.second) {
