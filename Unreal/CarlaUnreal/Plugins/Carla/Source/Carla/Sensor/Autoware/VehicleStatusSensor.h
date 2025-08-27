@@ -28,7 +28,7 @@ protected:
 	virtual void BeginPlay() override;
 
 public:
-	// virtual void TickActor(float DeltaTime, ELevelTick TickType, FActorTickFunction& ThisTickFunction) override;
+	// virtual void TickActor(float DeltaTime, ELevelTick TickType, FActorTickFunction& ThisTickFunction) override; //todo might need to change into this tick if PostPhysTick() is failing
 	virtual void PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds) override;
 
 private:
