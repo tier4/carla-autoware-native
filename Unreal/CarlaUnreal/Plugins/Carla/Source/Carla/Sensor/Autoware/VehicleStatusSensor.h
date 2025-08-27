@@ -58,7 +58,12 @@ protected:
 	virtual void BeginPlay() override;
 	
 	// Publish frequency
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", UIMin="1.0"))
+	float MinRateHz = 1.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", UIMin="1.0"))
+	float MaxRateHz = 1000.0f;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", ClampMax="1000.0", UIMin="1.0", UIMax="1000.0"))
 	float TargetRateHz = 30.0f;
 
 private:
@@ -66,10 +71,6 @@ private:
 	TWeakObjectPtr<AActor> Parent;
 	TWeakObjectPtr<ACarlaWheeledVehicle> Vehicle; // AWheeledVehicle
 	FVelocityInfo VelocityInfo;
-
-	// Publish frequency
-	float SecondsPerUpdate = 1.0f / TargetRateHz;
-	double LastSentTimestamp = 0.0;
 
 	// Helpers
 	bool ResolveVehicle();

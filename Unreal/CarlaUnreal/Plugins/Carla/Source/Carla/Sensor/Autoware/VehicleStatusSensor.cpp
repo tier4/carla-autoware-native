@@ -14,6 +14,9 @@ AVehicleStatusSensor::AVehicleStatusSensor(const FObjectInitializer& ObjectIniti
 {
   PrimaryActorTick.bCanEverTick = true;
   PrimaryActorTick.TickGroup = TG_PostPhysics;  // read ground-truth after physics update
+  
+  TargetRateHz = FMath::Clamp(TargetRateHz, MinRateHz, MaxRateHz);
+  PrimaryActorTick.TickInterval = 1.0f / TargetRateHz;
 }
 
 FActorDefinition AVehicleStatusSensor::GetSensorDefinition()
@@ -49,21 +52,11 @@ void AVehicleStatusSensor::BeginPlay()
   Super::BeginPlay();
   Parent = GetAttachParentActor();
   ResolveVehicle();
-  SecondsPerUpdate = 1.0f / TargetRateHz;
 }
 
 void AVehicleStatusSensor::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
 {
   Super::PostPhysTick(World, TickType, DeltaSeconds);
-
-  // Throttle publishing to defined Hz rate
-  const double CurrentTime = GetWorld()->GetTimeSeconds();
-  if (CurrentTime - LastSentTimestamp < SecondsPerUpdate)
-  {
-    return;
-  }
-  LastSentTimestamp = CurrentTime;
-  
   CollectAndStream(DeltaSeconds);
 }
 
