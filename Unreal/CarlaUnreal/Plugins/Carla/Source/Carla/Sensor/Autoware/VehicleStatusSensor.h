@@ -13,24 +13,24 @@ struct FVelocityInfo
 	GENERATED_BODY()
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
-	FVector LocalVelocity;
+	FVector Velocity;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
-	FRotator LocalRotationRate;
+	FRotator RotationRate;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
-	FVector LocalAngularVelocity;
+	FVector AngularVelocity;
 
 	FVelocityInfo()
-		: LocalVelocity(FVector::ZeroVector)
-		, LocalRotationRate(FRotator::ZeroRotator)
-		, LocalAngularVelocity(FVector::ZeroVector)
+		: Velocity(FVector::ZeroVector)
+		, RotationRate(FRotator::ZeroRotator)
+		, AngularVelocity(FVector::ZeroVector)
 	{
 	}
 
 	float GetSpeed() const
 	{
-		return LocalVelocity.Size();
+		return Velocity.Size();
 	}
 };
 
@@ -67,7 +67,7 @@ private:
 	// Helpers
 	bool ResolveVehicle();
 	void CollectAndStream(float DeltaSeconds);
-	void SetVelocityInfo(const AActor* VehicleActor);
+	void SetVelocityInfoToLocal(const AActor* VehicleActor);
 
 	// Scale UE velocity from cm/s to m/s
 	template<typename T>

@@ -110,7 +110,7 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   }
 
   // Update cached velocity info
-  SetVelocityInfo(VehicleActor);
+  SetVelocityInfoToLocal(VehicleActor);
 
   // Steering & control
   float steer = 0.0f;
@@ -155,14 +155,14 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   Packed msg{};
   msg.timestamp = GetWorld()->GetTimeSeconds();
   msg.speed_mps = VelocityInfo.GetSpeed();
-  msg.vel_x_mps = VelocityInfo.LocalVelocity.X;
-  msg.vel_y_mps = VelocityInfo.LocalVelocity.Y;
-  msg.angVel_x_mps = VelocityInfo.LocalAngularVelocity.X;
-  msg.angVel_y_mps = VelocityInfo.LocalAngularVelocity.Y;
-  msg.angVel_z_mps = VelocityInfo.LocalAngularVelocity.Z;
-  msg.rotr_pitch = VelocityInfo.LocalRotationRate.Pitch;
-  msg.rotr_yaw = VelocityInfo.LocalRotationRate.Yaw;
-  msg.rotr_roll = VelocityInfo.LocalRotationRate.Roll;
+  msg.vel_x_mps = VelocityInfo.Velocity.X;
+  msg.vel_y_mps = VelocityInfo.Velocity.Y;
+  msg.angVel_x_mps = VelocityInfo.AngularVelocity.X;
+  msg.angVel_y_mps = VelocityInfo.AngularVelocity.Y;
+  msg.angVel_z_mps = VelocityInfo.AngularVelocity.Z;
+  msg.rotr_pitch = VelocityInfo.RotationRate.Pitch;
+  msg.rotr_yaw = VelocityInfo.RotationRate.Yaw;
+  msg.rotr_roll = VelocityInfo.RotationRate.Roll;
   msg.steer = steer;
   msg.gear = current_gear;
   msg.turn_mask   = (left_blinker ? 0x01 : 0) | (right_blinker ? 0x02 : 0) | (hazard ? 0x04 : 0);
@@ -182,7 +182,7 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   }
 }
 
-void AVehicleStatusSensor::SetVelocityInfo(const AActor* VehicleActor)
+void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)
 {
   if (!VehicleActor) return;
 
@@ -191,7 +191,7 @@ void AVehicleStatusSensor::SetVelocityInfo(const AActor* VehicleActor)
 
   // Convert to m/s, then rotate into local space
   const FQuat InvRot = VehicleActor->GetActorTransform().GetRotation().Inverse();
-  VelocityInfo.LocalVelocity = InvRot.RotateVector(CmpsToMps(WorldVel_cmps));
+  VelocityInfo.Velocity = InvRot.RotateVector(CmpsToMps(WorldVel_cmps));
 
   // Physics angular velocity (rad/s, world space)
   FVector WorldAngVel = FVector::ZeroVector;
@@ -204,8 +204,8 @@ void AVehicleStatusSensor::SetVelocityInfo(const AActor* VehicleActor)
   }
 
   // Rotate into local space
-  VelocityInfo.LocalAngularVelocity = InvRot.RotateVector(WorldAngVel);
+  VelocityInfo.AngularVelocity = InvRot.RotateVector(WorldAngVel);
 
   // Convert angular velocity vector into a Rotator for convenience
-  VelocityInfo.LocalRotationRate = VelocityInfo.LocalAngularVelocity.Rotation();
+  VelocityInfo.RotationRate = VelocityInfo.AngularVelocity.Rotation();
 }
