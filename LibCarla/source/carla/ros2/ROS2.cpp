@@ -1089,6 +1089,28 @@ void ROS2::ProcessDataFromStatusSensor(
 
   const auto [seconds, nanoseconds] = Carla2RosTime(data.GetTimestamp());
   _autoware_publisher->Publish(seconds, nanoseconds);
+
+  // Debug
+  if constexpr (false) {
+    std::cerr << "========== NEW STATUS ==========" << '\n'
+              << "    RAW DATA:" << '\n'
+              << "Timestamp: " << data.GetTimestamp() << '\n'
+              << "Speed: " << data.GetSpeed() << '\n'
+              << "VelX: " << data.GetVelX() << '\n'
+              << "VelY: " << data.GetVelY() << '\n'
+              << "VelZ: " << data.GetVelZ() << '\n'
+              << "Steering: " << data.GetSteer() << '\n'
+              << "Gear: " << data.GetGear() << '\n'
+              << "Turn mask: " << data.GetTurnMask() << '\n'
+              << "Control flags: " << data.GetControlFlags() << '\n'
+              << "    PROCESSED:" << '\n'
+              << "Is reverse: " << is_reverse << '\n'
+              << "Is manual gear: " << is_manual_gear << '\n'
+              << "Is left blinker on: " << is_left_blinker_on << '\n'
+              << "Is right blinker on: " << is_right_blinker_on << '\n'
+              << "Is hazard lights on: " << is_hazard_lights_on << '\n'
+              << std::flush;
+  }
 }
 
 void ROS2::Shutdown() {
