@@ -57,6 +57,7 @@ def spawn_sensors(world, base_link):
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = blueprint_library.find("sensor.other.imu")
     gnss_receiver_blueprint = blueprint_library.find("sensor.other.gnss")
+    vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     sensor_kit_to_base_link_transform = carla.Transform(
         carla.Location(x=0.9, z=2.0),
@@ -109,6 +110,15 @@ def spawn_sensors(world, base_link):
         gnss_receiver_to_sensor_kit_transform,
         attach_to=sensor_kit)
     gnss_receiver.enable_for_ros()
+
+    # Spawn Vehicle Status Sensor
+    vehicle_status_to_sensor_kit_transform = carla.Transform(
+        carla.Location(x=0.0, z=0.5))
+    vehicle_status_sensor = world.spawn_actor(
+        vehicle_status_blueprint,
+        vehicle_status_to_sensor_kit_transform,
+        attach_to=sensor_kit)
+    vehicle_status_sensor.enable_for_ros()
 
 def spawn_ego_with_sensors(world, spawn_point):
     """Spawns a controllable vehicle with a basic sensor configuration

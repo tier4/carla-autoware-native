@@ -52,6 +52,7 @@ void AVehicleStatusSensor::BeginPlay()
   Super::BeginPlay();
   Parent = GetAttachParentActor();
   ResolveVehicle();
+  UE_LOG(LogTemp, Warning, TEXT("VehicleStatusSensor spawned and attached!"));
 }
 
 void AVehicleStatusSensor::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
