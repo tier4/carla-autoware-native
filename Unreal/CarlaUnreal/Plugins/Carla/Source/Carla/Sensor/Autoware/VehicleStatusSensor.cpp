@@ -92,7 +92,7 @@ bool AVehicleStatusSensor::ResolveVehicle()
     Vehicle = CWV;
     return true;
   }
-  
+
   return false;
 }
 
@@ -109,12 +109,8 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
     return;
   }
 
-  // Velocity
-  const FVector V_cmps = VehicleActor->GetVelocity();
-  const float speed_mps = CmpsToMps(V_cmps.Size());
-  const float vel_x_mps = CmpsToMps(V_cmps.X);
-  const float vel_y_mps = CmpsToMps(V_cmps.Y);
-  const float vel_z_mps = CmpsToMps(V_cmps.Z);
+  // Update cached velocity info
+  SetVelocityInfo(VehicleActor);
 
   // Steering & control
   float steer = 0.0f;
@@ -122,10 +118,11 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   bool reverse = false;
   int32 current_gear = 0;
 
-  if (auto* CWV = Cast<ACarlaWheeledVehicle>(VehicleActor)) {
+  if (auto* CWV = Cast<ACarlaWheeledVehicle>(VehicleActor))
+  {
     const auto Control = CWV->GetVehicleControl();
-    steer = Control.Steer;
-    reverse = Control.bReverse;
+    steer       = Control.Steer;
+    reverse     = Control.bReverse;
     manual_gear = Control.bManualGearShift;
     current_gear = CWV->GetVehicleCurrentGear();
   }
@@ -143,28 +140,35 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   struct Packed
   {
     double timestamp;
-    float  speed_mps;
-    float  vel_x_mps, vel_y_mps, vel_z_mps;
-    float  steer;
-    int32  gear;
-    uint8  turn_mask;
-    uint8  control_flags;
-    uint8  _pad0;
-    uint8  _pad1;
+    float speed_mps;
+    float vel_x_mps, vel_y_mps, vel_z_mps; // local
+    float angVel_x_mps, angVel_y_mps, angVel_z_mps; // local
+    float rotr_pitch, rotr_yaw, rotr_roll; // local
+    float steer;
+    int32 gear;
+    uint8 turn_mask;
+    uint8 control_flags;
+    uint8 _pad0;
+    uint8 _pad1;
   } PACKED;
 
   Packed msg{};
   msg.timestamp = GetWorld()->GetTimeSeconds();
-  msg.speed_mps = speed_mps;
-  msg.vel_x_mps = vel_x_mps;
-  msg.vel_y_mps = vel_y_mps;
-  msg.vel_z_mps = vel_z_mps;
+  msg.speed_mps = VelocityInfo.GetSpeed();
+  msg.vel_x_mps = VelocityInfo.LocalVelocity.X;
+  msg.vel_y_mps = VelocityInfo.LocalVelocity.Y;
+  msg.angVel_x_mps = VelocityInfo.LocalAngularVelocity.X;
+  msg.angVel_y_mps = VelocityInfo.LocalAngularVelocity.Y;
+  msg.angVel_z_mps = VelocityInfo.LocalAngularVelocity.Z;
+  msg.rotr_pitch = VelocityInfo.LocalRotationRate.Pitch;
+  msg.rotr_yaw = VelocityInfo.LocalRotationRate.Yaw;
+  msg.rotr_roll = VelocityInfo.LocalRotationRate.Roll;
   msg.steer = steer;
   msg.gear = current_gear;
   msg.turn_mask   = (left_blinker ? 0x01 : 0) | (right_blinker ? 0x02 : 0) | (hazard ? 0x04 : 0);
   msg.control_flags = (reverse ? 0x01 : 0) | (manual_gear ? 0x02 : 0);
 
-  // Send via new Carla UE5 API
+  // Send via Carla UE5 API
   if (AreClientsListening())
   {
     TArray<uint8> Buffer;
@@ -176,4 +180,32 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
         TArrayView<uint8>(Buffer),
         FCarlaEngine::GetFrameCounter());
   }
+}
+
+void AVehicleStatusSensor::SetVelocityInfo(const AActor* VehicleActor)
+{
+  if (!VehicleActor) return;
+
+  // World linear velocity (cm/s)
+  const FVector WorldVel_cmps = VehicleActor->GetVelocity();
+
+  // Convert to m/s, then rotate into local space
+  const FQuat InvRot = VehicleActor->GetActorTransform().GetRotation().Inverse();
+  VelocityInfo.LocalVelocity = InvRot.RotateVector(CmpsToMps(WorldVel_cmps));
+
+  // Physics angular velocity (rad/s, world space)
+  FVector WorldAngVel = FVector::ZeroVector;
+  if (UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(VehicleActor->GetRootComponent()))
+  {
+    if (RootPrim->IsSimulatingPhysics())
+    {
+      WorldAngVel = RootPrim->GetPhysicsAngularVelocityInRadians();
+    }
+  }
+
+  // Rotate into local space
+  VelocityInfo.LocalAngularVelocity = InvRot.RotateVector(WorldAngVel);
+
+  // Convert angular velocity vector into a Rotator for convenience
+  VelocityInfo.LocalRotationRate = VelocityInfo.LocalAngularVelocity.Rotation();
 }

@@ -7,6 +7,33 @@
 #include "Sensor/Sensor.h"
 #include "VehicleStatusSensor.generated.h"
 
+USTRUCT(BlueprintType)
+struct FVelocityStatus
+{
+	GENERATED_BODY()
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
+	FVector LocalVelocity;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
+	FRotator LocalRotationRate;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
+	FVector LocalAngularVelocity;
+
+	FVelocityStatus()
+		: LocalVelocity(FVector::ZeroVector)
+		, LocalRotationRate(FRotator::ZeroRotator)
+		, LocalAngularVelocity(FVector::ZeroVector)
+	{
+	}
+
+	float GetSpeed() const
+	{
+		return LocalVelocity.Size();
+	}
+};
+
 /**
  * 
  */
@@ -35,11 +62,17 @@ private:
 	// Cached parent vehicle
 	TWeakObjectPtr<AActor> Parent;
 	TWeakObjectPtr<ACarlaWheeledVehicle> Vehicle; // AWheeledVehicle
+	FVelocityStatus VelocityInfo;
 
 	// Helpers
 	bool ResolveVehicle();
 	void CollectAndStream(float DeltaSeconds);
+	void SetVelocityInfo(const AActor* VehicleActor);
 
 	// Scale UE velocity from cm/s to m/s
-	static inline float CmpsToMps(float v_cmps) { return v_cmps * 0.01f; }
+	template<typename T>
+	static FORCEINLINE T CmpsToMps(const T& v_cmps)
+	{
+		return v_cmps * 0.01f;
+	}
 };
