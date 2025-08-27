@@ -1029,55 +1029,45 @@ void ROS2::ProcessDataFromStatusSensor(
   // TODO: Verify whether the velocity data is in World or Vehicle frame
   _autoware_publisher->SetVelocity(data.GetVelX(), data.GetVelY(), 0.0f /* TODO: Add heading rate */);
 
-  // TODO: Check if steering should be set reversed
-  _autoware_publisher->SetSteering(data.GetSteer());
+  // TODO: Check if steering should be set reversed (it is set reversed because control had to be reversed (this is an educated guess))
+  _autoware_publisher->SetSteering(-data.GetSteer());
 
   // TODO: Add logic to use the input of control mode and base don that set output
+  // NOTE: Control mode command is a service, so no easy way to get it as of now (27.08.2025)
   _autoware_publisher->SetControlMode(ControlMode::AUTONOMOUS);
 
-  // TODO: Verify what is the incoming gear from data.GetGear()
+  // TODO: Verify what is the incoming gear from data.GetGear() and whether is_reverse should be used here
   _autoware_publisher->SetGear(Gear::NONE);
-  if (is_reverse) {
-    switch (data.GetGear()) {
-      case 1:
-        _autoware_publisher->SetGear(Gear::REVERSE);
-        break;
-      case 2:
-        _autoware_publisher->SetGear(Gear::REVERSE_2);
-        break;
-    }
-  } else {
-    switch (data.GetGear()) {
-      case 1:
-        _autoware_publisher->SetGear(Gear::DRIVE);
-        break;
+  switch (data.GetGear()) {
+    #define CASE(GEAR_VALUE, GEAR_ENUM)          \
+      case GEAR_VALUE:                           \
+        _autoware_publisher->SetGear(GEAR_ENUM); \
+        break;                                   \
+        static_assert(true, "")
 
-#define CASE(DRIVE_GEAR)                                    \
-  case DRIVE_GEAR:                                          \
-    _autoware_publisher->SetGear(Gear::DRIVE_##DRIVE_GEAR); \
-    break;                                                  \
-    static_assert(true, "")
+    CASE(-2,  Gear::REVERSE_2);
+    CASE(-1,  Gear::REVERSE  );
+    CASE( 0,  Gear::NEUTRAL  );
+    CASE( 1,  Gear::DRIVE    );
+    CASE( 2,  Gear::DRIVE_2  );
+    CASE( 3,  Gear::DRIVE_3  );
+    CASE( 4,  Gear::DRIVE_4  );
+    CASE( 5,  Gear::DRIVE_5  );
+    CASE( 6,  Gear::DRIVE_6  );
+    CASE( 7,  Gear::DRIVE_7  );
+    CASE( 8,  Gear::DRIVE_8  );
+    CASE( 9,  Gear::DRIVE_9  );
+    CASE( 10, Gear::DRIVE_10 );
+    CASE( 11, Gear::DRIVE_11 );
+    CASE( 12, Gear::DRIVE_12 );
+    CASE( 13, Gear::DRIVE_13 );
+    CASE( 14, Gear::DRIVE_14 );
+    CASE( 15, Gear::DRIVE_15 );
+    CASE( 16, Gear::DRIVE_16 );
+    CASE( 17, Gear::DRIVE_17 );
+    CASE( 18, Gear::DRIVE_18 );
 
-      CASE(2);
-      CASE(3);
-      CASE(4);
-      CASE(5);
-      CASE(6);
-      CASE(7);
-      CASE(8);
-      CASE(9);
-      CASE(10);
-      CASE(11);
-      CASE(12);
-      CASE(13);
-      CASE(14);
-      CASE(15);
-      CASE(16);
-      CASE(17);
-      CASE(18);
-
-#undef CASE
-    }
+    #undef CASE
   }
 
   // Turn indicators
