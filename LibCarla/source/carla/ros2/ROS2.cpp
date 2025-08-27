@@ -1026,8 +1026,8 @@ void ROS2::ProcessDataFromStatusSensor(
   const bool is_right_blinker_on = data.GetTurnMask() & right_blinker_mask;
   const bool is_hazard_lights_on = data.GetTurnMask() & hazard_lights_mask;
 
-  // TODO: Verify whether the velocity data is in World or Vehicle frame
-  _autoware_publisher->SetVelocity(data.GetVelX(), data.GetVelY(), 0.0f /* TODO: Add heading rate */);
+  // TODO: Verify whether any of the fields should be inverted
+  _autoware_publisher->SetVelocity(data.GetVelX(), -data.GetVelY(), data.GetAngVelZ());
 
   // TODO: Check if steering should be set reversed (it is set reversed because control had to be reversed (this is an educated guess))
   _autoware_publisher->SetSteering(-data.GetSteer());
@@ -1094,19 +1094,25 @@ void ROS2::ProcessDataFromStatusSensor(
   if constexpr (false) {
     std::cerr << "========== NEW STATUS ==========" << '\n'
               << "    RAW DATA:" << '\n'
-              << "Timestamp: " << data.GetTimestamp() << '\n'
-              << "Speed: " << data.GetSpeed() << '\n'
-              << "VelX: " << data.GetVelX() << '\n'
-              << "VelY: " << data.GetVelY() << '\n'
-              << "VelZ: " << data.GetVelZ() << '\n'
-              << "Steering: " << data.GetSteer() << '\n'
-              << "Gear: " << data.GetGear() << '\n'
-              << "Turn mask: " << data.GetTurnMask() << '\n'
+              << "Timestamp: "     << data.GetTimestamp() << '\n'
+              << "Speed: "         << data.GetSpeed() << '\n'
+              << "VelX: "          << data.GetVelX() << '\n'
+              << "VelY: "          << data.GetVelY() << '\n'
+              << "VelZ: "          << data.GetVelZ() << '\n'
+              << "AngVelX: "       << data.GetAngVelX() << '\n'
+              << "AngVelY: "       << data.GetAngVelY() << '\n'
+              << "AngVelZ: "       << data.GetAngVelZ() << '\n'
+              << "RotrPitch: "     << data.GetRotrPitch() << '\n'
+              << "RotrYaw: "       << data.GetRotrYaw() << '\n'
+              << "RotrRoll: "      << data.GetRotrRoll() << '\n'
+              << "Steering: "      << data.GetSteer() << '\n'
+              << "Gear: "          << data.GetGear() << '\n'
+              << "Turn mask: "     << data.GetTurnMask() << '\n'
               << "Control flags: " << data.GetControlFlags() << '\n'
               << "    PROCESSED:" << '\n'
-              << "Is reverse: " << is_reverse << '\n'
-              << "Is manual gear: " << is_manual_gear << '\n'
-              << "Is left blinker on: " << is_left_blinker_on << '\n'
+              << "Is reverse: "          << is_reverse << '\n'
+              << "Is manual gear: "      << is_manual_gear << '\n'
+              << "Is left blinker on: "  << is_left_blinker_on << '\n'
               << "Is right blinker on: " << is_right_blinker_on << '\n'
               << "Is hazard lights on: " << is_hazard_lights_on << '\n'
               << std::flush;
