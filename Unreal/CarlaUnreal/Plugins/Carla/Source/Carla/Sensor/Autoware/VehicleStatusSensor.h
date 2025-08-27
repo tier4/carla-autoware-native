@@ -8,7 +8,7 @@
 #include "VehicleStatusSensor.generated.h"
 
 USTRUCT(BlueprintType)
-struct FVelocityStatus
+struct FVelocityInfo
 {
 	GENERATED_BODY()
 	
@@ -21,7 +21,7 @@ struct FVelocityStatus
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
 	FVector LocalAngularVelocity;
 
-	FVelocityStatus()
+	FVelocityInfo()
 		: LocalVelocity(FVector::ZeroVector)
 		, LocalRotationRate(FRotator::ZeroRotator)
 		, LocalAngularVelocity(FVector::ZeroVector)
@@ -62,7 +62,7 @@ private:
 	// Cached parent vehicle
 	TWeakObjectPtr<AActor> Parent;
 	TWeakObjectPtr<ACarlaWheeledVehicle> Vehicle; // AWheeledVehicle
-	FVelocityStatus VelocityInfo;
+	FVelocityInfo VelocityInfo;
 
 	// Helpers
 	bool ResolveVehicle();
