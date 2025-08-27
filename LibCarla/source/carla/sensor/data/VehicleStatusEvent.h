@@ -34,7 +34,6 @@ namespace data {
     float GetRotrYaw() const { return _parsed.rotr_yaw; } // local
     float GetRotrRoll() const { return _parsed.rotr_roll; } // local
     
-
     float GetSteer() const { return _parsed.steer; }
     int32_t GetGear() const { return _parsed.gear; }
     uint8_t GetTurnMask() const { return _parsed.turn_mask; }
