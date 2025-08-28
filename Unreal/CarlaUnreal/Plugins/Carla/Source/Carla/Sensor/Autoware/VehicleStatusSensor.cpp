@@ -182,9 +182,6 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   Buffer.SetNumUninitialized(sizeof(Packed));
   FMemory::Memcpy(Buffer.GetData(), &msg, sizeof(Packed));
 
-  // Convert to std::vector<uint8_t>
-  std::vector<uint8_t> Raw(Buffer.GetData(), Buffer.GetData() + Buffer.Num());
-
   ASensor::SendDataToClient(
       *this,
       TArrayView<uint8>(Buffer),
@@ -195,6 +192,9 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   auto ROS2 = carla::ros2::ROS2::GetInstance();
   if (ROS2->IsEnabled())
   {
+    // Convert to std::vector<uint8_t>
+    std::vector<uint8_t> Raw(Buffer.GetData(), Buffer.GetData() + Buffer.Num());
+    
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
     ROS2->ProcessDataFromStatusSensor(
         0, StreamId, GetActorTransform(), Raw, this);
