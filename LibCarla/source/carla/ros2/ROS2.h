@@ -157,19 +157,19 @@ class ROS2
       AActor *second_actor,
       float distance,
       void *actor = nullptr);
-void ProcessDataFromCollisionSensor(
-    uint64_t sensor_type,
-    carla::streaming::detail::stream_id_type stream_id,
-    const carla::geom::Transform sensor_transform,
-    uint32_t other_actor,
-    carla::geom::Vector3D impulse,
-    void* actor);
-void ProcessDataFromStatusSensor(
-    uint64_t sensor_type,
-    carla::streaming::detail::stream_id_type stream_id,
-    const carla::geom::Transform sensor_transform,
-    const carla::sensor::data::VehicleStatusEvent &data,
-    void *actor);
+  void ProcessDataFromCollisionSensor(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      uint32_t other_actor,
+      carla::geom::Vector3D impulse,
+      void* actor);
+  void ProcessDataFromStatusSensor(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      const std::vector<uint8_t> vec,
+      void *actor);
 
     uint32_t GetDomainId() const noexcept { return _domain_id; }
 

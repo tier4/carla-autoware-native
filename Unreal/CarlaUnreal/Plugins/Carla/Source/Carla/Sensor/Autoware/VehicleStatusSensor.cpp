@@ -172,18 +172,35 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   msg.turn_mask   = (left_blinker ? 0x01 : 0) | (right_blinker ? 0x02 : 0) | (hazard ? 0x04 : 0);
   msg.control_flags = (reverse ? 0x01 : 0) | (manual_gear ? 0x02 : 0);
 
-  // Send via Carla UE5 API
-  if (AreClientsListening())
+  if (!AreClientsListening())
   {
-    TArray<uint8> Buffer;
-    Buffer.SetNumUninitialized(sizeof(Packed));
-    FMemory::Memcpy(Buffer.GetData(), &msg, sizeof(Packed));
-
-    ASensor::SendDataToClient(
-        *this,
-        TArrayView<uint8>(Buffer),
-        FCarlaEngine::GetFrameCounter());
+    return;
   }
+
+  // Send via Carla UE5 API
+  TArray<uint8> Buffer;
+  Buffer.SetNumUninitialized(sizeof(Packed));
+  FMemory::Memcpy(Buffer.GetData(), &msg, sizeof(Packed));
+
+  // Convert to std::vector<uint8_t>
+  std::vector<uint8_t> Raw(Buffer.GetData(), Buffer.GetData() + Buffer.Num());
+
+  ASensor::SendDataToClient(
+      *this,
+      TArrayView<uint8>(Buffer),
+      FCarlaEngine::GetFrameCounter());
+
+  // ROS2 forwarding
+#if defined(WITH_ROS2)
+  auto ROS2 = carla::ros2::ROS2::GetInstance();
+  if (ROS2->IsEnabled())
+  {
+    auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
+    ROS2->ProcessDataFromStatusSensor(
+        0, StreamId, GetActorTransform(), Raw, this);
+  }
+#endif
+  
 }
 
 void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)

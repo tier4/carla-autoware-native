@@ -13,11 +13,10 @@ namespace data {
     using Serializer = s11n::VehicleStatusSerializer;
     friend Serializer;
 
+  public:
     explicit VehicleStatusEvent(const RawData &data)
       : Super(data),
-        _parsed(Serializer::DeserializeRawData(data)) {}
-
-  public:
+      _parsed(Serializer::DeserializeRawData(data)) {}
 
     double GetTimestamp() const { return _parsed.timestamp; }
 

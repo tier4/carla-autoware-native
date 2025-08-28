@@ -999,7 +999,7 @@ void ROS2::ProcessDataFromStatusSensor(
     uint64_t sensor_type,
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
-    const carla::sensor::data::VehicleStatusEvent &data,
+    const std::vector<uint8_t> vec,
     void *actor)
 {
   // This callback is only for the Ego vehicle
@@ -1011,6 +1011,15 @@ void ROS2::ProcessDataFromStatusSensor(
     return;
   }
 
+  // Construct a Buffer from raw data
+  carla::Buffer buffer(vec.data(), vec.size());
+
+  // Now construct RawData from Buffer
+  carla::sensor::RawData raw(std::move(buffer));
+  
+  // Create a matching struct of VehicleStatusEvent
+  carla::sensor::data::VehicleStatusEvent event(raw);
+
   constexpr uint8_t reverse_mask     = 0b00000001;
   constexpr uint8_t manual_gear_mask = 0b00000010;
 
@@ -1019,18 +1028,18 @@ void ROS2::ProcessDataFromStatusSensor(
   constexpr uint8_t hazard_lights_mask = 0b00000100;
 
   // Decode data
-  const bool is_reverse = data.GetControlFlags() & reverse_mask;
-  const bool is_manual_gear = data.GetControlFlags() & manual_gear_mask;
+  const bool is_reverse = event.GetControlFlags() & reverse_mask;
+  const bool is_manual_gear = event.GetControlFlags() & manual_gear_mask;
 
-  const bool is_left_blinker_on = data.GetTurnMask() & left_blinker_mask;
-  const bool is_right_blinker_on = data.GetTurnMask() & right_blinker_mask;
-  const bool is_hazard_lights_on = data.GetTurnMask() & hazard_lights_mask;
+  const bool is_left_blinker_on = event.GetTurnMask() & left_blinker_mask;
+  const bool is_right_blinker_on = event.GetTurnMask() & right_blinker_mask;
+  const bool is_hazard_lights_on = event.GetTurnMask() & hazard_lights_mask;
 
   // TODO: Verify whether any of the fields should be inverted
-  _autoware_publisher->SetVelocity(data.GetVelX(), -data.GetVelY(), data.GetAngVelZ());
+  _autoware_publisher->SetVelocity(event.GetVelX(), -event.GetVelY(), event.GetAngVelZ());
 
   // TODO: Check if steering should be set reversed (it is set reversed because control had to be reversed (this is an educated guess))
-  _autoware_publisher->SetSteering(-data.GetSteer());
+  _autoware_publisher->SetSteering(-event.GetSteer());
 
   // TODO: Add logic to use the input of control mode and base don that set output
   // NOTE: Control mode command is a service, so no easy way to get it as of now (27.08.2025)
@@ -1038,7 +1047,7 @@ void ROS2::ProcessDataFromStatusSensor(
 
   // TODO: Verify what is the incoming gear from data.GetGear() and whether is_reverse should be used here
   _autoware_publisher->SetGear(Gear::NONE);
-  switch (data.GetGear()) {
+  switch (event.GetGear()) {
     #define CASE(GEAR_VALUE, GEAR_ENUM)          \
       case GEAR_VALUE:                           \
         _autoware_publisher->SetGear(GEAR_ENUM); \
@@ -1087,28 +1096,28 @@ void ROS2::ProcessDataFromStatusSensor(
 
   _autoware_publisher->SetHazardLights(is_hazard_lights_on);
 
-  const auto [seconds, nanoseconds] = Carla2RosTime(data.GetTimestamp());
+  const auto [seconds, nanoseconds] = Carla2RosTime(event.GetTimestamp());
   _autoware_publisher->Publish(seconds, nanoseconds);
 
   // Debug
   if constexpr (false) {
     std::cerr << "========== NEW STATUS ==========" << '\n'
               << "    RAW DATA:" << '\n'
-              << "Timestamp: "     << data.GetTimestamp() << '\n'
-              << "Speed: "         << data.GetSpeed() << '\n'
-              << "VelX: "          << data.GetVelX() << '\n'
-              << "VelY: "          << data.GetVelY() << '\n'
-              << "VelZ: "          << data.GetVelZ() << '\n'
-              << "AngVelX: "       << data.GetAngVelX() << '\n'
-              << "AngVelY: "       << data.GetAngVelY() << '\n'
-              << "AngVelZ: "       << data.GetAngVelZ() << '\n'
-              << "RotrPitch: "     << data.GetRotrPitch() << '\n'
-              << "RotrYaw: "       << data.GetRotrYaw() << '\n'
-              << "RotrRoll: "      << data.GetRotrRoll() << '\n'
-              << "Steering: "      << data.GetSteer() << '\n'
-              << "Gear: "          << data.GetGear() << '\n'
-              << "Turn mask: "     << data.GetTurnMask() << '\n'
-              << "Control flags: " << data.GetControlFlags() << '\n'
+              << "Timestamp: "     << event.GetTimestamp() << '\n'
+              << "Speed: "         << event.GetSpeed() << '\n'
+              << "VelX: "          << event.GetVelX() << '\n'
+              << "VelY: "          << event.GetVelY() << '\n'
+              << "VelZ: "          << event.GetVelZ() << '\n'
+              << "AngVelX: "       << event.GetAngVelX() << '\n'
+              << "AngVelY: "       << event.GetAngVelY() << '\n'
+              << "AngVelZ: "       << event.GetAngVelZ() << '\n'
+              << "RotrPitch: "     << event.GetRotrPitch() << '\n'
+              << "RotrYaw: "       << event.GetRotrYaw() << '\n'
+              << "RotrRoll: "      << event.GetRotrRoll() << '\n'
+              << "Steering: "      << event.GetSteer() << '\n'
+              << "Gear: "          << event.GetGear() << '\n'
+              << "Turn mask: "     << event.GetTurnMask() << '\n'
+              << "Control flags: " << event.GetControlFlags() << '\n'
               << "    PROCESSED:" << '\n'
               << "Is reverse: "          << is_reverse << '\n'
               << "Is manual gear: "      << is_manual_gear << '\n'
