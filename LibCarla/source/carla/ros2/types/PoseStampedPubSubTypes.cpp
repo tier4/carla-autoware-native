@@ -136,11 +136,11 @@ namespace geometry_msgs {
                 InstanceHandle_t* handle,
                 bool force_md5)
         {
-            if (!m_isGetKeyDefined || !data || !handle)
+            if (!m_isGetKeyDefined)
             {
                 return false;
             }
- 
+
             PoseStamped* p_type = static_cast<PoseStamped*>(data);
 
             // Object that manages the raw buffer.
@@ -150,20 +150,22 @@ namespace geometry_msgs {
             // Object that serializes the data.
             eprosima::fastcdr::Cdr ser(fastbuffer, eprosima::fastcdr::Cdr::BIG_ENDIANNESS);
             p_type->serializeKey(ser);
-
-            const size_t serialized_len = ser.getSerializedDataLength();
-
             if (force_md5 || PoseStamped::getKeyMaxCdrSerializedSize() > 16)
             {
                 m_md5.init();
-                m_md5.update(m_keyBuffer, static_cast<unsigned int>(serialized_len));
+                m_md5.update(m_keyBuffer, static_cast<unsigned int>(ser.getSerializedDataLength()));
                 m_md5.finalize();
-                std::memcpy(handle->value, m_md5.digest, 16);
+                for (uint8_t i = 0; i < 16; ++i)
+                {
+                    handle->value[i] = m_md5.digest[i];
+                }
             }
             else
             {
-                std::memset(handle->value, 0, 16); // zero-pad first
-                std::memcpy(handle->value, m_keyBuffer, std::min<size_t>(16, serialized_len));
+                for (uint8_t i = 0; i < 16; ++i)
+                {
+                    handle->value[i] = m_keyBuffer[i];
+                }
             }
             return true;
         }
