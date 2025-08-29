@@ -7,6 +7,23 @@
 #include "Sensor/Sensor.h"
 #include "VehicleStatusSensor.generated.h"
 
+#pragma pack(push, 1)
+struct FVehicleStatusMessage
+{
+	double Timestamp;
+	float SpeedMps;
+	FVector LocalVelocity;     // X, Y, Z
+	FVector LocalAngularVel;   // X, Y, Z
+	FRotator LocalRotationRate;
+	float Steer;
+	int32 Gear;
+	uint8 TurnMask;
+	uint8 ControlFlags;
+	uint8 _Pad0 = 0;
+	uint8 _Pad1 = 0;
+};
+#pragma pack(pop)
+
 USTRUCT(BlueprintType)
 struct FVelocityInfo
 {
@@ -51,7 +68,6 @@ public:
 	// Called by Carla’s spawning pipeline with user attributes
 	virtual void Set(const FActorDescription &ActorDescription) override;
 	
-	// virtual void TickActor(float DeltaTime, ELevelTick TickType, FActorTickFunction& ThisTickFunction) override; //todo might need to change into this tick if PostPhysTick() is failing
 	virtual void PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds) override;
 
 protected:
@@ -68,12 +84,15 @@ protected:
 
 private:
 	// Cached parent vehicle
-	TWeakObjectPtr<AActor> Parent;
-	TWeakObjectPtr<ACarlaWheeledVehicle> Vehicle; // AWheeledVehicle
+	TWeakObjectPtr<ACarlaWheeledVehicle> OwningVehicle;
 	FVelocityInfo VelocityInfo;
 
+	// Find parent helpers
+	FTimerHandle CheckParentTimerHandle;
+	void CheckForParentVehicle();
+	TObjectPtr<ACarlaWheeledVehicle> FindAttachmentParentVehicle() const;
+
 	// Helpers
-	bool ResolveVehicle();
 	void CollectAndStream(float DeltaSeconds);
 	void SetVelocityInfoToLocal(const AActor* VehicleActor);
 

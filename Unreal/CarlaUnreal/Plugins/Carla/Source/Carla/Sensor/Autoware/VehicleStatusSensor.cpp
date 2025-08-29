@@ -50,9 +50,8 @@ void AVehicleStatusSensor::Set(const FActorDescription &ActorDescription)
 void AVehicleStatusSensor::BeginPlay()
 {
   Super::BeginPlay();
-  Parent = GetAttachParentActor();
-  ResolveVehicle();
-  UE_LOG(LogTemp, Warning, TEXT("VehicleStatusSensor spawned and attached!"));
+  UE_LOG(LogTemp, Warning, TEXT("VehicleStatusSensor spawned."));
+  GetWorldTimerManager().SetTimer(CheckParentTimerHandle, this, &AVehicleStatusSensor::CheckForParentVehicle, 0.1f, true);
 }
 
 void AVehicleStatusSensor::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
@@ -61,143 +60,90 @@ void AVehicleStatusSensor::PostPhysTick(UWorld* World, ELevelTick TickType, floa
   CollectAndStream(DeltaSeconds);
 }
 
-bool AVehicleStatusSensor::ResolveVehicle()
+void AVehicleStatusSensor::CheckForParentVehicle()
 {
-  if (!Parent.IsValid())
+  if (OwningVehicle = FindAttachmentParentVehicle(); OwningVehicle.IsValid())
   {
-    return false;
+    UE_LOG(LogTemp, Warning, TEXT("Attached to a vehicle: %s"), *OwningVehicle->GetName());
+    GetWorldTimerManager().ClearTimer(CheckParentTimerHandle);
   }
-  
-  if (Vehicle.IsValid())
-  {
-    return true;
-  }
+}
 
-  AActor* ParentActor = Parent.Get();
-  if (!ParentActor)
+TObjectPtr<ACarlaWheeledVehicle> AVehicleStatusSensor::FindAttachmentParentVehicle() const
+{
+  for (AActor* Parent = GetAttachParentActor(); Parent; Parent = Parent->GetAttachParentActor())
   {
-    ParentActor = GetAttachParentActor();
+    if (ACarlaWheeledVehicle* Vehicle = Cast<ACarlaWheeledVehicle>(Parent))
+    {
+      return Vehicle;
+    }
   }
-  
-  if (!ParentActor)
-  {
-    return false;
-  }
-
-  // Try both common vehicle types
-  if (auto* WV = Cast<ACarlaWheeledVehicle>(ParentActor))
-  {
-    Vehicle = WV;
-    return true;
-  }
-  
-  if (auto* CWV = Cast<ACarlaWheeledVehicle>(ParentActor))
-  {
-    Vehicle = CWV;
-    return true;
-  }
-
-  return false;
+  return nullptr;
 }
 
 void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
 {
-  if (!ResolveVehicle())
+  if (!OwningVehicle.IsValid())
   {
     return;
   }
-
-  AActor* VehicleActor = Vehicle.Get();
-  if (!VehicleActor)
+  
+  TObjectPtr<ACarlaWheeledVehicle> Vehicle = OwningVehicle.Get();
+  if (!IsValid(Vehicle))
   {
-    return;
+      return;
   }
 
   // Update cached velocity info
-  SetVelocityInfoToLocal(VehicleActor);
+  SetVelocityInfoToLocal(Vehicle);
 
-  // Steering & control
-  float steer = 0.0f;
-  bool manual_gear = false;
-  bool reverse = false;
-  int32 current_gear = 0;
+  // Pack into message
+  FVehicleStatusMessage Msg{};
+  Msg.Timestamp       = GetWorld()->GetTimeSeconds();
+  Msg.SpeedMps        = VelocityInfo.GetSpeed();
+  Msg.LocalVelocity   = VelocityInfo.Velocity;
+  Msg.LocalAngularVel = VelocityInfo.AngularVelocity;
+  Msg.LocalRotationRate = FRotator(
+      VelocityInfo.RotationRate.Pitch,
+      VelocityInfo.RotationRate.Yaw,
+      VelocityInfo.RotationRate.Roll
+  );
+  Msg.Steer = Vehicle->GetVehicleControl().Steer;
+  Msg.Gear  = Vehicle->GetVehicleCurrentGear();
 
-  if (auto* CWV = Cast<ACarlaWheeledVehicle>(VehicleActor))
-  {
-    const auto Control = CWV->GetVehicleControl();
-    steer       = Control.Steer;
-    reverse     = Control.bReverse;
-    manual_gear = Control.bManualGearShift;
-    current_gear = CWV->GetVehicleCurrentGear();
-  }
+  // Control flags
+  const auto& Control = Vehicle->GetVehicleControl();
+  Msg.ControlFlags = (Control.bReverse ? 0x01 : 0) | (Control.bManualGearShift ? 0x02 : 0);
 
-  // Lights / indicators
-  bool left_blinker = false, right_blinker = false, hazard = false;
-  if (auto* CWV = Cast<ACarlaWheeledVehicle>(VehicleActor)) {
-    const FVehicleLightState Lights = CWV->GetVehicleLightState();
-    left_blinker  = Lights.LeftBlinker;
-    right_blinker = Lights.RightBlinker;
-    hazard = left_blinker && right_blinker;
-  }
+  // Turn mask
+  const auto& Lights = Vehicle->GetVehicleLightState();
+  const bool bHazard = Lights.LeftBlinker && Lights.RightBlinker;
+  Msg.TurnMask = (Lights.LeftBlinker ? 0x01 : 0) | (Lights.RightBlinker ? 0x02 : 0) | (bHazard ? 0x04 : 0);
 
-  // Pack into message - matching LibCarla serializer
-  struct Packed
-  {
-    double timestamp;
-    float speed_mps;
-    float vel_x_mps, vel_y_mps, vel_z_mps; // local
-    float angVel_x_mps, angVel_y_mps, angVel_z_mps; // local
-    float rotr_pitch, rotr_yaw, rotr_roll; // local
-    float steer;
-    int32 gear;
-    uint8 turn_mask;
-    uint8 control_flags;
-    uint8 _pad0;
-    uint8 _pad1;
-  } PACKED;
-
-  Packed msg{};
-  msg.timestamp = GetWorld()->GetTimeSeconds();
-  msg.speed_mps = VelocityInfo.GetSpeed();
-  msg.vel_x_mps = VelocityInfo.Velocity.X;
-  msg.vel_y_mps = VelocityInfo.Velocity.Y;
-  msg.angVel_x_mps = VelocityInfo.AngularVelocity.X;
-  msg.angVel_y_mps = VelocityInfo.AngularVelocity.Y;
-  msg.angVel_z_mps = VelocityInfo.AngularVelocity.Z;
-  msg.rotr_pitch = VelocityInfo.RotationRate.Pitch;
-  msg.rotr_yaw = VelocityInfo.RotationRate.Yaw;
-  msg.rotr_roll = VelocityInfo.RotationRate.Roll;
-  msg.steer = steer;
-  msg.gear = current_gear;
-  msg.turn_mask   = (left_blinker ? 0x01 : 0) | (right_blinker ? 0x02 : 0) | (hazard ? 0x04 : 0);
-  msg.control_flags = (reverse ? 0x01 : 0) | (manual_gear ? 0x02 : 0);
-
-  if (!AreClientsListening())
-  {
-    return;
-  }
-
-  // Send via Carla UE5 API
+  // Serialize message
+  constexpr int32 MsgSize = sizeof(FVehicleStatusMessage);
   TArray<uint8> Buffer;
-  Buffer.SetNumUninitialized(sizeof(Packed));
-  FMemory::Memcpy(Buffer.GetData(), &msg, sizeof(Packed));
+  Buffer.SetNumUninitialized(MsgSize);
+  FMemory::Memcpy(Buffer.GetData(), &Msg, MsgSize);
 
-  ASensor::SendDataToClient(
-      *this,
-      TArrayView<uint8>(Buffer),
-      FCarlaEngine::GetFrameCounter());
+  // UE client streaming
+  if (AreClientsListening())
+  {
+      ASensor::SendDataToClient(
+          *this,
+          TArrayView<uint8>(Buffer),
+          FCarlaEngine::GetFrameCounter());
+  }
 
   // ROS2 forwarding
 #if defined(WITH_ROS2)
-  auto ROS2 = carla::ros2::ROS2::GetInstance();
-  if (ROS2->IsEnabled())
+  if (auto ROS2 = carla::ros2::ROS2::GetInstance(); ROS2->IsEnabled())
   {
-    // Convert to std::vector<uint8_t>
     std::vector<uint8_t> Raw(Buffer.GetData(), Buffer.GetData() + Buffer.Num());
-    
+
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
-    ROS2->ProcessDataFromStatusSensor(
-        0, StreamId, GetActorTransform(), Raw, this);
+    ROS2->ProcessDataFromStatusSensor(0, StreamId, GetActorTransform(), Raw, this);
+    UE_LOG(LogTemp, Warning, TEXT("ros2 data sent"));
   }
 #endif
   
