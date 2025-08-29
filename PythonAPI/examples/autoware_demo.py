@@ -23,6 +23,10 @@ def generate_vlp16_blueprint(blueprint_library):
 
     blueprint.set_attribute("sensor_tick", "0.1")
 
+    # ROS settings
+    blueprint.set_attribute("ros_name", "sensor_kit_base_link")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/lidar/top/pointcloud_raw")
+
     return blueprint
 
 def generate_traffic_light_camera_blueprint(blueprint_library):
@@ -40,6 +44,36 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
     blueprint.set_attribute("image_size_y", "1080")
     blueprint.set_attribute("sensor_tick", "0.1")
 
+    # ROS settings
+    blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_link")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/camera/traffic_light")
+
+    return blueprint
+
+def generate_imu_blueprint(blueprint_library):
+    """Generates a blueprint for IMU"""
+
+    blueprint = blueprint_library.find("sensor.other.imu")
+
+    blueprint.set_attribute("sensor_tick", f"{1.0 / 30.0}")
+
+    # ROS settings
+    blueprint.set_attribute("ros_name", "tamagawa/imu_link")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/imu/tamagawa/imu_raw")
+
+    return blueprint
+
+def generate_gnss_blueprint(blueprint_library):
+    """Generates a blueprint for GNSS"""
+
+    blueprint = blueprint_library.find("sensor.other.gnss")
+
+    blueprint.set_attribute("sensor_tick", "1.0")
+
+    # ROS settings
+    blueprint.set_attribute("ros_name", "gnss_link")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/gnss/pose")
+
     return blueprint
 
 def spawn_sensors(world, base_link):
@@ -55,8 +89,8 @@ def spawn_sensors(world, base_link):
     vlp16_blueprint = generate_vlp16_blueprint(blueprint_library)
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
-    imu_blueprint = blueprint_library.find("sensor.other.imu")
-    gnss_receiver_blueprint = blueprint_library.find("sensor.other.gnss")
+    imu_blueprint = generate_imu_blueprint(blueprint_library)
+    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library)
 
     sensor_kit_to_base_link_transform = carla.Transform(
         carla.Location(x=0.9, z=2.0),
@@ -119,9 +153,12 @@ def spawn_ego_with_sensors(world, spawn_point):
     blueprint_library = world.get_blueprint_library()
 
     ego_blueprint = blueprint_library.find("vehicle.lincoln.mkz")
-    empty_blueprint = blueprint_library.find("util.actor.empty")
+    ego_blueprint.set_attribute("role_name", "ego")
+    ego_blueprint.set_attribute("ros_topic_name", "/carla/input")  # Default Carla ROS input topic name
 
     ego = world.spawn_actor(ego_blueprint, spawn_point)
+
+    empty_blueprint = blueprint_library.find("util.actor.empty")
 
     # Transformation between vehicle pivot and projection of the rear
     # axis on the ground (base link) as measured in Unreal Editor
@@ -136,6 +173,18 @@ def spawn_ego_with_sensors(world, spawn_point):
 
     return ego
 
+def move_spectator(world, ego_vehicle):
+    spectator = world.get_spectator()
+
+    spectator_tf = ego_vehicle.get_transform()
+    spectator_offset = carla.Transform(carla.Location(x=-6.0, z=1.5))
+
+    spectator_with_offset_position = spectator_tf.transform(spectator_offset.location)
+
+    spectator_tf = carla.Transform(spectator_with_offset_position, spectator_tf.rotation)
+
+    spectator.set_transform(spectator_tf)
+
 def main():
     argparser = argparse.ArgumentParser(
         description='CARLA Automatic Control Client')
@@ -148,6 +197,9 @@ def main():
     argparser.add_argument(
         '-p', '--port', metavar='P', default=2000, type=int,
         help='TCP port of the host server (default: 2000)')
+    argparser.add_argument(
+        '--follow', action='store_true',
+        help='Follow Ego vehicle')
     args = argparser.parse_args()
 
     client = carla.Client(args.host, args.port)
@@ -155,8 +207,16 @@ def main():
     world = client.get_world()
 
     spawn_point = random.choice(world.get_map().get_spawn_points())
-    spawn_ego_with_sensors(world, spawn_point)
+    ego = spawn_ego_with_sensors(world, spawn_point)
+    move_spectator(world, ego)
+
     print('Ego spawned!')
+
+    if args.follow:
+        print('Kill this script before stopping simulation!')
+    while args.follow:
+        world.wait_for_tick()
+        move_spectator(world, ego)
 
 if __name__ == '__main__':
     main()
