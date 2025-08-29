@@ -26,7 +26,7 @@ class AutowareGNSSPublisher : public CarlaPublisher {
 
     bool Init(const TopicConfig& pose_config, const TopicConfig& pose_config_with_covariance_stamped);
     bool Publish();
-    void SetData(int32_t seconds, uint32_t nanoseconds, const double* position, const double* orientation);
+    void SetData(int32_t seconds, uint32_t nanoseconds, const float* position, const float* orientation);
     const char* type() const override { return "Autoware GNSS"; }
 
   private:
