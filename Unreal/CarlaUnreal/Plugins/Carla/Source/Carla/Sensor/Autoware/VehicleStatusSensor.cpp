@@ -51,7 +51,7 @@ void AVehicleStatusSensor::BeginPlay()
 {
   Super::BeginPlay();
   UE_LOG(LogTemp, Warning, TEXT("VehicleStatusSensor spawned."));
-  GetWorldTimerManager().SetTimer(CheckParentTimerHandle, this, &AVehicleStatusSensor::CheckForParentVehicle, 0.1f, true);
+  GetWorldTimerManager().SetTimer(CheckParentTimerHandle, this, &AVehicleStatusSensor::CheckForParentVehicle, 1.0f, true);
 }
 
 void AVehicleStatusSensor::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
@@ -96,32 +96,33 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
 
   // Update cached velocity info
   SetVelocityInfoToLocal(Vehicle);
-
-  // Pack into message
-  FVehicleStatusMessage Msg{};
-  Msg.Timestamp       = GetWorld()->GetTimeSeconds();
-  Msg.SpeedMps        = VelocityInfo.GetSpeed();
-  Msg.LocalVelocity   = VelocityInfo.Velocity;
-  Msg.LocalAngularVel = VelocityInfo.AngularVelocity;
-  Msg.LocalRotationRate = FRotator(
-      VelocityInfo.RotationRate.Pitch,
-      VelocityInfo.RotationRate.Yaw,
-      VelocityInfo.RotationRate.Roll
-  );
-  Msg.Steer = Vehicle->GetVehicleControl().Steer;
-  Msg.Gear  = Vehicle->GetVehicleCurrentGear();
+  
+  FVehicleStatusMessageRaw Msg{};
+  Msg.timestamp = GetWorld()->GetTimeSeconds();
+  Msg.speed_mps = VelocityInfo.GetSpeed();
+  Msg.vel_x_mps = VelocityInfo.Velocity.X;
+  Msg.vel_y_mps = VelocityInfo.Velocity.Y;
+  Msg.vel_z_mps = VelocityInfo.Velocity.Z;
+  Msg.angVel_x_mps = VelocityInfo.AngularVelocity.X;
+  Msg.angVel_y_mps = VelocityInfo.AngularVelocity.Y;
+  Msg.angVel_z_mps = VelocityInfo.AngularVelocity.Z;
+  Msg.rotr_pitch = VelocityInfo.RotationRate.Pitch;
+  Msg.rotr_yaw =VelocityInfo.RotationRate.Yaw;
+  Msg.rotr_roll =VelocityInfo.RotationRate.Roll;
+  Msg.steer = Vehicle->GetVehicleControl().Steer;
+  Msg.gear = Vehicle->GetVehicleCurrentGear();
 
   // Control flags
   const auto& Control = Vehicle->GetVehicleControl();
-  Msg.ControlFlags = (Control.bReverse ? 0x01 : 0) | (Control.bManualGearShift ? 0x02 : 0);
+  Msg.control_flags = (Control.bReverse ? 0x01 : 0) | (Control.bManualGearShift ? 0x02 : 0);
 
   // Turn mask
   const auto& Lights = Vehicle->GetVehicleLightState();
   const bool bHazard = Lights.LeftBlinker && Lights.RightBlinker;
-  Msg.TurnMask = (Lights.LeftBlinker ? 0x01 : 0) | (Lights.RightBlinker ? 0x02 : 0) | (bHazard ? 0x04 : 0);
+  Msg.turn_mask = (Lights.LeftBlinker ? 0x01 : 0) | (Lights.RightBlinker ? 0x02 : 0) | (bHazard ? 0x04 : 0);
 
   // Serialize message
-  constexpr int32 MsgSize = sizeof(FVehicleStatusMessage);
+  constexpr int32 MsgSize = sizeof(FVehicleStatusMessageRaw);
   TArray<uint8> Buffer;
   Buffer.SetNumUninitialized(MsgSize);
   FMemory::Memcpy(Buffer.GetData(), &Msg, MsgSize);

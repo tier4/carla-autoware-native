@@ -8,19 +8,17 @@
 #include "VehicleStatusSensor.generated.h"
 
 #pragma pack(push, 1)
-struct FVehicleStatusMessage
+struct FVehicleStatusMessageRaw
 {
-	double Timestamp;
-	float SpeedMps;
-	FVector LocalVelocity;     // X, Y, Z
-	FVector LocalAngularVel;   // X, Y, Z
-	FRotator LocalRotationRate;
-	float Steer;
-	int32 Gear;
-	uint8 TurnMask;
-	uint8 ControlFlags;
-	uint8 _Pad0 = 0;
-	uint8 _Pad1 = 0;
+	double timestamp;
+	float speed_mps;
+	float vel_x_mps, vel_y_mps, vel_z_mps; // local
+	float angVel_x_mps, angVel_y_mps, angVel_z_mps; // local
+	float rotr_pitch, rotr_yaw, rotr_roll; // local
+	float steer;
+	int32_t gear;
+	uint8_t turn_mask;
+	uint8_t control_flags;
 };
 #pragma pack(pop)
 
