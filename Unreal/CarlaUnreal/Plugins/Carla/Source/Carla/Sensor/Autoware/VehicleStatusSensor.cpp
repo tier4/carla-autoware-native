@@ -5,7 +5,7 @@
 
 #include "Carla/Game/CarlaEpisode.h"
 #include "Carla/Vehicle/CarlaWheeledVehicle.h"
-#include "Carla/Vehicle/VehicleLightState.h"  
+#include "Carla/Vehicle/VehicleLightState.h"
 #include "Engine/World.h"
 #include "Carla/Sensor/Sensor.h"
 #include "Carla/Game/CarlaEngine.h"
@@ -14,7 +14,7 @@ AVehicleStatusSensor::AVehicleStatusSensor(const FObjectInitializer& ObjectIniti
 {
   PrimaryActorTick.bCanEverTick = true;
   PrimaryActorTick.TickGroup = TG_PostPhysics;  // read ground-truth after physics update
-  
+
   TargetRateHz = FMath::Clamp(TargetRateHz, MinRateHz, MaxRateHz);
   PrimaryActorTick.TickInterval = 1.0f / TargetRateHz;
 }
@@ -87,7 +87,7 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   {
     return;
   }
-  
+
   TObjectPtr<ACarlaWheeledVehicle> Vehicle = OwningVehicle.Get();
   if (!IsValid(Vehicle))
   {
@@ -96,7 +96,7 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
 
   // Update cached velocity info
   SetVelocityInfoToLocal(Vehicle);
-  
+
   FVehicleStatusMessageRaw Msg{};
   Msg.timestamp = GetWorld()->GetTimeSeconds();
   Msg.speed_mps = VelocityInfo.GetSpeed();
@@ -143,11 +143,11 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
     std::vector<uint8_t> Raw(Buffer.GetData(), Buffer.GetData() + Buffer.Num());
 
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
-    ROS2->ProcessDataFromStatusSensor(0, StreamId, GetActorTransform(), Raw, this);
+    ROS2->ProcessDataFromStatusSensor(0, StreamId, GetActorTransform(), Raw, OwningVehicle.Get(), this);
     UE_LOG(LogTemp, Warning, TEXT("ros2 data sent"));
   }
 #endif
-  
+
 }
 
 void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)

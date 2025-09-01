@@ -169,6 +169,7 @@ class ROS2
       carla::streaming::detail::stream_id_type stream_id,
       const carla::geom::Transform sensor_transform,
       const std::vector<uint8_t> vec,
+      void *vehicle_actor,
       void *actor);
 
     uint32_t GetDomainId() const noexcept { return _domain_id; }

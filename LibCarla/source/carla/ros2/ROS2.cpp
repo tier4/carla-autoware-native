@@ -1000,14 +1000,17 @@ void ROS2::ProcessDataFromStatusSensor(
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
     const std::vector<uint8_t> vec,
+    void *vehicle_actor,
     void *actor)
 {
   // This callback is only for the Ego vehicle
-  if (!_autoware_controller || actor != _autoware_controller->GetVehicle()) {
+  if (!_autoware_controller || vehicle_actor != _autoware_controller->GetVehicle()) {
+    log_warning("There is no Ego vehicle or this Vehicle Status Sensor is attached to a different vehicle than Ego. This is not allowed - not publishing the data!");
     return;
   }
 
   if (!_autoware_publisher) {
+    log_error("Encountered an unexpected error when publishing Vehicle Status Sensor data (", __FILE__, ":", __LINE__, ")");
     return;
   }
 
@@ -1016,7 +1019,7 @@ void ROS2::ProcessDataFromStatusSensor(
 
   // Now construct RawData from Buffer
   carla::sensor::RawData raw(std::move(buffer));
-  
+
   // Create a matching struct of VehicleStatusEvent
   carla::sensor::data::VehicleStatusEvent event(raw);
 
