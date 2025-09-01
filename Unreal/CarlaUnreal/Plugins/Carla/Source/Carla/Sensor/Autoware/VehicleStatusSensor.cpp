@@ -100,15 +100,15 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   FVehicleStatusMessageRaw Msg{};
   Msg.timestamp = GetWorld()->GetTimeSeconds();
   Msg.speed_mps = VelocityInfo.GetSpeed();
-  Msg.vel_x_mps = VelocityInfo.Velocity.X;
-  Msg.vel_y_mps = VelocityInfo.Velocity.Y;
-  Msg.vel_z_mps = VelocityInfo.Velocity.Z;
-  Msg.angVel_x_mps = VelocityInfo.AngularVelocity.X;
-  Msg.angVel_y_mps = VelocityInfo.AngularVelocity.Y;
-  Msg.angVel_z_mps = VelocityInfo.AngularVelocity.Z;
-  Msg.rotr_pitch = VelocityInfo.RotationRate.Pitch;
-  Msg.rotr_yaw =VelocityInfo.RotationRate.Yaw;
-  Msg.rotr_roll =VelocityInfo.RotationRate.Roll;
+  Msg.vel_x_mps = static_cast<float>(VelocityInfo.Velocity.X);
+  Msg.vel_y_mps = static_cast<float>(VelocityInfo.Velocity.Y);
+  Msg.vel_z_mps = static_cast<float>(VelocityInfo.Velocity.Z);
+  Msg.angVel_x_mps = static_cast<float>(VelocityInfo.AngularVelocity.X);
+  Msg.angVel_y_mps = static_cast<float>(VelocityInfo.AngularVelocity.Y);
+  Msg.angVel_z_mps = static_cast<float>(VelocityInfo.AngularVelocity.Z);
+  Msg.rotr_pitch = static_cast<float>(VelocityInfo.RotationRate.Pitch);
+  Msg.rotr_yaw = static_cast<float>(VelocityInfo.RotationRate.Yaw);
+  Msg.rotr_roll = static_cast<float>(VelocityInfo.RotationRate.Roll);
   Msg.steer = Vehicle->GetVehicleControl().Steer;
   Msg.gear = Vehicle->GetVehicleCurrentGear();
 

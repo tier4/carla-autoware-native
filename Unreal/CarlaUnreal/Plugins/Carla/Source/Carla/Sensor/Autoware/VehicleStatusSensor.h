@@ -4,10 +4,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Sensor/Sensor.h"
+#include "Sensor/Sensor.h" 
 #include "VehicleStatusSensor.generated.h"
 
-#pragma pack(push, 1)
 struct FVehicleStatusMessageRaw
 {
 	double timestamp;
@@ -20,7 +19,6 @@ struct FVehicleStatusMessageRaw
 	uint8_t turn_mask;
 	uint8_t control_flags;
 };
-#pragma pack(pop)
 
 USTRUCT(BlueprintType)
 struct FVelocityInfo
