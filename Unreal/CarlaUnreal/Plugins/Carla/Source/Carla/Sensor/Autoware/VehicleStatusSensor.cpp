@@ -143,7 +143,22 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
     std::vector<uint8_t> Raw(Buffer.GetData(), Buffer.GetData() + Buffer.Num());
 
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
-    ROS2->ProcessDataFromStatusSensor(0, StreamId, GetActorTransform(), Raw, OwningVehicle.Get(), this);
+    ROS2->ProcessDataFromStatusSensor(
+      0,
+      StreamId,
+      GetActorTransform(),
+      Msg.timestamp,
+      Msg.speed_mps,
+      Msg.vel_x_mps, Msg.vel_y_mps, Msg.vel_z_mps,
+      Msg.angVel_x_mps, Msg.angVel_y_mps, Msg.angVel_z_mps,
+      Msg.rotr_pitch, Msg.rotr_yaw, Msg.rotr_roll,
+      Msg.steer,
+      Msg.gear,
+      Msg.turn_mask,
+      Msg.control_flags,
+      Vehicle,
+      this
+  );
     UE_LOG(LogTemp, Warning, TEXT("ros2 data sent"));
   }
 #endif
