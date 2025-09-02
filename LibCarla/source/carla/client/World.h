@@ -240,7 +240,7 @@ namespace client {
     bool GetPublishTF() const;
 
     /// Simple test method to verify binding
-    int GetTestValue() const { return 42; }
+    // int GetTestValue() const { return 42; }
 
   private:
 
