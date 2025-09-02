@@ -354,6 +354,14 @@ namespace ros2 {
       accumulated_size += header_data[header_idx];
     }
 
+    // Compute missing data from Cartesian data
+    const uint32_t time_stamp = seconds * static_cast<uint32_t>(1e+9) + nanoseconds;
+    for (auto & point : data_ex) {
+      point.distance = std::hypot(point.x, point.y, point.z);
+      point.azimuth = std::atan2(point.y, point.x);
+      point.time_stamp = time_stamp;
+    }
+
     std::vector<uint8_t> data_ex_raw;
     const std::size_t data_ex_raw_size = data_ex.size() * sizeof(PointEx);
     data_ex_raw.resize(data_ex_raw_size);
