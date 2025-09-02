@@ -97,6 +97,8 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   // Update cached velocity info
   SetVelocityInfoToLocal(Vehicle);
 
+  const auto max_steer_angle = FMath::DegreesToRadians(Vehicle->GetMaximumSteerAngle());
+
   FVehicleStatusMessageRaw Msg{};
   Msg.timestamp = GetWorld()->GetTimeSeconds();
   Msg.speed_mps = VelocityInfo.GetSpeed();
@@ -109,7 +111,7 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   Msg.rotr_pitch = static_cast<float>(VelocityInfo.RotationRate.Pitch);
   Msg.rotr_yaw = static_cast<float>(VelocityInfo.RotationRate.Yaw);
   Msg.rotr_roll = static_cast<float>(VelocityInfo.RotationRate.Roll);
-  Msg.steer = Vehicle->GetVehicleControl().Steer;
+  Msg.steer = Vehicle->GetVehicleControl().Steer * max_steer_angle;
   Msg.gear = Vehicle->GetVehicleCurrentGear();
 
   // Control flags
