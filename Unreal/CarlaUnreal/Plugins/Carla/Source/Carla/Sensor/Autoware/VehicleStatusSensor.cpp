@@ -193,5 +193,8 @@ void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)
   // Convert angular velocity vector into a Rotator for convenience
   VelocityInfo.RotationRate = VelocityInfo.AngularVelocity.Rotation();
 
-  UE_LOG(LogTemp, Log, TEXT("%s"), *VelocityInfo.ToString());
+  if (!VelocityInfo.Velocity.IsNearlyZero(0.1f))
+  {
+    UE_LOG(LogTemp, Log, TEXT("%s"), *VelocityInfo.ToString());
+  }
 }
