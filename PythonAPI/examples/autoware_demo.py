@@ -152,7 +152,8 @@ def spawn_sensors(world, base_link):
         vehicle_status_blueprint,
         vehicle_status_to_sensor_kit_transform,
         attach_to=sensor_kit)
-    vehicle_status_sensor.enable_for_ros()
+    # # NOTE: Enable for ros is not needed, because this sensor uses a global publisher
+    # vehicle_status_sensor.enable_for_ros()
 
 def spawn_ego_with_sensors(world, spawn_point):
     """Spawns a controllable vehicle with a basic sensor configuration
