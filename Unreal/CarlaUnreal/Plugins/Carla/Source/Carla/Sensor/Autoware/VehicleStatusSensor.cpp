@@ -167,7 +167,10 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
 
 void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)
 {
-  if (!VehicleActor) return;
+  if (!VehicleActor)
+  {
+    return;
+  }
 
   // World linear velocity (cm/s)
   const FVector WorldVel_cmps = VehicleActor->GetVelocity();
