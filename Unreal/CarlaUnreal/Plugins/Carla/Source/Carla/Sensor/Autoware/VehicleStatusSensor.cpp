@@ -161,7 +161,6 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   );
   }
 #endif
-
 }
 
 void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)
@@ -193,4 +192,6 @@ void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)
 
   // Convert angular velocity vector into a Rotator for convenience
   VelocityInfo.RotationRate = VelocityInfo.AngularVelocity.Rotation();
+
+  UE_LOG(LogTemp, Log, TEXT("%s"), *VelocityInfo.ToString());
 }

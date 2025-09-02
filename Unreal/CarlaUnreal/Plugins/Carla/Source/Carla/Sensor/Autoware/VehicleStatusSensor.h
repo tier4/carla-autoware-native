@@ -8,9 +8,9 @@
 #include "VehicleStatusSensor.generated.h"
 
 //todo: This mimics the same structure used in carla. It can be be replaced with carla::sensor::data::VehicleStatusEvent.
-// But it generates problems with serialization and data passing into ros2. I've tried plain struct to be passes, which didn't work either.
+// But it generates problems with serialization and data passing into ros2. I've tried plain struct to be passed, which didn't work either.
 // All data are passed by value in ROS2::ProcessDataFromStatusSensor. I'm leaving this struct since in the future it should be used and replace passing by value.
-#pragma pack(push, 1)
+// I'm not using pragma push and pop, since carla struct doesnt have it.
 struct FVehicleStatusMessageRaw
 {
 	double timestamp;
@@ -23,7 +23,6 @@ struct FVehicleStatusMessageRaw
 	uint8_t turn_mask;
 	uint8_t control_flags;
 };
-#pragma pack(pop)
 
 USTRUCT(BlueprintType)
 struct FVelocityInfo
@@ -45,10 +44,18 @@ struct FVelocityInfo
 		, AngularVelocity(FVector::ZeroVector)
 	{
 	}
-
+	
 	float GetSpeed() const
 	{
 		return Velocity.Size();
+	}
+	
+	FString ToString() const
+	{
+		return FString::Printf(TEXT("Velocity: %s | Angular Velocity: %s | Rotation Rate: %s"),
+			*Velocity.ToString(),
+			*AngularVelocity.ToString(),
+			*RotationRate.ToString());
 	}
 };
 
