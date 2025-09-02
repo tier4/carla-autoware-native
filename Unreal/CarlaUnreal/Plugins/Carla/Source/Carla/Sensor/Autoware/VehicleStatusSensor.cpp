@@ -142,8 +142,6 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
 #if defined(WITH_ROS2)
   if (auto ROS2 = carla::ros2::ROS2::GetInstance(); ROS2->IsEnabled())
   {
-    std::vector<uint8_t> Raw(Buffer.GetData(), Buffer.GetData() + Buffer.Num());
-
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
     ROS2->ProcessDataFromStatusSensor(
       0,
@@ -161,7 +159,6 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
       Vehicle,
       this
   );
-    UE_LOG(LogTemp, Warning, TEXT("ros2 data sent"));
   }
 #endif
 
