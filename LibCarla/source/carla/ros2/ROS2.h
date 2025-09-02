@@ -124,6 +124,9 @@ class ROS2
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
       const carla::geom::Transform sensor_transform,
+      uint32_t channel_count,
+      float upper_fov_limit,
+      float lower_fov_limit,
       carla::sensor::data::LidarData &data,
       void *actor = nullptr);
   void ProcessDataFromSemanticLidar(

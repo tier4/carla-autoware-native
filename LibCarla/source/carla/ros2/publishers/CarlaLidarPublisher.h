@@ -28,7 +28,7 @@ namespace ros2 {
       bool Publish();
       void SetData(const int32_t seconds, const uint32_t nanoseconds, const size_t height, const size_t width, float * data);
       void SetDataEx(const int32_t seconds, const uint32_t nanoseconds, const size_t height, const size_t width,
-                     float * data, const size_t header_size, uint32_t * header_data);
+                     float * data, const size_t header_size, uint32_t * header_data, const std::vector<float> & vertical_angles);
 
       const char* type() const override { return "lidar"; }
 
