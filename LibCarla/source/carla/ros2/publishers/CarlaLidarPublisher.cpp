@@ -335,6 +335,7 @@ namespace ros2 {
     }
 
     std::vector<PointEx> data_ex;
+    data_ex.reserve(height * width);
     for (auto it = data; it < data + height * width; it += 4) {
       auto & point = data_ex.emplace_back();
       point.x = *(it);
