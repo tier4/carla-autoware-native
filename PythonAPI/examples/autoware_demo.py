@@ -206,6 +206,11 @@ def main():
     client.set_timeout(60.0)
     world = client.get_world()
 
+    # Autoware will be publishing TF information based on the URDF files
+    # of the vehicle and sensor kit. Disable TF publishing in CARLA
+    # to avoid conflicts.
+    world.set_publish_tf(False)
+
     spawn_point = random.choice(world.get_map().get_spawn_points())
     ego = spawn_ego_with_sensors(world, spawn_point)
     move_spectator(world, ego)

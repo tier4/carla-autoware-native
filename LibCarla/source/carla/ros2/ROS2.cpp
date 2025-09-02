@@ -160,6 +160,10 @@ void ROS2::SetTimestamp(double timestamp) {
 #endif
 }
 
+void ROS2::SetPublishTF(bool publish_tf) {
+  _publish_tf = publish_tf;
+}
+
 void ROS2::AddActorRosName(void *actor, std::string ros_name) {
   _actor_ros_name.insert({actor, ros_name});
 }
@@ -697,7 +701,7 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
           publisher->Publish();
         }
-        if (sensors.second) {
+        if (sensors.second && _publish_tf) {
           std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
           publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
           publisher->Publish();
@@ -720,7 +724,7 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
           publisher->Publish();
         }
-        if (sensors.second) {
+        if (sensors.second && _publish_tf) {
           std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
           publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
           publisher->Publish();
@@ -736,7 +740,7 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetData(_seconds, _nanoseconds, (const int32_t*) buffer->data());
           publisher->Publish();
         }
-        if (sensors.second) {
+        if (sensors.second && _publish_tf) {
           std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
           publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
           publisher->Publish();
@@ -759,7 +763,7 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
           publisher->Publish();
         }
-        if (sensors.second) {
+        if (sensors.second && _publish_tf) {
           std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
           publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
           publisher->Publish();
@@ -786,7 +790,7 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
           publisher->Publish();
         }
-        if (sensors.second) {
+        if (sensors.second && _publish_tf) {
           std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
           publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
           publisher->Publish();
@@ -810,7 +814,7 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
           publisher->Publish();
         }
-        if (sensors.second) {
+        if (sensors.second && _publish_tf) {
           std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
           publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
           publisher->Publish();
@@ -833,7 +837,7 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
           publisher->Publish();
         }
-        if (sensors.second) {
+        if (sensors.second && _publish_tf) {
           std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
           publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
           publisher->Publish();
@@ -872,7 +876,7 @@ void ROS2::ProcessDataFromGNSS(
       autoware_publisher->Publish();
     }
   }
-  if (sensors.second) {
+  if (sensors.second && _publish_tf) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
@@ -894,7 +898,7 @@ void ROS2::ProcessDataFromIMU(
     publisher->SetData(_seconds, _nanoseconds, reinterpret_cast<float*>(&accelerometer), reinterpret_cast<float*>(&gyroscope), compass);
     publisher->Publish();
   }
-  if (sensors.second) {
+  if (sensors.second && _publish_tf) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
@@ -924,7 +928,7 @@ void ROS2::ProcessDataFromDVS(
     publisher->SetPointCloudData(1, elements * sizeof(carla::sensor::data::DVSEvent), elements, (const uint8_t*) (buffer->data() + carla::sensor::s11n::ImageSerializer::header_offset));
     publisher->Publish();
   }
-  if (sensors.second) {
+  if (sensors.second && _publish_tf) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
@@ -946,7 +950,7 @@ void ROS2::ProcessDataFromLidar(
     publisher->SetData(_seconds, _nanoseconds, height, width, (float*)data._points.data());
     publisher->Publish();
   }
-  if (sensors.second) {
+  if (sensors.second && _publish_tf) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
@@ -969,7 +973,7 @@ void ROS2::ProcessDataFromSemanticLidar(
     publisher->SetData(_seconds, _nanoseconds, 6, height, width, (float*)data._ser_points.data());
     publisher->Publish();
   }
-  if (sensors.second) {
+  if (sensors.second && _publish_tf) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
@@ -992,7 +996,7 @@ void ROS2::ProcessDataFromRadar(
     publisher->SetData(_seconds, _nanoseconds, height, width, elements, (const uint8_t*)data._detections.data());
     publisher->Publish();
   }
-  if (sensors.second) {
+  if (sensors.second && _publish_tf) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
@@ -1023,7 +1027,7 @@ void ROS2::ProcessDataFromCollisionSensor(
     publisher->SetData(_seconds, _nanoseconds, other_actor, impulse.x, impulse.y, impulse.z);
     publisher->Publish();
   }
-  if (sensors.second) {
+  if (sensors.second && _publish_tf) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
