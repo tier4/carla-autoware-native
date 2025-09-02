@@ -52,18 +52,34 @@ bool AutowareGNSSPublisher::Publish() {
     _impl->_pose_with_covariance_publisher.Publish();
 }
 
-void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const double* position_data, const double* orientation_data) {
+void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation) {
   geometry_msgs::msg::Pose pose;
 
-  // TODO: Verify whether this data layout is correct
-  pose.position().x(*position_data++);
-  pose.position().y(*position_data++);
-  pose.position().z(*position_data++);
+  /// @note: Copied from CarlaTransformPublisher
+  const float tx = *translation++;
+  const float ty = *translation++;
+  const float tz = *translation++;
 
-  pose.orientation().x(*orientation_data++);
-  pose.orientation().y(*orientation_data++);
-  pose.orientation().z(*orientation_data++);
-  pose.orientation().w(*orientation_data++);
+  const float rx = ((*rotation++) * -1.0f) * (M_PIf32 / 180.0f);
+  const float ry = ((*rotation++) * -1.0f) * (M_PIf32 / 180.0f);
+  const float rz = *rotation++ * (M_PIf32 / 180.0f);
+
+  const float cr = cosf(rz * 0.5f);
+  const float sr = sinf(rz * 0.5f);
+  const float cp = cosf(rx * 0.5f);
+  const float sp = sinf(rx * 0.5f);
+  const float cy = cosf(ry * 0.5f);
+  const float sy = sinf(ry * 0.5f);
+
+  // TODO: Verify whether this data layout is correct
+  pose.position().x(tx);
+  pose.position().y(-ty);
+  pose.position().z(tz);
+
+  pose.orientation().w(cr * cp * cy + sr * sp * sy);
+  pose.orientation().x(sr * cp * cy - cr * sp * sy);
+  pose.orientation().y(cr * sp * cy + sr * cp * sy);
+  pose.orientation().z(cr * cp * sy - sr * sp * cy);
 
   _impl->_pose_publisher.SetData(pose);
 

@@ -19,6 +19,7 @@
 #include "carla/sensor/s11n/SensorHeaderSerializer.h"
 
 #include "publishers/AutowarePublisher.h"
+#include "publishers/AutowareGNSSPublisher.h"
 #include "publishers/CarlaPublisher.h"
 #include "publishers/CarlaClockPublisher.h"
 #include "publishers/CarlaRGBCameraPublisher.h"
@@ -407,10 +408,36 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           ros_name += string_id;
           UpdateActorRosName(actor, ros_name);
         }
-        auto new_publisher = std::make_shared<CarlaGNSSPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        if (false) {  // TODO: Add some configurable switch whether the sensor is Autoware or Carla
+          auto new_publisher = std::make_shared<CarlaGNSSPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
+          if (new_publisher->Init(_domain_id)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
+        } else {
+          auto new_publisher = std::make_shared<AutowareGNSSPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
+          if (new_publisher->Init([this]{
+            TopicConfig config;
+            config.domain_id = _domain_id;
+            config.reliability_qos = ReliabilityQoS::RELIABLE;
+            config.durability_qos = DurabilityQoS::VOLATILE;
+            config.history_qos = HistoryQoS::KEEP_LAST;
+            config.history_qos_depth = 1;
+            config.suffix = "/pose";
+            return config;
+          }(), [this]{
+            TopicConfig config;
+            config.domain_id = _domain_id;
+            config.reliability_qos = ReliabilityQoS::RELIABLE;
+            config.durability_qos = DurabilityQoS::VOLATILE;
+            config.history_qos = HistoryQoS::KEEP_LAST;
+            config.history_qos_depth = 1;
+            config.suffix = "/pose_with_covariance";
+            return config;
+          }())) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
@@ -829,13 +856,18 @@ void ROS2::ProcessDataFromGNSS(
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
     const carla::geom::GeoLocation &data,
+    const carla::geom::Transform &sensor_world_transform,
     void *actor) {
   log_info("Sensor GnssSensor to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "geo.", data.latitude, data.longitude, data.altitude);
   auto sensors = GetOrCreateSensor(ESensors::GnssSensor, stream_id, actor);
   if (sensors.first) {
-    std::shared_ptr<CarlaGNSSPublisher> publisher = std::dynamic_pointer_cast<CarlaGNSSPublisher>(sensors.first);
-    publisher->SetData(_seconds, _nanoseconds, reinterpret_cast<const double*>(&data));
-    publisher->Publish();
+    if (std::shared_ptr<CarlaGNSSPublisher> carla_publisher = std::dynamic_pointer_cast<CarlaGNSSPublisher>(sensors.first)) {
+      carla_publisher->SetData(_seconds, _nanoseconds, reinterpret_cast<const double*>(&data));
+      carla_publisher->Publish();
+    } else if (const auto autoware_publisher = std::dynamic_pointer_cast<AutowareGNSSPublisher>(sensors.first)) {
+      autoware_publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_world_transform.location, (const float*)&sensor_world_transform.rotation);
+      autoware_publisher->Publish();
+    }
   }
   if (sensors.second) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);

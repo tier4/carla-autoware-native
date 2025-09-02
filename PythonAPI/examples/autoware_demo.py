@@ -72,7 +72,7 @@ def generate_gnss_blueprint(blueprint_library):
 
     # ROS settings
     blueprint.set_attribute("ros_name", "gnss_link")  # frame_id
-    blueprint.set_attribute("ros_topic_name", "/sensing/gnss/pose")
+    blueprint.set_attribute("ros_topic_name", "/sensing/gnss")
 
     return blueprint
 
