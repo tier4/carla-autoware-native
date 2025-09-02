@@ -1070,7 +1070,8 @@ void ROS2::ProcessDataFromStatusSensor(
   const bool is_hazard_lights_on = turn_mask & hazard_lights_mask;
 
   // TODO: Verify whether any of the fields should be inverted
-  _autoware_publisher->SetVelocity(vel_x_mps, -vel_y_mps, angVel_z_mps);
+  // Now all positive values mean forward and left (if going forward)
+  _autoware_publisher->SetVelocity(vel_x_mps, -vel_y_mps, -angVel_z_mps);
 
   // TODO: Check if steering should be set reversed (it is set reversed because control had to be reversed (this is an educated guess))
   _autoware_publisher->SetSteering(-steer);
