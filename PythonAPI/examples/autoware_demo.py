@@ -146,12 +146,10 @@ def spawn_sensors(world, base_link):
     gnss_receiver.enable_for_ros()
 
     # Spawn Vehicle Status Sensor
-    vehicle_status_to_sensor_kit_transform = carla.Transform(
-        carla.Location(x=0.0, z=0.5))
     vehicle_status_sensor = world.spawn_actor(
         vehicle_status_blueprint,
-        vehicle_status_to_sensor_kit_transform,
-        attach_to=sensor_kit)
+        carla.Transform(),
+        attach_to=base_link)  # Attach to base_link with no offset, because velocities should come from rear axle
     # # NOTE: Enable for ros is not needed, because this sensor uses a global publisher
     # vehicle_status_sensor.enable_for_ros()
 
