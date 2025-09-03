@@ -1142,7 +1142,7 @@ void ROS2::ProcessDataFromStatusSensor(
               << "RotrPitch: "     << data.rot_pitch << '\n'
               << "RotrYaw: "       << data.rot_yaw << '\n'
               << "RotrRoll: "      << data.rot_roll << '\n'
-              << "data.steering: "      << data.steer << '\n'
+              << "Steering: "      << data.steer << '\n'
               << "Gear: "          << data.gear << '\n'
               << "Turn mask: "     << data.turn_mask << '\n'
               << "Control flags: " << data.control_flags << '\n'
