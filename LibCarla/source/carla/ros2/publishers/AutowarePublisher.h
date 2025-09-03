@@ -12,6 +12,52 @@
 namespace carla {
 namespace ros2 {
 
+// https://github.com/autowarefoundation/autoware_msgs/blob/main/autoware_vehicle_msgs/msg/ControlModeReport.msg
+enum class ControlMode {
+  NO_COMMAND,
+  AUTONOMOUS,
+  AUTONOMOUS_STEER_ONLY,
+  AUTONOMOUS_VELOCITY_ONLY,
+  MANUAL,
+  DISENGAGED,
+  NOT_READY
+};
+
+// https://github.com/autowarefoundation/autoware_msgs/blob/main/autoware_vehicle_msgs/msg/GearReport.msg
+enum class Gear {
+  NONE,
+  NEUTRAL,
+  DRIVE,
+  DRIVE_2,
+  DRIVE_3,
+  DRIVE_4,
+  DRIVE_5,
+  DRIVE_6,
+  DRIVE_7,
+  DRIVE_8,
+  DRIVE_9,
+  DRIVE_10,
+  DRIVE_11,
+  DRIVE_12,
+  DRIVE_13,
+  DRIVE_14,
+  DRIVE_15,
+  DRIVE_16,
+  DRIVE_17,
+  DRIVE_18,
+  REVERSE,
+  REVERSE_2,
+  PARK,
+  LOW,
+  LOW_2
+};
+
+enum class TurnIndicatorsStatus {
+  OFF,
+  LEFT,
+  RIGHT
+};
+
 class AutowarePublisher
 {
 public:
@@ -19,10 +65,10 @@ public:
 
   void SetVelocity(const float longitudinal_velocity, const float lateral_velocity, const float heading_rate);
   void SetSteering(const float steering_tire_angle);
-  void SetControlMode(const uint8_t mode);
-  void SetGear(const uint8_t gear);
-  void SetTurnIndicators(const uint8_t turn_indicators);
-  void SetHazardLights(const uint8_t hazard_lights);
+  void SetControlMode(const ControlMode mode);
+  void SetGear(const Gear gear);
+  void SetTurnIndicators(const TurnIndicatorsStatus status);
+  void SetHazardLights(const bool hazard_lights);
 
   void Publish(const int32_t seconds, const uint32_t nanoseconds);
 
