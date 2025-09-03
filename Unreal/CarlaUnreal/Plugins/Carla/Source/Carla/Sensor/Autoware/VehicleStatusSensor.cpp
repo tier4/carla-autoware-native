@@ -119,9 +119,9 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
     static_cast<float>(VelocityInfo.AngularVelocity.X),
     static_cast<float>(VelocityInfo.AngularVelocity.Y),
     static_cast<float>(VelocityInfo.AngularVelocity.Z),
-    static_cast<float>(VelocityInfo.RotationRate.Pitch),
-    static_cast<float>(VelocityInfo.RotationRate.Yaw),
-    static_cast<float>(VelocityInfo.RotationRate.Roll),
+    static_cast<float>(Vehicle->GetActorRotation().Pitch),
+    static_cast<float>(Vehicle->GetActorRotation().Yaw),
+    static_cast<float>(Vehicle->GetActorRotation().Roll),
     static_cast<float>(Vehicle->GetVehicleControl().Steer * MaxSteerAngleInRadians),
     static_cast<int32_t>(Vehicle->GetVehicleCurrentGear()),
     static_cast<uint8_t>(TurnMask),
@@ -197,9 +197,4 @@ void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)
 
   // Convert angular velocity vector into a Rotator for convenience
   VelocityInfo.RotationRate = VelocityInfo.AngularVelocity.Rotation();
-
-  if (!VelocityInfo.Velocity.IsNearlyZero(0.1f))
-  {
-    UE_LOG(LogTemp, Log, TEXT("%s"), *VelocityInfo.ToString());
-  }
 }

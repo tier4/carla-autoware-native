@@ -17,17 +17,18 @@ struct FVelocityInfo
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
 	FVector Velocity;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
+	FVector AngularVelocity;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
 	FRotator RotationRate;
 	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
-	FVector AngularVelocity;
 
 	FVelocityInfo()
 		: Velocity(FVector::ZeroVector)
-		, RotationRate(FRotator::ZeroRotator)
 		, AngularVelocity(FVector::ZeroVector)
+		, RotationRate(FRotator::ZeroRotator)
 	{
 	}
 	
