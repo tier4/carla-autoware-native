@@ -937,15 +937,31 @@ void ROS2::ProcessDataFromLidar(
     uint64_t sensor_type,
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
+    uint32_t channel_count,
+    float upper_fov_limit,
+    float lower_fov_limit,
     carla::sensor::data::LidarData &data,
     void *actor) {
   log_info("Sensor Lidar to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "points.", data._points.size());
   auto sensors = GetOrCreateSensor(ESensors::RayCastLidar, stream_id, actor);
   if (sensors.first) {
     std::shared_ptr<CarlaLidarPublisher> publisher = std::dynamic_pointer_cast<CarlaLidarPublisher>(sensors.first);
+
+    // Convert to radians
+    upper_fov_limit = upper_fov_limit * M_PI / 180.0f;
+    lower_fov_limit = lower_fov_limit * M_PI / 180.0f;
+
+    std::vector<float> vertical_angles;
+    const float vertical_step = (upper_fov_limit - lower_fov_limit) / static_cast<float>(channel_count - 1U);
+    vertical_angles.reserve(channel_count);
+    for (uint32_t i = 0; i < channel_count; ++i) {
+      vertical_angles.push_back(upper_fov_limit - static_cast<float>(i) * vertical_step);
+    }
+
     size_t width = data._points.size();
     size_t height = 1;
-    publisher->SetData(_seconds, _nanoseconds, height, width, (float*)data._points.data());
+    publisher->SetDataEx(_seconds, _nanoseconds, height, width, (float*)data._points.data(),
+      data._header.size() - carla::sensor::data::LidarData::Index::SIZE, data._header.data() + carla::sensor::data::LidarData::Index::SIZE, vertical_angles);
     publisher->Publish();
   }
   if (sensors.second && _publish_tf) {
