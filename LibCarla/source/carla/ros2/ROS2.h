@@ -175,21 +175,6 @@ class ROS2
       const sensor::s11n::VehicleStatusData data,
       void *vehicle_actor,
       void *actor);
-  // void ProcessDataFromStatusSensor(
-  //     uint64_t sensor_type,
-  //     carla::streaming::detail::stream_id_type stream_id,
-  //     const carla::geom::Transform &sensor_transform,
-  //     double timestamp,
-  //     float speed_mps,
-  //     float vel_x_mps, float vel_y_mps, float vel_z_mps,
-  //     float angVel_x_mps, float angVel_y_mps, float angVel_z_mps,
-  //     float rotr_pitch, float rotr_yaw, float rotr_roll,
-  //     float steer,
-  //     int32_t gear,
-  //     uint8_t turn_mask,
-  //     uint8_t control_flags,
-  //     void *vehicle_actor,
-  //     void *actor);
 
     uint32_t GetDomainId() const noexcept { return _domain_id; }
 
