@@ -87,7 +87,7 @@ void ROS2::Enable(bool enable) {
   const auto topic_config = [this] {
     TopicConfig config;
     config.domain_id = _domain_id;
-    config.reliability_qos = ReliabilityQoS::BEST_EFFORT;
+    config.reliability_qos = ReliabilityQoS::RELIABLE;
     config.durability_qos = DurabilityQoS::VOLATILE;
     config.history_qos = HistoryQoS::KEEP_LAST;
     config.history_qos_depth = 1;

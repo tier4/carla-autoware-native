@@ -29,7 +29,7 @@ struct PublisherTraits;
 template <>
 struct PublisherTraits<autoware_vehicle_msgs::msg::VelocityReport> {
   using PubSub = autoware_vehicle_msgs::msg::VelocityReportPubSubType;
-  static constexpr const char* frame_id = "base_line";
+  static constexpr const char* frame_id = "base_link";
   static constexpr const char* topic = "/vehicle/status/velocity_status";
   static constexpr const char* human_name = "Autoware velocity report";
 };
@@ -37,7 +37,7 @@ struct PublisherTraits<autoware_vehicle_msgs::msg::VelocityReport> {
 template <>
 struct PublisherTraits<autoware_vehicle_msgs::msg::SteeringReport> {
   using PubSub = autoware_vehicle_msgs::msg::SteeringReportPubSubType;
-  static constexpr const char* frame_id = "";
+  static constexpr const char* frame_id = "base_link";
   static constexpr const char* topic = "/vehicle/status/steering_status";
   static constexpr const char* human_name = "Autoware steering report";
 };
@@ -45,7 +45,7 @@ struct PublisherTraits<autoware_vehicle_msgs::msg::SteeringReport> {
 template <>
 struct PublisherTraits<autoware_vehicle_msgs::msg::ControlModeReport> {
   using PubSub = autoware_vehicle_msgs::msg::ControlModeReportPubSubType;
-  static constexpr const char* frame_id = "";
+  static constexpr const char* frame_id = "base_link";
   static constexpr const char* topic = "/vehicle/status/control_mode";
   static constexpr const char* human_name = "Autoware control mode report";
 };
@@ -53,7 +53,7 @@ struct PublisherTraits<autoware_vehicle_msgs::msg::ControlModeReport> {
 template <>
 struct PublisherTraits<autoware_vehicle_msgs::msg::GearReport> {
   using PubSub = autoware_vehicle_msgs::msg::GearReportPubSubType;
-  static constexpr const char* frame_id = "";
+  static constexpr const char* frame_id = "base_link";
   static constexpr const char* topic = "/vehicle/status/gear_status";
   static constexpr const char* human_name = "Autoware gear report";
 };
@@ -61,7 +61,7 @@ struct PublisherTraits<autoware_vehicle_msgs::msg::GearReport> {
 template <>
 struct PublisherTraits<autoware_vehicle_msgs::msg::TurnIndicatorsReport> {
   using PubSub = autoware_vehicle_msgs::msg::TurnIndicatorsReportPubSubType;
-  static constexpr const char* frame_id = "";
+  static constexpr const char* frame_id = "base_link";
   static constexpr const char* topic = "/vehicle/status/turn_indicators_status";
   static constexpr const char* human_name = "Autoware turn indicators report";
 };
@@ -69,7 +69,7 @@ struct PublisherTraits<autoware_vehicle_msgs::msg::TurnIndicatorsReport> {
 template <>
 struct PublisherTraits<autoware_vehicle_msgs::msg::HazardLightsReport> {
   using PubSub = autoware_vehicle_msgs::msg::HazardLightsReportPubSubType;
-  static constexpr const char* frame_id = "";
+  static constexpr const char* frame_id = "base_link";
   static constexpr const char* topic = "/vehicle/status/hazard_lights_status";
   static constexpr const char* human_name = "Autoware hazard lights report";
 };

@@ -24,8 +24,8 @@ def generate_vlp16_blueprint(blueprint_library):
     blueprint.set_attribute("sensor_tick", "0.1")
 
     # ROS settings
-    blueprint.set_attribute("ros_name", "sensor_kit_base_link")  # frame_id
-    blueprint.set_attribute("ros_topic_name", "/sensing/lidar/top/pointcloud_raw")
+    blueprint.set_attribute("ros_name", "velodyne_top")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/lidar/top/pointcloud_raw_ex")
 
     return blueprint
 
@@ -45,7 +45,7 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
     blueprint.set_attribute("sensor_tick", "0.1")
 
     # ROS settings
-    blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_link")  # frame_id
+    blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_optical_link")  # frame_id
     blueprint.set_attribute("ros_topic_name", "/sensing/camera/traffic_light")
 
     return blueprint
@@ -71,7 +71,7 @@ def generate_gnss_blueprint(blueprint_library):
     blueprint.set_attribute("sensor_tick", "1.0")
 
     # ROS settings
-    blueprint.set_attribute("ros_name", "gnss_link")  # frame_id
+    blueprint.set_attribute("ros_name", "map")  # frame_id
     blueprint.set_attribute("ros_topic_name", "/sensing/gnss")
 
     return blueprint
