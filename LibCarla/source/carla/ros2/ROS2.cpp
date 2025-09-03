@@ -955,7 +955,6 @@ void ROS2::ProcessDataFromLidar(
     for (uint32_t i = 0; i < channel_count; ++i) {
       vertical_angles.push_back(upper_fov_limit - static_cast<float>(i) * vertical_step);
     }
-    std::cerr << "VERTICAL ANGLES size: " << vertical_angles.size() << std::endl;
 
     size_t width = data._points.size();
     size_t height = 1;
