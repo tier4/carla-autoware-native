@@ -2,6 +2,19 @@ import carla
 import math
 import random
 import argparse
+import time
+
+# Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
+DESIRED_SIM_RATE = 100
+
+def info(text):
+    print("[INFO]: %s" % text)
+
+def warning(text):
+    print("[WARNING]: %s" % text)
+
+def error(text):
+    print("[ERROR]: %s" % text)
 
 def generate_vlp16_blueprint(blueprint_library):
     """Generates a blueprint for VLP16
@@ -207,6 +220,9 @@ def main():
         '-p', '--port', metavar='P', default=2000, type=int,
         help='TCP port of the host server (default: 2000)')
     argparser.add_argument(
+        '--time_scale', metavar='T', default=1.0, type=float,
+        help='Simulation timescale (default: 1.0)')
+    argparser.add_argument(
         '--follow', action='store_true',
         help='Follow Ego vehicle')
     args = argparser.parse_args()
@@ -224,13 +240,51 @@ def main():
     ego = spawn_ego_with_sensors(world, spawn_point)
     move_spectator(world, ego)
 
-    print('Ego spawned!')
+    info('Ego spawned!')
+    time.sleep(0.05)  # Without this sometimes spectator would not move
 
-    if args.follow:
-        print('Kill this script before stopping simulation!')
-    while args.follow:
-        world.wait_for_tick()
-        move_spectator(world, ego)
+    # Set synchronous mode
+    settings = world.get_settings()
+    settings.synchronous_mode = True
+    settings.fixed_delta_seconds = 1.0 / DESIRED_SIM_RATE
+    world.apply_settings(settings)
+
+    info("Simulation time scale is %f" % args.time_scale)
+
+    warning('Kill this script before stopping simulation!')
+
+    desired_real_time_delta = 1e+9 / DESIRED_SIM_RATE / args.time_scale  # ns
+
+    consecutive_frames = 0
+
+    prev_time = time.time_ns()
+    # Tick world to follow desired time_scale
+    try:
+        while True:
+            current_time = time.time_ns()
+            delta_time = current_time - prev_time
+
+            if delta_time < desired_real_time_delta:
+                consecutive_frames = 0
+                continue
+
+            consecutive_frames += 1
+
+            if consecutive_frames > 200:
+                error("Simulation cannot keep up with the desired time scale!")
+
+            prev_time = current_time
+            world.tick()
+
+            if args.follow:
+                move_spectator(world, ego)
+
+    except KeyboardInterrupt:
+        info("Exiting, restoring asynchronous mode...")
+        # Set asynchronous mode, otherwise simulation will crash
+        settings = world.get_settings()
+        settings.synchronous_mode = False
+        world.apply_settings(settings)
 
 if __name__ == '__main__':
     main()
