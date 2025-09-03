@@ -1066,7 +1066,7 @@ void ROS2::ProcessDataFromStatusSensor(
   // Now all positive values mean forward and left (if going forward)
   _autoware_publisher->SetVelocity(data.vel_x_mps, -data.vel_y_mps, -data.angVel_z_mps);
 
-  // TODO: Check if data.steering should be set reversed (it is set reversed because control had to be reversed (this is an educated guess))
+  // TODO: Check if steering should be set reversed (it is set reversed because control had to be reversed (this is an educated guess))
   _autoware_publisher->SetSteering(-data.steer);
 
   // TODO: Add logic to use the input of control mode and base don that set output

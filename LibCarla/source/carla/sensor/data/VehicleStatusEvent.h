@@ -29,9 +29,9 @@ namespace data {
     float GetAngVelY() const { return _parsed.angVel_y_mps; } // local
     float GetAngVelZ() const { return _parsed.angVel_z_mps; } // local
 
-    float GetrotPitch() const { return _parsed.rot_pitch; } // local
-    float GetrotYaw() const { return _parsed.rot_yaw; } // local
-    float GetrotRoll() const { return _parsed.rot_roll; } // local
+    float GetRotPitch() const { return _parsed.rot_pitch; } // local
+    float GetRotYaw() const { return _parsed.rot_yaw; } // local
+    float GetRotRoll() const { return _parsed.rot_roll; } // local
     
     float GetSteer() const { return _parsed.steer; }
     int32_t GetGear() const { return _parsed.gear; }
