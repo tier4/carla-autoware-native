@@ -29,9 +29,9 @@ namespace data {
     float GetAngVelY() const { return _parsed.angVel_y_mps; } // local
     float GetAngVelZ() const { return _parsed.angVel_z_mps; } // local
 
-    float GetRotrPitch() const { return _parsed.rotr_pitch; } // local
-    float GetRotrYaw() const { return _parsed.rotr_yaw; } // local
-    float GetRotrRoll() const { return _parsed.rotr_roll; } // local
+    float GetRotPitch() const { return _parsed.rot_pitch; } // local
+    float GetRotYaw() const { return _parsed.rot_yaw; } // local
+    float GetRotRoll() const { return _parsed.rot_roll; } // local
     
     float GetSteer() const { return _parsed.steer; }
     int32_t GetGear() const { return _parsed.gear; }
@@ -39,7 +39,7 @@ namespace data {
     uint8_t GetControlFlags() const { return _parsed.control_flags; }
 
   private:
-    Serializer::Data _parsed;
+    s11n::VehicleStatusData _parsed;
   };
 
 } // namespace data
