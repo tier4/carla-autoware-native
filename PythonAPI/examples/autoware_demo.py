@@ -253,33 +253,34 @@ def main():
 
     warning('Kill this script before stopping simulation!')
 
-    desired_real_time_delta = 1e+9 / DESIRED_SIM_RATE / args.time_scale  # ns
+    frame_count = 0
 
-    consecutive_frames = 0
-
-    prev_time = time.time_ns()
+    start_time = time.time()
+    last_behind_error_time = start_time
     # Tick world to follow desired time_scale
     try:
         while True:
-            current_time = time.time_ns()
-            delta_time = current_time - prev_time
+            current_time = time.time()
+            real_time_passed = current_time - start_time
+            sim_time_passed = real_time_passed * args.time_scale
+            desired_frame_count = math.floor(sim_time_passed * DESIRED_SIM_RATE)
 
-            if delta_time < desired_real_time_delta:
-                consecutive_frames = 0
+            if desired_frame_count <= frame_count:
                 continue
 
-            consecutive_frames += 1
+            frame_behind_count = max(desired_frame_count - frame_count, 0)
+            if (frame_behind_count > 10) and \
+                (current_time > last_behind_error_time + 2.0):  # Error every 2 seconds
+                    last_behind_error_time = current_time
+                    error(f'Simulation cannot keep up with the desired time scale!!! ({frame_behind_count} frames behind)')
 
-            if consecutive_frames > 200:
-                error("Simulation cannot keep up with the desired time scale!")
-
-            prev_time = current_time
             world.tick()
+            frame_count += 1
 
             if args.follow:
                 move_spectator(world, ego)
 
-    except KeyboardInterrupt:
+    except:  # KeyboardInterrupt:
         info("Exiting, restoring asynchronous mode...")
         # Set asynchronous mode, otherwise simulation will crash
         settings = world.get_settings()
