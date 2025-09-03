@@ -98,7 +98,7 @@ def spawn_sensors(world, base_link):
         carla.Rotation(
             roll=math.degrees(-0.001),
             pitch=math.degrees(0.015),
-            yaw=math.degrees(-0.0364)))
+            yaw=math.degrees(0.0364)))
     sensor_kit = world.spawn_actor(
         empty_blueprint,
         sensor_kit_to_base_link_transform,
@@ -108,7 +108,7 @@ def spawn_sensors(world, base_link):
     lidar_top_to_sensor_kit_transform = carla.Transform(
         carla.Location(),
         carla.Rotation(
-            yaw=math.degrees(1.575)))
+            yaw=math.degrees(-1.575)))
     lidar_top = world.spawn_actor(
         vlp16_blueprint,
         lidar_top_to_sensor_kit_transform,
