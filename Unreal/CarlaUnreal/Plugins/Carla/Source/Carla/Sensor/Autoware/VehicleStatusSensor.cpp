@@ -97,34 +97,39 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   // Update cached velocity info
   SetVelocityInfoToLocal(Vehicle);
 
-  const auto max_steer_angle = FMath::DegreesToRadians(Vehicle->GetMaximumSteerAngle());
-
-  FVehicleStatusMessageRaw Msg{};
-  Msg.timestamp = GetWorld()->GetTimeSeconds();
-  Msg.speed_mps = VelocityInfo.GetSpeed();
-  Msg.vel_x_mps = static_cast<float>(VelocityInfo.Velocity.X);
-  Msg.vel_y_mps = static_cast<float>(VelocityInfo.Velocity.Y);
-  Msg.vel_z_mps = static_cast<float>(VelocityInfo.Velocity.Z);
-  Msg.angVel_x_mps = static_cast<float>(VelocityInfo.AngularVelocity.X);
-  Msg.angVel_y_mps = static_cast<float>(VelocityInfo.AngularVelocity.Y);
-  Msg.angVel_z_mps = static_cast<float>(VelocityInfo.AngularVelocity.Z);
-  Msg.rotr_pitch = static_cast<float>(VelocityInfo.RotationRate.Pitch);
-  Msg.rotr_yaw = static_cast<float>(VelocityInfo.RotationRate.Yaw);
-  Msg.rotr_roll = static_cast<float>(VelocityInfo.RotationRate.Roll);
-  Msg.steer = Vehicle->GetVehicleControl().Steer * max_steer_angle;
-  Msg.gear = Vehicle->GetVehicleCurrentGear();
-
+  // Get Max Steering
+  const auto MaxSteerAngleInRadians = FMath::DegreesToRadians(Vehicle->GetMaximumSteerAngle());
+  
   // Control flags
   const auto& Control = Vehicle->GetVehicleControl();
-  Msg.control_flags = (Control.bReverse ? 0x01 : 0) | (Control.bManualGearShift ? 0x02 : 0);
+  const auto Flags = (Control.bReverse ? 0x01 : 0) | (Control.bManualGearShift ? 0x02 : 0);
 
   // Turn mask
   const auto& Lights = Vehicle->GetVehicleLightState();
   const bool bHazard = Lights.LeftBlinker && Lights.RightBlinker;
-  Msg.turn_mask = (Lights.LeftBlinker ? 0x01 : 0) | (Lights.RightBlinker ? 0x02 : 0) | (bHazard ? 0x04 : 0);
+  const auto TurnMask = (Lights.LeftBlinker ? 0x01 : 0) | (Lights.RightBlinker ? 0x02 : 0) | (bHazard ? 0x04 : 0);
 
+  FVehicleStatusData Msg
+  {
+    static_cast<double>(GetWorld()->GetTimeSeconds()),
+    static_cast<float>(VelocityInfo.GetSpeed()),
+    static_cast<float>(VelocityInfo.Velocity.X),
+    static_cast<float>(VelocityInfo.Velocity.Y),
+    static_cast<float>(VelocityInfo.Velocity.Z),
+    static_cast<float>(VelocityInfo.AngularVelocity.X),
+    static_cast<float>(VelocityInfo.AngularVelocity.Y),
+    static_cast<float>(VelocityInfo.AngularVelocity.Z),
+    static_cast<float>(Vehicle->GetActorRotation().Pitch),
+    static_cast<float>(Vehicle->GetActorRotation().Yaw),
+    static_cast<float>(Vehicle->GetActorRotation().Roll),
+    static_cast<float>(Vehicle->GetVehicleControl().Steer * MaxSteerAngleInRadians),
+    static_cast<int32_t>(Vehicle->GetVehicleCurrentGear()),
+    static_cast<uint8_t>(TurnMask),
+    static_cast<uint8_t>(Flags),
+  };
+ 
   // Serialize message
-  constexpr int32 MsgSize = sizeof(FVehicleStatusMessageRaw);
+  constexpr int32 MsgSize = sizeof(FVehicleStatusData);
   TArray<uint8> Buffer;
   Buffer.SetNumUninitialized(MsgSize);
   FMemory::Memcpy(Buffer.GetData(), &Msg, MsgSize);
@@ -147,15 +152,7 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
       0,
       StreamId,
       GetActorTransform(),
-      Msg.timestamp,
-      Msg.speed_mps,
-      Msg.vel_x_mps, Msg.vel_y_mps, Msg.vel_z_mps,
-      Msg.angVel_x_mps, Msg.angVel_y_mps, Msg.angVel_z_mps,
-      Msg.rotr_pitch, Msg.rotr_yaw, Msg.rotr_roll,
-      Msg.steer,
-      Msg.gear,
-      Msg.turn_mask,
-      Msg.control_flags,
+      Msg,
       Vehicle,
       this
   );
@@ -192,9 +189,4 @@ void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)
 
   // Convert angular velocity vector into a Rotator for convenience
   VelocityInfo.RotationRate = VelocityInfo.AngularVelocity.Rotation();
-
-  if (!VelocityInfo.Velocity.IsNearlyZero(0.1f))
-  {
-    UE_LOG(LogTemp, Log, TEXT("%s"), *VelocityInfo.ToString());
-  }
 }

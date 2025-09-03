@@ -32,6 +32,9 @@ namespace carla {
       class RadarData;
       class VehicleStatusEvent;
     }
+    namespace s11n{
+      struct VehicleStatusData;
+    }
   }
 }
 
@@ -172,26 +175,11 @@ class ROS2
       uint32_t other_actor,
       carla::geom::Vector3D impulse,
       void* actor);
-  // void ProcessDataFromStatusSensor(
-  //     uint64_t sensor_type,
-  //     carla::streaming::detail::stream_id_type stream_id,
-  //     const carla::geom::Transform sensor_transform,
-  //     const std::vector<uint8_t> vec,
-  //     void *vehicle_actor,
-  //     void *actor);
   void ProcessDataFromStatusSensor(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
-      const carla::geom::Transform &sensor_transform,
-      double timestamp,
-      float speed_mps,
-      float vel_x_mps, float vel_y_mps, float vel_z_mps,
-      float angVel_x_mps, float angVel_y_mps, float angVel_z_mps,
-      float rotr_pitch, float rotr_yaw, float rotr_roll,
-      float steer,
-      int32_t gear,
-      uint8_t turn_mask,
-      uint8_t control_flags,
+      const carla::geom::Transform sensor_transform,
+      const sensor::s11n::VehicleStatusData data,
       void *vehicle_actor,
       void *actor);
 

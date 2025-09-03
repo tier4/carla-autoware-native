@@ -7,22 +7,8 @@
 #include "Sensor/Sensor.h" 
 #include "VehicleStatusSensor.generated.h"
 
-//todo: This mimics the same structure used in carla. It can be be replaced with carla::sensor::data::VehicleStatusEvent.
-// But it generates problems with serialization and data passing into ros2. I've tried plain struct to be passed, which didn't work either.
-// All data are passed by value in ROS2::ProcessDataFromStatusSensor. I'm leaving this struct since in the future it should be used and replace passing by value.
-// I'm not using pragma push and pop, since carla struct doesnt have it.
-struct FVehicleStatusMessageRaw
-{
-	double timestamp;
-	float speed_mps;
-	float vel_x_mps, vel_y_mps, vel_z_mps; // local
-	float angVel_x_mps, angVel_y_mps, angVel_z_mps; // local
-	float rotr_pitch, rotr_yaw, rotr_roll; // local
-	float steer;
-	int32_t gear;
-	uint8_t turn_mask;
-	uint8_t control_flags;
-};
+// Structure imported from LibCarla
+using FVehicleStatusData = carla::sensor::s11n::VehicleStatusData;
 
 USTRUCT(BlueprintType)
 struct FVelocityInfo
@@ -31,17 +17,18 @@ struct FVelocityInfo
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
 	FVector Velocity;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
+	FVector AngularVelocity;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
 	FRotator RotationRate;
 	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
-	FVector AngularVelocity;
 
 	FVelocityInfo()
 		: Velocity(FVector::ZeroVector)
-		, RotationRate(FRotator::ZeroRotator)
 		, AngularVelocity(FVector::ZeroVector)
+		, RotationRate(FRotator::ZeroRotator)
 	{
 	}
 	

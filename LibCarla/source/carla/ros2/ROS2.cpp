@@ -49,6 +49,7 @@
 #endif
 
 #include <vector>
+#include "ROS2.h"
 
 namespace carla {
 namespace ros2 {
@@ -1048,20 +1049,12 @@ void ROS2::ProcessDataFromCollisionSensor(
 }
 
 void ROS2::ProcessDataFromStatusSensor(
-    uint64_t sensor_type,
-    carla::streaming::detail::stream_id_type stream_id,
-    const carla::geom::Transform &sensor_transform,
-    double timestamp,
-    float speed_mps,
-    float vel_x_mps, float vel_y_mps, float vel_z_mps,
-    float angVel_x_mps, float angVel_y_mps, float angVel_z_mps,
-    float rotr_pitch, float rotr_yaw, float rotr_roll,
-    float steer,
-    int32_t gear,
-    uint8_t turn_mask,
-    uint8_t control_flags,
-    void *vehicle_actor,
-    void *actor)
+  uint64_t sensor_type, 
+  carla::streaming::detail::stream_id_type stream_id, 
+  const carla::geom::Transform sensor_transform, 
+  const sensor::s11n::VehicleStatusData data, 
+  void *vehicle_actor, 
+  void *actor)
 {
   // This callback is only for the Ego vehicle
   if (!_autoware_controller || vehicle_actor != _autoware_controller->GetVehicle()) {
@@ -1082,19 +1075,19 @@ void ROS2::ProcessDataFromStatusSensor(
   constexpr uint8_t hazard_lights_mask = 0b00000100;
 
   // Decode data
-  const bool is_reverse = control_flags & reverse_mask;
-  const bool is_manual_gear = control_flags & manual_gear_mask;
+  const bool is_reverse = data.control_flags & reverse_mask;
+  const bool is_manual_gear = data.control_flags & manual_gear_mask;
 
-  const bool is_left_blinker_on = turn_mask & left_blinker_mask;
-  const bool is_right_blinker_on = turn_mask & right_blinker_mask;
-  const bool is_hazard_lights_on = turn_mask & hazard_lights_mask;
+  const bool is_left_blinker_on = data.turn_mask & left_blinker_mask;
+  const bool is_right_blinker_on = data.turn_mask & right_blinker_mask;
+  const bool is_hazard_lights_on = data.turn_mask & hazard_lights_mask;
 
   // TODO: Verify whether any of the fields should be inverted
   // Now all positive values mean forward and left (if going forward)
-  _autoware_publisher->SetVelocity(vel_x_mps, -vel_y_mps, -angVel_z_mps);
+  _autoware_publisher->SetVelocity(data.vel_x_mps, -data.vel_y_mps, -data.angVel_z_mps);
 
   // TODO: Check if steering should be set reversed (it is set reversed because control had to be reversed (this is an educated guess))
-  _autoware_publisher->SetSteering(-steer);
+  _autoware_publisher->SetSteering(-data.steer);
 
   // TODO: Add logic to use the input of control mode and base don that set output
   // NOTE: Control mode command is a service, so no easy way to get it as of now (27.08.2025)
@@ -1102,7 +1095,7 @@ void ROS2::ProcessDataFromStatusSensor(
 
   // TODO: Verify what is the incoming gear from data.GetGear() and whether is_reverse should be used here
   _autoware_publisher->SetGear(Gear::NONE);
-  switch (gear) {
+  switch (data.gear) {
     #define CASE(GEAR_VALUE, GEAR_ENUM)          \
       case GEAR_VALUE:                           \
         _autoware_publisher->SetGear(GEAR_ENUM); \
@@ -1151,28 +1144,28 @@ void ROS2::ProcessDataFromStatusSensor(
 
   _autoware_publisher->SetHazardLights(is_hazard_lights_on);
 
-  const auto [seconds, nanoseconds] = Carla2RosTime(timestamp);
+  const auto [seconds, nanoseconds] = Carla2RosTime(data.timestamp);
   _autoware_publisher->Publish(seconds, nanoseconds);
 
   // Debug
   if constexpr (false) {
     std::cerr << "========== NEW STATUS ==========" << '\n'
               << "    RAW DATA:" << '\n'
-              << "Timestamp: "     << timestamp << '\n'
-              << "Speed: "         << speed_mps << '\n'
-              << "VelX: "          << vel_x_mps << '\n'
-              << "VelY: "          << vel_y_mps << '\n'
-              << "VelZ: "          << vel_z_mps << '\n'
-              << "AngVelX: "       << angVel_x_mps << '\n'
-              << "AngVelY: "       << angVel_y_mps << '\n'
-              << "AngVelZ: "       << angVel_z_mps << '\n'
-              << "RotrPitch: "     << rotr_pitch << '\n'
-              << "RotrYaw: "       << rotr_yaw << '\n'
-              << "RotrRoll: "      << rotr_roll << '\n'
-              << "Steering: "      << steer << '\n'
-              << "Gear: "          << gear << '\n'
-              << "Turn mask: "     << turn_mask << '\n'
-              << "Control flags: " << control_flags << '\n'
+              << "Timestamp: "     << data.timestamp << '\n'
+              << "Speed: "         << data.speed_mps << '\n'
+              << "VelX: "          << data.vel_x_mps << '\n'
+              << "VelY: "          << data.vel_y_mps << '\n'
+              << "VelZ: "          << data.vel_z_mps << '\n'
+              << "AngVelX: "       << data.angVel_x_mps << '\n'
+              << "AngVelY: "       << data.angVel_y_mps << '\n'
+              << "AngVelZ: "       << data.angVel_z_mps << '\n'
+              << "RotrPitch: "     << data.rot_pitch << '\n'
+              << "RotrYaw: "       << data.rot_yaw << '\n'
+              << "RotrRoll: "      << data.rot_roll << '\n'
+              << "Steering: "      << data.steer << '\n'
+              << "Gear: "          << data.gear << '\n'
+              << "Turn mask: "     << data.turn_mask << '\n'
+              << "Control flags: " << data.control_flags << '\n'
               << "    PROCESSED:" << '\n'
               << "Is reverse: "          << is_reverse << '\n'
               << "Is manual gear: "      << is_manual_gear << '\n'
