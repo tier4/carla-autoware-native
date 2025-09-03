@@ -152,15 +152,7 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
       0,
       StreamId,
       GetActorTransform(),
-      Msg.timestamp,
-      Msg.speed_mps,
-      Msg.vel_x_mps, Msg.vel_y_mps, Msg.vel_z_mps,
-      Msg.angVel_x_mps, Msg.angVel_y_mps, Msg.angVel_z_mps,
-      Msg.rot_pitch, Msg.rot_yaw, Msg.rot_roll,
-      Msg.steer,
-      Msg.gear,
-      Msg.turn_mask,
-      Msg.control_flags,
+      Msg,
       Vehicle,
       this
   );
