@@ -24,8 +24,8 @@ def generate_vlp16_blueprint(blueprint_library):
     blueprint.set_attribute("sensor_tick", "0.1")
 
     # ROS settings
-    blueprint.set_attribute("ros_name", "sensor_kit_base_link")  # frame_id
-    blueprint.set_attribute("ros_topic_name", "/sensing/lidar/top/pointcloud_raw")
+    blueprint.set_attribute("ros_name", "velodyne_top")  # frame_id
+    blueprint.set_attribute("ros_topic_name", "/sensing/lidar/top/pointcloud_raw_ex")
 
     return blueprint
 
@@ -45,7 +45,7 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
     blueprint.set_attribute("sensor_tick", "0.1")
 
     # ROS settings
-    blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_link")  # frame_id
+    blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_optical_link")  # frame_id
     blueprint.set_attribute("ros_topic_name", "/sensing/camera/traffic_light")
 
     return blueprint
@@ -71,7 +71,7 @@ def generate_gnss_blueprint(blueprint_library):
     blueprint.set_attribute("sensor_tick", "1.0")
 
     # ROS settings
-    blueprint.set_attribute("ros_name", "gnss_link")  # frame_id
+    blueprint.set_attribute("ros_name", "map")  # frame_id
     blueprint.set_attribute("ros_topic_name", "/sensing/gnss")
 
     return blueprint
@@ -91,6 +91,7 @@ def spawn_sensors(world, base_link):
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = generate_imu_blueprint(blueprint_library)
     gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library)
+    vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     sensor_kit_to_base_link_transform = carla.Transform(
         carla.Location(x=0.9, z=2.0),
@@ -143,6 +144,14 @@ def spawn_sensors(world, base_link):
         gnss_receiver_to_sensor_kit_transform,
         attach_to=sensor_kit)
     gnss_receiver.enable_for_ros()
+
+    # Spawn Vehicle Status Sensor
+    vehicle_status_sensor = world.spawn_actor(
+        vehicle_status_blueprint,
+        carla.Transform(),
+        attach_to=base_link)  # Attach to base_link with no offset, because velocities should come from rear axle
+    # # NOTE: Enable for ros is not needed, because this sensor uses a global publisher
+    # vehicle_status_sensor.enable_for_ros()
 
 def spawn_ego_with_sensors(world, spawn_point):
     """Spawns a controllable vehicle with a basic sensor configuration
@@ -205,6 +214,11 @@ def main():
     client = carla.Client(args.host, args.port)
     client.set_timeout(60.0)
     world = client.get_world()
+
+    # Autoware will be publishing TF information based on the URDF files
+    # of the vehicle and sensor kit. Disable TF publishing in CARLA
+    # to avoid conflicts.
+    world.set_publish_tf(False)
 
     spawn_point = random.choice(world.get_map().get_spawn_points())
     ego = spawn_ego_with_sensors(world, spawn_point)

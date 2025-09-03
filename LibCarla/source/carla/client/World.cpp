@@ -387,5 +387,13 @@ namespace client {
     }
   }
 
+  void World::SetPublishTF(bool publish_tf) {
+    _episode.Lock()->SetPublishTF(publish_tf);
+  }
+
+  bool World::GetPublishTF() const {
+    return _episode.Lock()->GetPublishTF();
+  }
+
 } // namespace client
 } // namespace carla

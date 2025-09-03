@@ -1,0 +1,200 @@
+// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma de Barcelona (UAB).
+// This work is licensed under the terms of the MIT license. For a copy, see <https://opensource.org/licenses/MIT>.
+
+#include "Sensor/Autoware/VehicleStatusSensor.h"
+
+#include "Carla/Game/CarlaEpisode.h"
+#include "Carla/Vehicle/CarlaWheeledVehicle.h"
+#include "Carla/Vehicle/VehicleLightState.h"
+#include "Engine/World.h"
+#include "Carla/Sensor/Sensor.h"
+#include "Carla/Game/CarlaEngine.h"
+
+AVehicleStatusSensor::AVehicleStatusSensor(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
+{
+  PrimaryActorTick.bCanEverTick = true;
+  PrimaryActorTick.TickGroup = TG_PostPhysics;  // read ground-truth after physics update
+
+  TargetRateHz = FMath::Clamp(TargetRateHz, MinRateHz, MaxRateHz);
+  PrimaryActorTick.TickInterval = 1.0f / TargetRateHz;
+}
+
+FActorDefinition AVehicleStatusSensor::GetSensorDefinition()
+{
+  using namespace carla::rpc;
+
+  FActorDefinition Definition;
+
+  Definition.UId = 0;  // Carla usually ignores, spawner sets it
+  Definition.Id = TEXT("sensor.other.vehicle_status");
+  Definition.Class = StaticClass();
+  Definition.Tags = TEXT("sensor,other,vehicle_status");
+
+  // Optional attributes exposed in Python API
+  {
+    FActorAttribute SpeedUnits;
+    SpeedUnits.Id = TEXT("speed_units");
+    SpeedUnits.Type = EActorAttributeType::String;
+    SpeedUnits.Value = TEXT("mps");
+    Definition.Attributes.Emplace(MoveTemp(SpeedUnits));
+  }
+
+  return Definition;
+}
+
+void AVehicleStatusSensor::Set(const FActorDescription &ActorDescription)
+{
+  Super::Set(ActorDescription);
+}
+
+void AVehicleStatusSensor::BeginPlay()
+{
+  Super::BeginPlay();
+  UE_LOG(LogTemp, Warning, TEXT("VehicleStatusSensor spawned."));
+  GetWorldTimerManager().SetTimer(CheckParentTimerHandle, this, &AVehicleStatusSensor::CheckForParentVehicle, 1.0f, true);
+}
+
+void AVehicleStatusSensor::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
+{
+  Super::PostPhysTick(World, TickType, DeltaSeconds);
+  CollectAndStream(DeltaSeconds);
+}
+
+void AVehicleStatusSensor::CheckForParentVehicle()
+{
+  if (OwningVehicle = FindAttachmentParentVehicle(); OwningVehicle.IsValid())
+  {
+    UE_LOG(LogTemp, Warning, TEXT("Attached to a vehicle: %s"), *OwningVehicle->GetName());
+    GetWorldTimerManager().ClearTimer(CheckParentTimerHandle);
+  }
+}
+
+TObjectPtr<ACarlaWheeledVehicle> AVehicleStatusSensor::FindAttachmentParentVehicle() const
+{
+  for (AActor* Parent = GetAttachParentActor(); Parent; Parent = Parent->GetAttachParentActor())
+  {
+    if (ACarlaWheeledVehicle* Vehicle = Cast<ACarlaWheeledVehicle>(Parent))
+    {
+      return Vehicle;
+    }
+  }
+  return nullptr;
+}
+
+void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
+{
+  if (!OwningVehicle.IsValid())
+  {
+    return;
+  }
+
+  TObjectPtr<ACarlaWheeledVehicle> Vehicle = OwningVehicle.Get();
+  if (!IsValid(Vehicle))
+  {
+      return;
+  }
+
+  // Update cached velocity info
+  SetVelocityInfoToLocal(Vehicle);
+
+  const auto max_steer_angle = FMath::DegreesToRadians(Vehicle->GetMaximumSteerAngle());
+
+  FVehicleStatusMessageRaw Msg{};
+  Msg.timestamp = GetWorld()->GetTimeSeconds();
+  Msg.speed_mps = VelocityInfo.GetSpeed();
+  Msg.vel_x_mps = static_cast<float>(VelocityInfo.Velocity.X);
+  Msg.vel_y_mps = static_cast<float>(VelocityInfo.Velocity.Y);
+  Msg.vel_z_mps = static_cast<float>(VelocityInfo.Velocity.Z);
+  Msg.angVel_x_mps = static_cast<float>(VelocityInfo.AngularVelocity.X);
+  Msg.angVel_y_mps = static_cast<float>(VelocityInfo.AngularVelocity.Y);
+  Msg.angVel_z_mps = static_cast<float>(VelocityInfo.AngularVelocity.Z);
+  Msg.rotr_pitch = static_cast<float>(VelocityInfo.RotationRate.Pitch);
+  Msg.rotr_yaw = static_cast<float>(VelocityInfo.RotationRate.Yaw);
+  Msg.rotr_roll = static_cast<float>(VelocityInfo.RotationRate.Roll);
+  Msg.steer = Vehicle->GetVehicleControl().Steer * max_steer_angle;
+  Msg.gear = Vehicle->GetVehicleCurrentGear();
+
+  // Control flags
+  const auto& Control = Vehicle->GetVehicleControl();
+  Msg.control_flags = (Control.bReverse ? 0x01 : 0) | (Control.bManualGearShift ? 0x02 : 0);
+
+  // Turn mask
+  const auto& Lights = Vehicle->GetVehicleLightState();
+  const bool bHazard = Lights.LeftBlinker && Lights.RightBlinker;
+  Msg.turn_mask = (Lights.LeftBlinker ? 0x01 : 0) | (Lights.RightBlinker ? 0x02 : 0) | (bHazard ? 0x04 : 0);
+
+  // Serialize message
+  constexpr int32 MsgSize = sizeof(FVehicleStatusMessageRaw);
+  TArray<uint8> Buffer;
+  Buffer.SetNumUninitialized(MsgSize);
+  FMemory::Memcpy(Buffer.GetData(), &Msg, MsgSize);
+
+  // UE client streaming
+  if (AreClientsListening())
+  {
+      ASensor::SendDataToClient(
+          *this,
+          TArrayView<uint8>(Buffer),
+          FCarlaEngine::GetFrameCounter());
+  }
+
+  // ROS2 forwarding
+#if defined(WITH_ROS2)
+  if (auto ROS2 = carla::ros2::ROS2::GetInstance(); ROS2->IsEnabled())
+  {
+    auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
+    ROS2->ProcessDataFromStatusSensor(
+      0,
+      StreamId,
+      GetActorTransform(),
+      Msg.timestamp,
+      Msg.speed_mps,
+      Msg.vel_x_mps, Msg.vel_y_mps, Msg.vel_z_mps,
+      Msg.angVel_x_mps, Msg.angVel_y_mps, Msg.angVel_z_mps,
+      Msg.rotr_pitch, Msg.rotr_yaw, Msg.rotr_roll,
+      Msg.steer,
+      Msg.gear,
+      Msg.turn_mask,
+      Msg.control_flags,
+      Vehicle,
+      this
+  );
+  }
+#endif
+}
+
+void AVehicleStatusSensor::SetVelocityInfoToLocal(const AActor* VehicleActor)
+{
+  if (!VehicleActor)
+  {
+    return;
+  }
+
+  // World linear velocity (cm/s)
+  const FVector WorldVel_cmps = VehicleActor->GetVelocity();
+
+  // Convert to m/s, then rotate into local space
+  const FQuat InvRot = VehicleActor->GetActorTransform().GetRotation().Inverse();
+  VelocityInfo.Velocity = InvRot.RotateVector(CmpsToMps(WorldVel_cmps));
+
+  // Physics angular velocity (rad/s, world space)
+  FVector WorldAngVel = FVector::ZeroVector;
+  if (UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(VehicleActor->GetRootComponent()))
+  {
+    if (RootPrim->IsSimulatingPhysics())
+    {
+      WorldAngVel = RootPrim->GetPhysicsAngularVelocityInRadians();
+    }
+  }
+
+  // Rotate into local space
+  VelocityInfo.AngularVelocity = InvRot.RotateVector(WorldAngVel);
+
+  // Convert angular velocity vector into a Rotator for convenience
+  VelocityInfo.RotationRate = VelocityInfo.AngularVelocity.Rotation();
+
+  if (!VelocityInfo.Velocity.IsNearlyZero(0.1f))
+  {
+    UE_LOG(LogTemp, Log, TEXT("%s"), *VelocityInfo.ToString());
+  }
+}

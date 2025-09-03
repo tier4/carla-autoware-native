@@ -30,6 +30,7 @@ namespace carla {
       class LidarData;
       class SemanticLidarData;
       class RadarData;
+      class VehicleStatusEvent;
     }
   }
 }
@@ -58,12 +59,27 @@ class ROS2
     return _instance;
   }
 
+  // utility
+  static std::pair<int32_t, uint32_t> Carla2RosTime(double timestamp) {
+    double integral;
+    const double fractional = modf(timestamp, &integral);
+    const double multiplier = 1000000000.0;
+    const auto seconds = static_cast<int32_t>(integral);
+    const auto nanoseconds = static_cast<uint32_t>(fractional * multiplier);
+
+    return std::make_pair(seconds, nanoseconds);
+  }
+
   // general
   void Enable(bool enable);
   void Shutdown();
   bool IsEnabled() { return _enabled; }
   void SetFrame(uint64_t frame);
   void SetTimestamp(double timestamp);
+
+  // TF publishing control
+  void SetPublishTF(bool publish_tf);
+  bool GetPublishTF() const { return _publish_tf; }
 
   // ros_name managing
   void AddActorRosName(void *actor, std::string ros_name);
@@ -149,13 +165,35 @@ class ROS2
       AActor *second_actor,
       float distance,
       void *actor = nullptr);
-void ProcessDataFromCollisionSensor(
-    uint64_t sensor_type,
-    carla::streaming::detail::stream_id_type stream_id,
-    const carla::geom::Transform sensor_transform,
-    uint32_t other_actor,
-    carla::geom::Vector3D impulse,
-    void* actor);
+  void ProcessDataFromCollisionSensor(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      uint32_t other_actor,
+      carla::geom::Vector3D impulse,
+      void* actor);
+  // void ProcessDataFromStatusSensor(
+  //     uint64_t sensor_type,
+  //     carla::streaming::detail::stream_id_type stream_id,
+  //     const carla::geom::Transform sensor_transform,
+  //     const std::vector<uint8_t> vec,
+  //     void *vehicle_actor,
+  //     void *actor);
+  void ProcessDataFromStatusSensor(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform &sensor_transform,
+      double timestamp,
+      float speed_mps,
+      float vel_x_mps, float vel_y_mps, float vel_z_mps,
+      float angVel_x_mps, float angVel_y_mps, float angVel_z_mps,
+      float rotr_pitch, float rotr_yaw, float rotr_roll,
+      float steer,
+      int32_t gear,
+      uint8_t turn_mask,
+      uint8_t control_flags,
+      void *vehicle_actor,
+      void *actor);
 
     uint32_t GetDomainId() const noexcept { return _domain_id; }
 
@@ -170,6 +208,7 @@ void ProcessDataFromCollisionSensor(
   static std::shared_ptr<ROS2> _instance;
 
   bool _enabled { false };
+  bool _publish_tf { true };
   uint64_t _frame { 0 };
   int32_t _seconds { 0 };
   uint32_t _nanoseconds { 0 };
