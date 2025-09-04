@@ -3,6 +3,17 @@ import math
 import random
 import argparse
 
+class ROS:
+    """
+    ROS coordinate system to CARLA coordinate system conversion.
+    ROS has Y axis to the left (when X forward and Z up), while CARLA (Unreal) has Y axis to the right.
+    """
+    def Location(x=0.0, y=0.0, z=0.0):
+        return carla.Location(x=x, y=-y, z=z)
+
+    def Rotation(roll=0.0, pitch=0.0, yaw=0.0):
+        return carla.Rotation(roll=-roll, pitch=pitch, yaw=-yaw)
+
 def generate_vlp16_blueprint(blueprint_library):
     """Generates a blueprint for VLP16
 
@@ -94,8 +105,8 @@ def spawn_sensors(world, base_link):
     vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     sensor_kit_to_base_link_transform = carla.Transform(
-        carla.Location(x=0.9, z=2.0),
-        carla.Rotation(
+        ROS.Location(x=0.9, z=2.0),
+        ROS.Rotation(
             roll=math.degrees(-0.001),
             pitch=math.degrees(0.015),
             yaw=math.degrees(-0.0364)))
@@ -106,8 +117,8 @@ def spawn_sensors(world, base_link):
 
     # Spawn top lidar
     lidar_top_to_sensor_kit_transform = carla.Transform(
-        carla.Location(),
-        carla.Rotation(
+        ROS.Location(),
+        ROS.Rotation(
             yaw=math.degrees(1.575)))
     lidar_top = world.spawn_actor(
         vlp16_blueprint,
@@ -117,7 +128,7 @@ def spawn_sensors(world, base_link):
 
     # Spawn traffic light camera
     traffic_light_left_camera_to_sensor_kit_transform = carla.Transform(
-        carla.Location(x=0.05, y=0.0175, z=-0.1))
+        ROS.Location(x=0.05, y=0.0175, z=-0.1))
     traffic_light_left_camera = world.spawn_actor(
         traffic_light_camera_blueprint,
         traffic_light_left_camera_to_sensor_kit_transform,
@@ -126,8 +137,8 @@ def spawn_sensors(world, base_link):
 
     # Spawn IMU
     imu_to_sensor_kit_transform = carla.Transform(
-        carla.Location(),
-        carla.Rotation(
+        ROS.Location(),
+        ROS.Rotation(
             roll=math.degrees(3.14159265359),
             yaw=math.degrees(3.14159265359)))
     imu = world.spawn_actor(
@@ -138,7 +149,7 @@ def spawn_sensors(world, base_link):
 
     # Spawn GNSS receiver
     gnss_receiver_to_sensor_kit_transform = carla.Transform(
-        carla.Location(x=-0.1, z=-0.2))
+        ROS.Location(x=-0.1, z=-0.2))
     gnss_receiver = world.spawn_actor(
         gnss_receiver_blueprint,
         gnss_receiver_to_sensor_kit_transform,
@@ -172,7 +183,7 @@ def spawn_ego_with_sensors(world, spawn_point):
     # Transformation between vehicle pivot and projection of the rear
     # axis on the ground (base link) as measured in Unreal Editor
     base_link_to_pivot_transform = carla.Transform(
-        carla.Location(x=-1.39706787))
+        ROS.Location(x=-1.39706787))
     base_link = world.spawn_actor(
         empty_blueprint,
         base_link_to_pivot_transform,
@@ -186,7 +197,7 @@ def move_spectator(world, ego_vehicle):
     spectator = world.get_spectator()
 
     spectator_tf = ego_vehicle.get_transform()
-    spectator_offset = carla.Transform(carla.Location(x=-6.0, z=1.5))
+    spectator_offset = carla.Transform(ROS.Location(x=-6.0, z=1.5))
 
     spectator_with_offset_position = spectator_tf.transform(spectator_offset.location)
 
