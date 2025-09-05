@@ -160,10 +160,12 @@ void ACarlaGameModeBase::InitGame(
 
   ParseOpenDrive();
 
-  if(Map.has_value())
-  {
-    StoreSpawnPoints();
-  }
+  // if(Map.has_value())
+  // {
+  //   StoreSpawnPoints();
+  // }
+
+  StoreSpawnPoints();
 }
 
 void ACarlaGameModeBase::RestartPlayer(AController *NewPlayer)
