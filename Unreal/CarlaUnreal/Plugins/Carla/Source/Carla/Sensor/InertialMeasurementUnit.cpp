@@ -19,7 +19,7 @@
 
 // Based on OpenDRIVE's lon and lat
 const FVector AInertialMeasurementUnit::CarlaNorthVector =
-    FVector(0.0f, -1.0f, 0.0f);
+    FVector(0.0f, 1.0f, 0.0f);
 
 AInertialMeasurementUnit::AInertialMeasurementUnit(
     const FObjectInitializer &ObjectInitializer)
