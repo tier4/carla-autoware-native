@@ -69,7 +69,7 @@ public:
 
   float GetCompassValue() const;
 
-  /// Based on Autoware lon and lat, North is in (0.0f, -1.0f, 0.0f)
+  /// Based on Autoware lon and lat, North is in (0.0f, 1.0f, 0.0f) - https://autowarefoundation.github.io/autoware-documentation/main/contributing/coding-guidelines/ros-nodes/coordinate-system/#coordinate-axes-conventions
   static const FVector CarlaNorthVector;
 
 private:
