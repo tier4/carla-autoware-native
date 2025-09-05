@@ -69,7 +69,7 @@ public:
 
   float GetCompassValue() const;
 
-  /// Based on OpenDRIVE's lon and lat, North is in (0.0f, -1.0f, 0.0f)
+  /// Based on Autoware lon and lat, North is in (0.0f, -1.0f, 0.0f)
   static const FVector CarlaNorthVector;
 
 private:
