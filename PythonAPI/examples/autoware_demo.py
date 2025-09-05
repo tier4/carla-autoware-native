@@ -106,7 +106,8 @@ def spawn_sensors(world, base_link):
 
     blueprint_library = world.get_blueprint_library()
 
-    empty_blueprint = blueprint_library.find("util.actor.empty")
+    sensor_kit_blueprint = blueprint_library.find("util.actor.empty")
+    sensor_kit_blueprint.set_attribute("ros_name", "sensor_kit_base_link")
     vlp16_blueprint = generate_vlp16_blueprint(blueprint_library)
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
@@ -121,7 +122,7 @@ def spawn_sensors(world, base_link):
             pitch=0.015,
             yaw=-0.0364))
     sensor_kit = world.spawn_actor(
-        empty_blueprint,
+        sensor_kit_blueprint,
         sensor_kit_to_base_link_transform,
         attach_to=base_link)
 
@@ -188,14 +189,15 @@ def spawn_ego_with_sensors(world, spawn_point):
 
     ego = world.spawn_actor(ego_blueprint, spawn_point)
 
-    empty_blueprint = blueprint_library.find("util.actor.empty")
+    base_link_blueprint = blueprint_library.find("util.actor.empty")
+    base_link_blueprint.set_attribute("ros_name", "sensor_kit_base_link")
 
     # Transformation between vehicle pivot and projection of the rear
     # axis on the ground (base link) as measured in Unreal Editor
     base_link_to_pivot_transform = carla.Transform(
         ROS2.Location(x=-1.39706787))
     base_link = world.spawn_actor(
-        empty_blueprint,
+        base_link_blueprint,
         base_link_to_pivot_transform,
         attach_to=ego)
 
