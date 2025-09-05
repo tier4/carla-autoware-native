@@ -154,20 +154,7 @@ namespace ros2 {
   }
 
   void CarlaIMUPublisher::SetData(int32_t seconds, uint32_t nanoseconds, float* pAccelerometer, float* pGyroscope, float compass) {
-    geometry_msgs::msg::Vector3 gyroscope;
-    geometry_msgs::msg::Vector3 linear_acceleration;
-    const float ax = *pAccelerometer++;
-    const float ay = *pAccelerometer++;
-    const float az = *pAccelerometer++;
-    linear_acceleration.x(ax);
-    linear_acceleration.y(ay);
-    linear_acceleration.z(az);
-    const float gx = *pGyroscope++;
-    const float gy = *pGyroscope++;
-    const float gz = *pGyroscope++;
-    gyroscope.x(gx);
-    gyroscope.y(gy);
-    gyroscope.z(gz);
+    sensor_msgs::msg::Imu imu_msg;
 
     builtin_interfaces::msg::Time time;
     time.sec(seconds);
@@ -177,28 +164,78 @@ namespace ros2 {
     header.stamp(std::move(time));
     header.frame_id(_frame_id);
 
+    imu_msg.header(std::move(header));
+
+    // NOTE: Carla / Unreal axes: X forward, Y right, Z up
+    // Autoware expects ENU: X forward, Y left, Z up
+    // All Y needs to be flipped to match Autoware.
+
+    // Linear acceleration
+    const float ax = *pAccelerometer++;
+    const float ay = *pAccelerometer++;
+    const float az = *pAccelerometer++;
+
+    geometry_msgs::msg::Vector3 linear_accel;
+    linear_accel.x(ax);
+    linear_accel.y(-ay); // flip sign for Y
+    linear_accel.z(az);
+
+    imu_msg.linear_acceleration(std::move(linear_accel));
+
+    // Angular velocity - gyroscope
+    const float gx = *pGyroscope++;
+    const float gy = *pGyroscope++;
+    const float gz = *pGyroscope++;
+
+    geometry_msgs::msg::Vector3 ang_vel;
+    ang_vel.x(gx);
+    ang_vel.y(-gy); // flip sign for Y
+    ang_vel.z(gz);
+
+    imu_msg.angular_velocity(std::move(ang_vel));
+
+    const float roll = 0.0f;
+    const float pitch = 0.0f;
+    const float yaw = compass; // treat compass as yaw in radians
+
+    const float cy = cosf(yaw * 0.5f);
+    const float sy = sinf(yaw * 0.5f);
+    const float cp = cosf(pitch * 0.5f);
+    const float sp = sinf(pitch * 0.5f);
+    const float cr = cosf(roll * 0.5f);
+    const float sr = sinf(roll * 0.5f);
+
     geometry_msgs::msg::Quaternion orientation;
-
-    const float rx = 0.0f;                           // pitch
-    const float ry = (float(M_PI_2) / 2.0f) - compass;  // yaw
-    const float rz = 0.0f;                           // roll
-
-    const float cr = cosf(rz * 0.5f);
-    const float sr = sinf(rz * 0.5f);
-    const float cp = cosf(rx * 0.5f);
-    const float sp = sinf(rx * 0.5f);
-    const float cy = cosf(ry * 0.5f);
-    const float sy = sinf(ry * 0.5f);
-
     orientation.w(cr * cp * cy + sr * sp * sy);
     orientation.x(sr * cp * cy - cr * sp * sy);
     orientation.y(cr * sp * cy + sr * cp * sy);
     orientation.z(cr * cp * sy - sr * sp * cy);
 
-    _impl->_imu.header(std::move(header));
-    _impl->_imu.orientation(orientation);
-    _impl->_imu.angular_velocity(gyroscope);
-    _impl->_imu.linear_acceleration(linear_acceleration);
+    imu_msg.orientation(std::move(orientation));
+
+    // Covariances - todo I don't know if this is needed
+  
+    // orientation_covariance
+    sensor_msgs::msg::sensor_msgs__Imu__double_array_9 orient_cov{};
+    orient_cov.fill(0.0);
+    orient_cov[0] = -1.0; // indicate orientation is not available or fully trusted
+    imu_msg.orientation_covariance(std::move(orient_cov));
+
+    sensor_msgs::msg::sensor_msgs__Imu__double_array_9 ang_cov{};
+    ang_cov.fill(0.0);
+    ang_cov[0] = 1e-4; // var around X
+    ang_cov[4] = 1e-4; // var around Y
+    ang_cov[8] = 1e-4; // var around Z
+    imu_msg.angular_velocity_covariance(std::move(ang_cov));
+
+    sensor_msgs::msg::sensor_msgs__Imu__double_array_9 lin_cov{};
+    lin_cov.fill(0.0);
+    lin_cov[0] = 1e-3;
+    lin_cov[4] = 1e-3;
+    lin_cov[8] = 1e-3;
+    imu_msg.linear_acceleration_covariance(std::move(lin_cov));
+
+    _impl->_imu = std::move(imu_msg);
   }
 
   CarlaIMUPublisher::CarlaIMUPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
