@@ -3,6 +3,7 @@ import math
 import random
 import argparse
 import time
+import PyKDL as kdl
 
 # Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
 DESIRED_SIM_RATE = 100
@@ -36,6 +37,60 @@ class ROS2:
         return carla.Rotation(roll  =  math.degrees(roll),
                               pitch = -math.degrees(pitch),
                               yaw   = -math.degrees(yaw))
+
+    class Transform:
+        """
+        Transform in ROS2 coordinate system
+        """
+        x = 0.0
+        y = 0.0
+        z = 0.0
+        roll = 0.0
+        pitch = 0.0
+        yaw = 0.0
+
+        def __init__(self,
+                     x : float = 0.0,
+                     y : float = 0.0,
+                     z : float = 0.0,
+                     roll : float = 0.0,
+                     pitch : float = 0.0,
+                     yaw : float = 0.0):
+            self.x = x
+            self.y = y
+            self.z = z
+            self.roll = roll
+            self.pitch = pitch
+            self.yaw = yaw
+
+        def to_carla(self):
+            return carla.Transform(ROS2.Location(x=self.x,
+                                                 y=self.y,
+                                                 z=self.z),
+                                   ROS2.Rotation(roll=self.roll,
+                                                 pitch=self.pitch,
+                                                 yaw=self.yaw))
+
+        def to_kdl(self):
+            return kdl.Frame(kdl.Rotation.RPY(self.roll, self.pitch, self.yaw),
+                             kdl.Vector(self.x, self.y, self.z))
+
+        @staticmethod
+        def from_kdl(F: kdl.Frame):
+            x, y, z = F.p[0], F.p[1], F.p[2]
+            roll, pitch, yaw = F.M.GetRPY()
+
+            return ROS2.Transform(x, y, z, roll, pitch, yaw)
+
+def chain_transforms(transforms):
+    """
+    :param transforms: list of ROS2.Transform
+    :return: ROS2.Transform
+    """
+    F = transforms[0].to_kdl()
+    for t in transforms[1:]:
+        F = F * t.to_kdl()
+    return ROS2.Transform.from_kdl(F)
 
 def generate_vlp16_blueprint(blueprint_library):
     """Generates a blueprint for VLP16
@@ -110,7 +165,7 @@ def generate_gnss_blueprint(blueprint_library):
 
     return blueprint
 
-def spawn_sensors(world, base_link):
+def spawn_sensors(world, base_link, ego):
     """Spawns sensors relatively to the provided base_link actor
 
     Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
@@ -160,15 +215,23 @@ def spawn_sensors(world, base_link):
     traffic_light_left_camera.enable_for_ros()
 
     # Spawn IMU
-    imu_to_sensor_kit_transform = carla.Transform(
-        ROS2.Location(),
-        ROS2.Rotation(
-            roll=3.14159265359,
-            yaw=3.14159265359))
+    # NOTE: IMU is mounted to Ego directly, because this is required for angular velocity to work
+    base_link_to_pivot_transform = ROS2.Transform(x=-1.39706787)
+    sensor_kit_to_base_link_transform = ROS2.Transform(x=0.9,
+                                                       z=2.0,
+                                                       roll=-0.001,
+                                                       pitch=0.015,
+                                                       yaw=-0.0364)
+    imu_to_sensor_kit_transform = ROS2.Transform(roll=3.14159265359,
+                                                 yaw=3.14159265359)
+
+    imu_to_pivot_transform = chain_transforms([base_link_to_pivot_transform,
+                                               sensor_kit_to_base_link_transform,
+                                               imu_to_sensor_kit_transform])
     imu = world.spawn_actor(
         imu_blueprint,
-        imu_to_sensor_kit_transform,
-        attach_to=sensor_kit)
+        imu_to_pivot_transform.to_carla(),
+        attach_to=ego)
     imu.enable_for_ros()
 
     # Spawn GNSS receiver
@@ -214,7 +277,7 @@ def spawn_ego_with_sensors(world, spawn_point):
         base_link_to_pivot_transform,
         attach_to=ego)
 
-    spawn_sensors(world, base_link)
+    spawn_sensors(world, base_link, ego)
 
     return ego
 
