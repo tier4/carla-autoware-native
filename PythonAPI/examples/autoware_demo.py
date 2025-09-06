@@ -2,6 +2,19 @@ import carla
 import math
 import random
 import argparse
+import time
+
+# Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
+DESIRED_SIM_RATE = 100
+
+def info(text):
+    print("[INFO]: %s" % text)
+
+def warning(text):
+    print("[WARNING]: %s" % text)
+
+def error(text):
+    print("[ERROR]: %s" % text)
 
 class ROS2:
     """
@@ -230,6 +243,9 @@ def main():
         '-p', '--port', metavar='P', default=2000, type=int,
         help='TCP port of the host server (default: 2000)')
     argparser.add_argument(
+        '--time_scale', metavar='T', default=1.0, type=float,
+        help='Simulation timescale (default: 1.0)')
+    argparser.add_argument(
         '--follow', action='store_true',
         help='Follow Ego vehicle')
     args = argparser.parse_args()
@@ -247,13 +263,52 @@ def main():
     ego = spawn_ego_with_sensors(world, spawn_point)
     move_spectator(world, ego)
 
-    print('Ego spawned!')
+    info('Ego spawned!')
+    time.sleep(0.05)  # Without this sometimes spectator would not move
 
-    if args.follow:
-        print('Kill this script before stopping simulation!')
-    while args.follow:
-        world.wait_for_tick()
-        move_spectator(world, ego)
+    # Set synchronous mode
+    settings = world.get_settings()
+    settings.synchronous_mode = True
+    settings.fixed_delta_seconds = 1.0 / DESIRED_SIM_RATE
+    world.apply_settings(settings)
+
+    info("Simulation time scale is %f" % args.time_scale)
+
+    warning('Kill this script before stopping simulation!')
+
+    frame_count = 0
+
+    start_time = time.time()
+    last_behind_error_time = start_time
+    # Tick world to follow desired time_scale
+    try:
+        while True:
+            current_time = time.time()
+            real_time_passed = current_time - start_time
+            sim_time_passed = real_time_passed * args.time_scale
+            desired_frame_count = math.floor(sim_time_passed * DESIRED_SIM_RATE)
+
+            if desired_frame_count <= frame_count:
+                continue
+
+            frame_behind_count = max(desired_frame_count - frame_count, 0)
+            if (frame_behind_count > 10) and \
+                (current_time > last_behind_error_time + 2.0):  # Error every 2 seconds
+                    last_behind_error_time = current_time
+                    error(f'Simulation cannot keep up with the desired time scale!!! ({frame_behind_count} frames behind)')
+
+            world.tick()
+            frame_count += 1
+
+            if args.follow:
+                move_spectator(world, ego)
+
+    except:  # KeyboardInterrupt:
+        info("Exiting, restoring asynchronous mode...")
+        # Set asynchronous mode, otherwise simulation will crash
+        settings = world.get_settings()
+        settings.synchronous_mode = False
+        world.apply_settings(settings)
 
 if __name__ == '__main__':
     main()
