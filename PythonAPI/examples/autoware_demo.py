@@ -183,25 +183,22 @@ def spawn_sensors(world, base_link, ego):
     gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library)
     vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
-    sensor_kit_to_base_link_transform = carla.Transform(
-        ROS2.Location(x=0.9, z=2.0),
-        ROS2.Rotation(
-            roll=-0.001,
-            pitch=0.015,
-            yaw=-0.0364))
+    sensor_kit_to_base_link_transform = ROS2.Transform(
+        x=0.9,
+        z=2.0,
+        roll=-0.001,
+        pitch=0.015,
+        yaw=-0.0364)
     sensor_kit = world.spawn_actor(
         sensor_kit_blueprint,
-        sensor_kit_to_base_link_transform,
+        sensor_kit_to_base_link_transform.to_carla(),
         attach_to=base_link)
 
     # Spawn top lidar
-    lidar_top_to_sensor_kit_transform = carla.Transform(
-        ROS2.Location(),
-        ROS2.Rotation(
-            yaw=1.575))
+    lidar_top_to_sensor_kit_transform = ROS2.Transform(yaw=1.575)
     lidar_top = world.spawn_actor(
         vlp16_blueprint,
-        lidar_top_to_sensor_kit_transform,
+        lidar_top_to_sensor_kit_transform.to_carla(),
         attach_to=sensor_kit)
     lidar_top.enable_for_ros()
 
@@ -235,11 +232,10 @@ def spawn_sensors(world, base_link, ego):
     imu.enable_for_ros()
 
     # Spawn GNSS receiver
-    gnss_receiver_to_sensor_kit_transform = carla.Transform(
-        ROS2.Location(x=-0.1, z=-0.2))
+    gnss_receiver_to_sensor_kit_transform = ROS2.Transform(x=-0.1, z=-0.2)
     gnss_receiver = world.spawn_actor(
         gnss_receiver_blueprint,
-        gnss_receiver_to_sensor_kit_transform,
+        gnss_receiver_to_sensor_kit_transform.to_carla(),
         attach_to=sensor_kit)
     gnss_receiver.enable_for_ros()
 
@@ -270,11 +266,10 @@ def spawn_ego_with_sensors(world, spawn_point):
 
     # Transformation between vehicle pivot and projection of the rear
     # axis on the ground (base link) as measured in Unreal Editor
-    base_link_to_pivot_transform = carla.Transform(
-        ROS2.Location(x=-1.39706787))
+    base_link_to_pivot_transform = ROS2.Transform(x=-1.39706787)
     base_link = world.spawn_actor(
         base_link_blueprint,
-        base_link_to_pivot_transform,
+        base_link_to_pivot_transform.to_carla(),
         attach_to=ego)
 
     spawn_sensors(world, base_link, ego)
