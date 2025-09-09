@@ -35,6 +35,8 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include <util/ue-header-guard-end.h>
 
+#include "AutowareWorldSettings.h"
+
 namespace cr = carla::road;
 namespace crp = carla::rpc;
 namespace cre = carla::road::element;
@@ -462,6 +464,21 @@ void AAutowareGameModeBase::ParseOpenDrive()
   else
   {
     Episode->MapGeoReference = Map->GetGeoReference();
+
+    if (auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
+    {
+      if (WS->MgrsDataAsset.IsValid())
+      {
+        auto* Data = WS->MgrsDataAsset.Get();
+    
+        carla::geom::GeoLocation GeoReference(
+          Data->WorldOriginGeoCoordinate.Latitude,
+          Data->WorldOriginGeoCoordinate.Longitude,
+          Data->WorldOriginGeoCoordinate.Altitude
+        );
+        Episode->MapGeoReference = GeoReference;
+      }
+    }
   }
 }
 
