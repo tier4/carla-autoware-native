@@ -4,7 +4,7 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
-#include "Carla/Game/CarlaGameModeBase.h"
+#include "AutowareGameModeBase.h"
 #include "Carla.h"
 #include "Carla/Game/Tagger.h"
 #include "Carla/Game/CarlaHUD.h"
@@ -39,7 +39,7 @@ namespace cr = carla::road;
 namespace crp = carla::rpc;
 namespace cre = carla::road::element;
 
-ACarlaGameModeBase::ACarlaGameModeBase(const FObjectInitializer& ObjectInitializer)
+AAutowareGameModeBase::AAutowareGameModeBase(const FObjectInitializer& ObjectInitializer)
   : Super(ObjectInitializer)
 {
   PrimaryActorTick.bCanEverTick = true;
@@ -59,7 +59,7 @@ ACarlaGameModeBase::ACarlaGameModeBase(const FObjectInitializer& ObjectInitializ
   CarlaSettingsDelegate = CreateDefaultSubobject<UCarlaSettingsDelegate>(TEXT("CarlaSettingsDelegate"));
 }
 
-const FString ACarlaGameModeBase::GetRelativeMapPath() const
+const FString AAutowareGameModeBase::GetRelativeMapPath() const
 {
   UWorld* World = GetWorld();
   TSoftObjectPtr<UWorld> AssetPtr (World);
@@ -68,18 +68,18 @@ const FString ACarlaGameModeBase::GetRelativeMapPath() const
   return Path;
 }
 
-const FString ACarlaGameModeBase::GetFullMapPath() const
+const FString AAutowareGameModeBase::GetFullMapPath() const
 {
   FString Path = GetRelativeMapPath();
   return FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir()) + Path;
 }
 
-void ACarlaGameModeBase::InitGame(
+void AAutowareGameModeBase::InitGame(
     const FString &MapName,
     const FString &Options,
     FString &ErrorMessage)
 {
-  TRACE_CPUPROFILER_EVENT_SCOPE(ACarlaGameModeBase::InitGame);
+  TRACE_CPUPROFILER_EVENT_SCOPE(AAutowareGameModeBase::InitGame);
   Super::InitGame(MapName, Options, ErrorMessage);
 
   UWorld* World = GetWorld();
@@ -150,7 +150,7 @@ void ACarlaGameModeBase::InitGame(
 
   OnEpisodeSettingsChangeHandle = FCarlaStaticDelegates::OnEpisodeSettingsChange.AddUObject(
         this,
-        &ACarlaGameModeBase::OnEpisodeSettingsChanged);
+        &AAutowareGameModeBase::OnEpisodeSettingsChanged);
 
   SpawnActorFactories();
 
@@ -160,13 +160,15 @@ void ACarlaGameModeBase::InitGame(
 
   ParseOpenDrive();
 
-  if(Map.has_value())
-  {
-    StoreSpawnPoints();
-  }
+  // if(Map.has_value())
+  // {
+  //   StoreSpawnPoints();
+  // }
+
+  StoreSpawnPoints();
 }
 
-void ACarlaGameModeBase::RestartPlayer(AController *NewPlayer)
+void AAutowareGameModeBase::RestartPlayer(AController *NewPlayer)
 {
   if (CarlaSettingsDelegate != nullptr)
   {
@@ -176,7 +178,7 @@ void ACarlaGameModeBase::RestartPlayer(AController *NewPlayer)
   Super::RestartPlayer(NewPlayer);
 }
 
-void ACarlaGameModeBase::BeginPlay()
+void AAutowareGameModeBase::BeginPlay()
 {
   Super::BeginPlay();
 
@@ -243,7 +245,7 @@ void ACarlaGameModeBase::BeginPlay()
   EnableOverlapEvents();
 }
 
-TArray<FString> ACarlaGameModeBase::GetNamesOfAllActors()
+TArray<FString> AAutowareGameModeBase::GetNamesOfAllActors()
 {
   TArray<FString> Names;
   TArray<AActor*> Actors;
@@ -260,7 +262,7 @@ TArray<FString> ACarlaGameModeBase::GetNamesOfAllActors()
   return Names;
 }
 
-AActor* ACarlaGameModeBase::FindActorByName(const FString& ActorName)
+AActor* AAutowareGameModeBase::FindActorByName(const FString& ActorName)
 {
   TArray<AActor*> Actors;
   UGameplayStatics::GetAllActorsOfClass(GetWorld(), AActor::StaticClass(), Actors);
@@ -275,7 +277,7 @@ AActor* ACarlaGameModeBase::FindActorByName(const FString& ActorName)
   return nullptr;
 }
 
-UTexture2D* ACarlaGameModeBase::CreateUETexture(const carla::rpc::TextureColor& Texture)
+UTexture2D* AAutowareGameModeBase::CreateUETexture(const carla::rpc::TextureColor& Texture)
 {
   FlushRenderingCommands();
   TArray<FColor> Colors;
@@ -298,7 +300,7 @@ UTexture2D* ACarlaGameModeBase::CreateUETexture(const carla::rpc::TextureColor& 
   return UETexture;
 }
 
-UTexture2D* ACarlaGameModeBase::CreateUETexture(const carla::rpc::TextureFloatColor& Texture)
+UTexture2D* AAutowareGameModeBase::CreateUETexture(const carla::rpc::TextureFloatColor& Texture)
 {
   FlushRenderingCommands();
   TArray<FFloat16Color> Colors;
@@ -321,7 +323,7 @@ UTexture2D* ACarlaGameModeBase::CreateUETexture(const carla::rpc::TextureFloatCo
   return UETexture;
 }
 
-void ACarlaGameModeBase::ApplyTextureToActor(
+void AAutowareGameModeBase::ApplyTextureToActor(
     AActor* Actor,
     UTexture2D* Texture,
     const carla::rpc::MaterialParameter& TextureParam)
@@ -371,9 +373,9 @@ void ACarlaGameModeBase::ApplyTextureToActor(
   }
 }
 
-void ACarlaGameModeBase::Tick(float DeltaSeconds)
+void AAutowareGameModeBase::Tick(float DeltaSeconds)
 {
-  TRACE_CPUPROFILER_EVENT_SCOPE(ACarlaGameModeBase::Tick);
+  TRACE_CPUPROFILER_EVENT_SCOPE(AAutowareGameModeBase::Tick);
   Super::Tick(DeltaSeconds);
 
   /// @todo Recorder should not tick here, FCarlaEngine should do it.
@@ -383,7 +385,7 @@ void ACarlaGameModeBase::Tick(float DeltaSeconds)
   }
 }
 
-void ACarlaGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void AAutowareGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
   FCarlaStaticDelegates::OnEpisodeSettingsChange.Remove(OnEpisodeSettingsChangeHandle);
 
@@ -398,7 +400,7 @@ void ACarlaGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
   }
 }
 
-void ACarlaGameModeBase::SpawnActorFactories()
+void AAutowareGameModeBase::SpawnActorFactories()
 {
   auto *World = GetWorld();
   check(World != nullptr);
@@ -421,7 +423,7 @@ void ACarlaGameModeBase::SpawnActorFactories()
   }
 }
 
-void ACarlaGameModeBase::StoreSpawnPoints()
+void AAutowareGameModeBase::StoreSpawnPoints()
 {
   for (TActorIterator<AVehicleSpawnPoint> It(GetWorld()); It; ++It)
   {
@@ -436,7 +438,7 @@ void ACarlaGameModeBase::StoreSpawnPoints()
   UE_LOG(LogCarla, Log, TEXT("There are %d SpawnPoints in the map"), SpawnPointsTransforms.Num());
 }
 
-void ACarlaGameModeBase::GenerateSpawnPoints()
+void AAutowareGameModeBase::GenerateSpawnPoints()
 {
   UE_LOG(LogCarla, Log, TEXT("Generating SpawnPoints ..."));
   std::vector<std::pair<carla::road::element::Waypoint, carla::road::element::Waypoint>> Topology = Map->GenerateTopology();
@@ -450,7 +452,7 @@ void ACarlaGameModeBase::GenerateSpawnPoints()
   }
 }
 
-void ACarlaGameModeBase::ParseOpenDrive()
+void AAutowareGameModeBase::ParseOpenDrive()
 {
   std::string opendrive_xml = carla::rpc::FromLongFString(UOpenDrive::GetXODR(GetWorld()));
   Map = carla::opendrive::OpenDriveParser::Load(opendrive_xml);
@@ -463,7 +465,7 @@ void ACarlaGameModeBase::ParseOpenDrive()
   }
 }
 
-ATrafficLightManager* ACarlaGameModeBase::GetTrafficLightManager()
+ATrafficLightManager* AAutowareGameModeBase::GetTrafficLightManager()
 {
   if (!TrafficLightManager)
   {
@@ -483,7 +485,7 @@ ATrafficLightManager* ACarlaGameModeBase::GetTrafficLightManager()
   return TrafficLightManager;
 }
 
-void ACarlaGameModeBase::CheckForEmptyMeshes()
+void AAutowareGameModeBase::CheckForEmptyMeshes()
 {
   TArray<AActor*> WorldActors;
   UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), WorldActors);
@@ -498,7 +500,7 @@ void ACarlaGameModeBase::CheckForEmptyMeshes()
   }
 }
 
-void ACarlaGameModeBase::EnableOverlapEvents()
+void AAutowareGameModeBase::EnableOverlapEvents()
 {
   TArray<AActor*> WorldActors;
   UGameplayStatics::GetAllActorsOfClass(GetWorld(), AStaticMeshActor::StaticClass(), WorldActors);
@@ -523,7 +525,7 @@ void ACarlaGameModeBase::EnableOverlapEvents()
   }
 }
 
-void ACarlaGameModeBase::DebugShowSignals(bool enable)
+void AAutowareGameModeBase::DebugShowSignals(bool enable)
 {
 
   auto World = GetWorld();
@@ -623,7 +625,7 @@ void ACarlaGameModeBase::DebugShowSignals(bool enable)
 
 }
 
-TArray<FBoundingBox> ACarlaGameModeBase::GetAllBBsOfLevel(uint8 TagQueried) const
+TArray<FBoundingBox> AAutowareGameModeBase::GetAllBBsOfLevel(uint8 TagQueried) const
 {
   UWorld* World = GetWorld();
 
@@ -637,7 +639,7 @@ TArray<FBoundingBox> ACarlaGameModeBase::GetAllBBsOfLevel(uint8 TagQueried) cons
   return BoundingBoxes;
 }
 
-void ACarlaGameModeBase::RegisterEnvironmentObjects()
+void AAutowareGameModeBase::RegisterEnvironmentObjects()
 {
   // Get all actors of the level
   TArray<AActor*> FoundActors;
@@ -645,14 +647,14 @@ void ACarlaGameModeBase::RegisterEnvironmentObjects()
   ObjectRegister->RegisterObjects(FoundActors);
 }
 
-void ACarlaGameModeBase::EnableEnvironmentObjects(
+void AAutowareGameModeBase::EnableEnvironmentObjects(
   const TSet<uint64>& EnvObjectIds,
   bool Enable)
 {
   ObjectRegister->EnableEnvironmentObjects(EnvObjectIds, Enable);
 }
 
-void ACarlaGameModeBase::LoadMapLayer(int32 MapLayers)
+void AAutowareGameModeBase::LoadMapLayer(int32 MapLayers)
 {
   const UWorld* World = GetWorld();
   UGameplayStatics::FlushLevelStreaming(World);
@@ -677,7 +679,7 @@ void ACarlaGameModeBase::LoadMapLayer(int32 MapLayers)
   }
 }
 
-void ACarlaGameModeBase::UnLoadMapLayer(int32 MapLayers)
+void AAutowareGameModeBase::UnLoadMapLayer(int32 MapLayers)
 {
   const UWorld* World = GetWorld();
 
@@ -702,7 +704,7 @@ void ACarlaGameModeBase::UnLoadMapLayer(int32 MapLayers)
 
 }
 
-void ACarlaGameModeBase::ConvertMapLayerMaskToMapNames(int32 MapLayer, TArray<FName>& OutLevelNames)
+void AAutowareGameModeBase::ConvertMapLayerMaskToMapNames(int32 MapLayer, TArray<FName>& OutLevelNames)
 {
   UWorld* World = GetWorld();
   const TArray <ULevelStreaming*> Levels = World->GetStreamingLevels();
@@ -744,7 +746,7 @@ void ACarlaGameModeBase::ConvertMapLayerMaskToMapNames(int32 MapLayer, TArray<FN
 
 }
 
-ULevel* ACarlaGameModeBase::GetULevelFromName(FString LevelName)
+ULevel* AAutowareGameModeBase::GetULevelFromName(FString LevelName)
 {
   ULevel* OutLevel = nullptr;
   UWorld* World = GetWorld();
@@ -767,7 +769,7 @@ ULevel* ACarlaGameModeBase::GetULevelFromName(FString LevelName)
   return OutLevel;
 }
 
-void ACarlaGameModeBase::OnLoadStreamLevel()
+void AAutowareGameModeBase::OnLoadStreamLevel()
 {
   PendingLevelsToLoad--;
 
@@ -779,7 +781,7 @@ void ACarlaGameModeBase::OnLoadStreamLevel()
   }
 }
 
-void ACarlaGameModeBase::OnUnloadStreamLevel()
+void AAutowareGameModeBase::OnUnloadStreamLevel()
 {
   PendingLevelsToUnLoad--;
   // Update stored registered objects (discarding the deleted objects)
@@ -789,7 +791,7 @@ void ACarlaGameModeBase::OnUnloadStreamLevel()
   }
 }
 
-void ACarlaGameModeBase::OnEpisodeSettingsChanged(const FEpisodeSettings &Settings)
+void AAutowareGameModeBase::OnEpisodeSettingsChanged(const FEpisodeSettings &Settings)
 {
   CarlaSettingsDelegate->SetAllActorsDrawDistance(GetWorld(), Settings.MaxCullingDistance);
 }
