@@ -112,6 +112,8 @@ void FAckermannController::RunControlSteering() {
     }
 
   }
+
+  UE_LOG(LogTemp, Warning, TEXT("Steer: %f Vehicle Steer: %f Target Steer: %f Vehicle Max Steering: %f"), Steer, VehicleSteer, TargetSteer, VehicleMaxSteering);
 }
 
 bool FAckermannController::RunControlFullStop() {
