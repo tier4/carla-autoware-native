@@ -15,8 +15,67 @@
 
 #include "carla/ros2/subscribers/AutowareSubscriber.h"
 
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
 namespace carla {
 namespace ros2 {
+
+// Steering compensation lookup table
+// Pairs of (actual_steering_angle, ratio) where ratio = desired_angle / actual_angle
+// Data from steer-angle-experiments.ods Sheet2
+// Only positive values stored; absolute value used for lookup
+static const std::vector<std::pair<float, float>> STEERING_COMPENSATION_TABLE = {
+    {0.000f, 1.000f},   // Zero steering
+    {0.007f, 14.286f},  // 0.007 rad actual -> 14.286 ratio
+    {0.027f, 7.407f},   // 0.027 rad actual -> 7.407 ratio
+    {0.061f, 4.918f},   // 0.061 rad actual -> 4.918 ratio
+    {0.1085f, 3.687f},  // 0.1085 rad actual -> 3.687 ratio
+    {0.170f, 2.941f},   // 0.170 rad actual -> 2.941 ratio
+    {0.2445f, 2.454f},  // 0.2445 rad actual -> 2.454 ratio
+    {0.3345f, 2.093f},  // 0.3345 rad actual -> 2.093 ratio
+    {0.439f, 1.822f},   // 0.439 rad actual -> 1.822 ratio
+    {0.560f, 1.607f},   // 0.560 rad actual -> 1.607 ratio
+    {0.7005f, 1.428f},  // 0.7005 rad actual -> 1.428 ratio
+    {0.8625f, 1.275f},  // 0.8625 rad actual -> 1.275 ratio
+    {1.0565f, 1.136f}   // 1.0565 rad actual -> 1.136 ratio
+};
+
+// Linear interpolation function
+static float Lerp(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+// Get steering compensation ratio from lookup table with LERP
+static float GetSteeringCompensationRatio(float actual_steering_angle) {
+    // Use absolute value for symmetric steering
+    float abs_angle = std::abs(actual_steering_angle);
+    
+    // Handle edge cases
+    if (abs_angle <= STEERING_COMPENSATION_TABLE.front().first) {
+        return STEERING_COMPENSATION_TABLE.front().second;
+    }
+    if (abs_angle >= STEERING_COMPENSATION_TABLE.back().first) {
+        return STEERING_COMPENSATION_TABLE.back().second;
+    }
+
+    // Find the two points to interpolate between
+    for (size_t i = 0; i < STEERING_COMPENSATION_TABLE.size() - 1; ++i) {
+        const auto& current = STEERING_COMPENSATION_TABLE[i];
+        const auto& next = STEERING_COMPENSATION_TABLE[i + 1];
+        
+        if (abs_angle >= current.first && abs_angle <= next.first) {
+            // Calculate interpolation factor
+            float t = (abs_angle - current.first) / (next.first - current.first);
+            // Interpolate between the two ratio values
+            return Lerp(current.second, next.second, t);
+        }
+    }
+
+    // Default fallback (should not reach here)
+    return 1.0f;
+}
 
 // Define subscribers
 class AutowareControlSubscriber
@@ -194,7 +253,12 @@ VehicleAckermannControl AutowareController::GetControl() {
   }
 
   /// @note Set lateral negative, because Carla treats positive as right and Autoware expects positive to represent left (all when moving forward)
-  control_out.steer = -control_in.lateral().steering_tire_angle();
+  float raw_steering = -control_in.lateral().steering_tire_angle();
+  
+  // Apply steering compensation using lookup table
+  float compensation_ratio = GetSteeringCompensationRatio(raw_steering);
+  control_out.steer = raw_steering * compensation_ratio;
+  
   if (control_in.lateral().is_defined_steering_tire_rotation_rate()) {
     control_out.steer_speed = -control_in.lateral().steering_tire_rotation_rate();
   }
