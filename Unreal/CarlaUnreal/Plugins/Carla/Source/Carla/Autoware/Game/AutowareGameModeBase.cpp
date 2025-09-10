@@ -464,20 +464,24 @@ void AAutowareGameModeBase::ParseOpenDrive()
   else
   {
     Episode->MapGeoReference = Map->GetGeoReference();
+  }
 
-    if (auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
+  if (auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
+  {
+    UE_LOG(LogCarla, Warning, TEXT("Autoware Settings fetch succeded."));
+    auto* Data = WS->MgrsDataAsset.LoadSynchronous();;
+
+    if (IsValid(Data))
     {
-      if (WS->MgrsDataAsset.IsValid())
-      {
-        auto* Data = WS->MgrsDataAsset.Get();
-    
-        carla::geom::GeoLocation GeoReference(
-          Data->WorldOriginGeoCoordinate.Latitude,
-          Data->WorldOriginGeoCoordinate.Longitude,
-          Data->WorldOriginGeoCoordinate.Altitude
-        );
-        Episode->MapGeoReference = GeoReference;
-      }
+      carla::geom::GeoLocation GeoReference
+      (
+        Data->WorldOriginGeoCoordinate.Latitude,
+        Data->WorldOriginGeoCoordinate.Longitude,
+        Data->WorldOriginGeoCoordinate.Altitude
+      );
+      Episode->MapGeoReference = GeoReference;
+      
+      UE_LOG(LogCarla, Warning, TEXT("MGRS Offset loaded successfuly."));
     }
   }
 }
