@@ -27,7 +27,6 @@ namespace ros2 {
 // Data from steer-angle-experiments.ods Sheet2
 // Only positive values stored; absolute value used for lookup
 static const std::vector<std::pair<float, float>> STEERING_COMPENSATION_TABLE = {
-    {0.000f, 1.000f},   // Zero steering
     {0.007f, 14.286f},  // 0.007 rad actual -> 14.286 ratio
     {0.027f, 7.407f},   // 0.027 rad actual -> 7.407 ratio
     {0.061f, 4.918f},   // 0.061 rad actual -> 4.918 ratio
