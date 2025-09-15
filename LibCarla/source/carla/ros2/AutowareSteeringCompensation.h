@@ -32,14 +32,14 @@ constexpr std::array STEERING_COMPENSATION_TABLE{
 };
 
 // Linear interpolation function
-inline float Lerp(float a, float b, float t) {
+inline float Lerp(const float a, const float b, const float t) {
   return a + t * (b - a);
 }
 
 // Get steering compensation ratio from lookup table with LERP
-inline float GetSteeringCompensationRatio(float actual_steering_angle) {
+inline float GetSteeringCompensationRatio(const float actual_steering_angle) {
   // Use absolute value for symmetric steering
-  float abs_angle = std::abs(actual_steering_angle);
+  const float abs_angle = std::abs(actual_steering_angle);
 
   // Handle edge cases
   if (abs_angle <= STEERING_COMPENSATION_TABLE.front().first) {
@@ -51,12 +51,12 @@ inline float GetSteeringCompensationRatio(float actual_steering_angle) {
 
   // Find the two points to interpolate between
   for (size_t i = 0; i < STEERING_COMPENSATION_TABLE.size() - 1; ++i) {
-    const auto& [current_angle, current_compensation_ratio] = STEERING_COMPENSATION_TABLE[i];
-    const auto& [next_angle, next_compensation_ratio] = STEERING_COMPENSATION_TABLE[i + 1];
+    const auto [current_angle, current_compensation_ratio] = STEERING_COMPENSATION_TABLE[i];
+    const auto [next_angle, next_compensation_ratio] = STEERING_COMPENSATION_TABLE[i + 1];
 
     if (abs_angle >= current_angle && abs_angle <= next_angle) {
       // Calculate interpolation factor
-      float t = (abs_angle - current_angle) / (next_angle - current_angle);
+      const float t = (abs_angle - current_angle) / (next_angle - current_angle);
       // Interpolate between the two ratio values
       return Lerp(current_compensation_ratio, next_compensation_ratio, t);
     }

@@ -199,10 +199,10 @@ VehicleAckermannControl AutowareController::GetControl() {
   }
 
   /// @note Set lateral negative, because Carla treats positive as right and Autoware expects positive to represent left (all when moving forward)
-  float raw_steering = -control_in.lateral().steering_tire_angle();
+  const auto raw_steering = -control_in.lateral().steering_tire_angle();
 
   // Apply steering compensation using lookup table
-  float compensation_ratio = autoware_steering_compensation::GetSteeringCompensationRatio(raw_steering);
+  const auto compensation_ratio = autoware_steering_compensation::GetSteeringCompensationRatio(raw_steering);
   control_out.steer = raw_steering * compensation_ratio;
 
   if (control_in.lateral().is_defined_steering_tire_rotation_rate()) {
