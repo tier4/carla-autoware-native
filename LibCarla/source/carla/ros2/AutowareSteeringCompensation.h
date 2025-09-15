@@ -11,24 +11,26 @@ namespace carla {
 namespace ros2 {
 namespace autoware_steering_compensation {
 
+// Helper alias to use template type deduction
+using _p = std::pair<float, float>;
+
 // Steering compensation lookup table
 // Pairs of (actual_steering_angle, ratio) where ratio = desired_angle / actual_angle
 // Data from steer-angle-experiments.ods Sheet2
 // Only positive values stored; absolute value used for lookup
-using _P = std::pair<float, float>;
 constexpr std::array STEERING_COMPENSATION_TABLE{
-  _P{0.007f, 14.286f},  // 0.007 rad actual -> 14.286 ratio
-  _P{0.027f, 7.407f},   // 0.027 rad actual -> 7.407 ratio
-  _P{0.061f, 4.918f},   // 0.061 rad actual -> 4.918 ratio
-  _P{0.1085f, 3.687f},  // 0.1085 rad actual -> 3.687 ratio
-  _P{0.170f, 2.941f},   // 0.170 rad actual -> 2.941 ratio
-  _P{0.2445f, 2.454f},  // 0.2445 rad actual -> 2.454 ratio
-  _P{0.3345f, 2.093f},  // 0.3345 rad actual -> 2.093 ratio
-  _P{0.439f, 1.822f},   // 0.439 rad actual -> 1.822 ratio
-  _P{0.560f, 1.607f},   // 0.560 rad actual -> 1.607 ratio
-  _P{0.7005f, 1.428f},  // 0.7005 rad actual -> 1.428 ratio
-  _P{0.8625f, 1.275f},  // 0.8625 rad actual -> 1.275 ratio
-  _P{1.0565f, 1.136f}   // 1.0565 rad actual -> 1.136 ratio
+  _p{0.007f, 14.286f},  // 0.007 rad actual -> 14.286 ratio
+  _p{0.027f, 7.407f},   // 0.027 rad actual -> 7.407 ratio
+  _p{0.061f, 4.918f},   // 0.061 rad actual -> 4.918 ratio
+  _p{0.1085f, 3.687f},  // 0.1085 rad actual -> 3.687 ratio
+  _p{0.170f, 2.941f},   // 0.170 rad actual -> 2.941 ratio
+  _p{0.2445f, 2.454f},  // 0.2445 rad actual -> 2.454 ratio
+  _p{0.3345f, 2.093f},  // 0.3345 rad actual -> 2.093 ratio
+  _p{0.439f, 1.822f},   // 0.439 rad actual -> 1.822 ratio
+  _p{0.560f, 1.607f},   // 0.560 rad actual -> 1.607 ratio
+  _p{0.7005f, 1.428f},  // 0.7005 rad actual -> 1.428 ratio
+  _p{0.8625f, 1.275f},  // 0.8625 rad actual -> 1.275 ratio
+  _p{1.0565f, 1.136f}   // 1.0565 rad actual -> 1.136 ratio
 };
 
 // Linear interpolation function
