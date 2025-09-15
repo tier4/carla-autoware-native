@@ -3,6 +3,7 @@ import math
 import random
 import argparse
 import time
+import PyKDL as kdl
 
 # Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
 DESIRED_SIM_RATE = 100
@@ -15,6 +16,81 @@ def warning(text):
 
 def error(text):
     print("[ERROR]: %s" % text)
+
+class ROS2:
+    """
+    ROS2 coordinate system to CARLA coordinate system conversions
+    ROS2 uses right-handed system and CARLA uses left-handed system.
+    Also converts rotation units
+    - ROS2 uses radians
+    - CARLA uses degrees
+    https://github.com/carla-simulator/ros-bridge/blob/e9063d97ff5a724f76adbb1b852dc71da1dcfeec/carla_common/src/carla_common/transforms.py#L307-L310
+    """
+    def Location(x : float = 0.0, y : float = 0.0, z : float = 0.0):
+        """In meters"""
+        return carla.Location(x =  x,
+                              y = -y,
+                              z =  z)
+
+    def Rotation(roll : float = 0.0, pitch : float = 0.0, yaw : float = 0.0):
+        """In radians"""
+        return carla.Rotation(roll  =  math.degrees(roll),
+                              pitch = -math.degrees(pitch),
+                              yaw   = -math.degrees(yaw))
+
+    class Transform:
+        """
+        Transform in ROS2 coordinate system
+        """
+        x = 0.0
+        y = 0.0
+        z = 0.0
+        roll = 0.0
+        pitch = 0.0
+        yaw = 0.0
+
+        def __init__(self,
+                     x : float = 0.0,
+                     y : float = 0.0,
+                     z : float = 0.0,
+                     roll : float = 0.0,
+                     pitch : float = 0.0,
+                     yaw : float = 0.0):
+            self.x = x
+            self.y = y
+            self.z = z
+            self.roll = roll
+            self.pitch = pitch
+            self.yaw = yaw
+
+        def to_carla(self):
+            return carla.Transform(ROS2.Location(x=self.x,
+                                                 y=self.y,
+                                                 z=self.z),
+                                   ROS2.Rotation(roll=self.roll,
+                                                 pitch=self.pitch,
+                                                 yaw=self.yaw))
+
+        def to_kdl(self):
+            return kdl.Frame(kdl.Rotation.RPY(self.roll, self.pitch, self.yaw),
+                             kdl.Vector(self.x, self.y, self.z))
+
+        @staticmethod
+        def from_kdl(F: kdl.Frame):
+            x, y, z = F.p[0], F.p[1], F.p[2]
+            roll, pitch, yaw = F.M.GetRPY()
+
+            return ROS2.Transform(x, y, z, roll, pitch, yaw)
+
+def chain_transforms(transforms):
+    """
+    :param transforms: list of ROS2.Transform
+    :return: ROS2.Transform
+    """
+    F = transforms[0].to_kdl()
+    for t in transforms[1:]:
+        F = F * t.to_kdl()
+    return ROS2.Transform.from_kdl(F)
 
 def generate_vlp16_blueprint(blueprint_library):
     """Generates a blueprint for VLP16
@@ -89,7 +165,7 @@ def generate_gnss_blueprint(blueprint_library):
 
     return blueprint
 
-def spawn_sensors(world, base_link):
+def spawn_sensors(world, base_link, ego):
     """Spawns sensors relatively to the provided base_link actor
 
     Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
@@ -98,7 +174,8 @@ def spawn_sensors(world, base_link):
 
     blueprint_library = world.get_blueprint_library()
 
-    empty_blueprint = blueprint_library.find("util.actor.empty")
+    sensor_kit_blueprint = blueprint_library.find("util.actor.empty")
+    sensor_kit_blueprint.set_attribute("ros_name", "sensor_kit_base_link")
     vlp16_blueprint = generate_vlp16_blueprint(blueprint_library)
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
@@ -106,31 +183,28 @@ def spawn_sensors(world, base_link):
     gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library)
     vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
-    sensor_kit_to_base_link_transform = carla.Transform(
-        carla.Location(x=0.9, z=2.0),
-        carla.Rotation(
-            roll=math.degrees(-0.001),
-            pitch=math.degrees(0.015),
-            yaw=math.degrees(-0.0364)))
+    sensor_kit_to_base_link_transform = ROS2.Transform(
+        x=0.9,
+        z=2.0,
+        roll=-0.001,
+        pitch=0.015,
+        yaw=-0.0364)
     sensor_kit = world.spawn_actor(
-        empty_blueprint,
-        sensor_kit_to_base_link_transform,
+        sensor_kit_blueprint,
+        sensor_kit_to_base_link_transform.to_carla(),
         attach_to=base_link)
 
     # Spawn top lidar
-    lidar_top_to_sensor_kit_transform = carla.Transform(
-        carla.Location(),
-        carla.Rotation(
-            yaw=math.degrees(1.575)))
+    lidar_top_to_sensor_kit_transform = ROS2.Transform(yaw=1.575)
     lidar_top = world.spawn_actor(
         vlp16_blueprint,
-        lidar_top_to_sensor_kit_transform,
+        lidar_top_to_sensor_kit_transform.to_carla(),
         attach_to=sensor_kit)
     lidar_top.enable_for_ros()
 
     # Spawn traffic light camera
     traffic_light_left_camera_to_sensor_kit_transform = carla.Transform(
-        carla.Location(x=0.05, y=0.0175, z=-0.1))
+        ROS2.Location(x=0.05, y=0.0175, z=-0.1))
     traffic_light_left_camera = world.spawn_actor(
         traffic_light_camera_blueprint,
         traffic_light_left_camera_to_sensor_kit_transform,
@@ -138,23 +212,30 @@ def spawn_sensors(world, base_link):
     traffic_light_left_camera.enable_for_ros()
 
     # Spawn IMU
-    imu_to_sensor_kit_transform = carla.Transform(
-        carla.Location(),
-        carla.Rotation(
-            roll=math.degrees(3.14159265359),
-            yaw=math.degrees(3.14159265359)))
+    # NOTE: IMU is mounted to Ego directly, because this is required for angular velocity to work
+    base_link_to_pivot_transform = ROS2.Transform(x=-1.39706787)
+    sensor_kit_to_base_link_transform = ROS2.Transform(x=0.9,
+                                                       z=2.0,
+                                                       roll=-0.001,
+                                                       pitch=0.015,
+                                                       yaw=-0.0364)
+    imu_to_sensor_kit_transform = ROS2.Transform(roll=3.14159265359,
+                                                 yaw=3.14159265359)
+
+    imu_to_pivot_transform = chain_transforms([base_link_to_pivot_transform,
+                                               sensor_kit_to_base_link_transform,
+                                               imu_to_sensor_kit_transform])
     imu = world.spawn_actor(
         imu_blueprint,
-        imu_to_sensor_kit_transform,
-        attach_to=sensor_kit)
+        imu_to_pivot_transform.to_carla(),
+        attach_to=ego)
     imu.enable_for_ros()
 
     # Spawn GNSS receiver
-    gnss_receiver_to_sensor_kit_transform = carla.Transform(
-        carla.Location(x=-0.1, z=-0.2))
+    gnss_receiver_to_sensor_kit_transform = ROS2.Transform(x=-0.1, z=-0.2)
     gnss_receiver = world.spawn_actor(
         gnss_receiver_blueprint,
-        gnss_receiver_to_sensor_kit_transform,
+        gnss_receiver_to_sensor_kit_transform.to_carla(),
         attach_to=sensor_kit)
     gnss_receiver.enable_for_ros()
 
@@ -180,18 +261,18 @@ def spawn_ego_with_sensors(world, spawn_point):
 
     ego = world.spawn_actor(ego_blueprint, spawn_point)
 
-    empty_blueprint = blueprint_library.find("util.actor.empty")
+    base_link_blueprint = blueprint_library.find("util.actor.empty")
+    base_link_blueprint.set_attribute("ros_name", "sensor_kit_base_link")
 
     # Transformation between vehicle pivot and projection of the rear
     # axis on the ground (base link) as measured in Unreal Editor
-    base_link_to_pivot_transform = carla.Transform(
-        carla.Location(x=-1.39706787))
+    base_link_to_pivot_transform = ROS2.Transform(x=-1.39706787)
     base_link = world.spawn_actor(
-        empty_blueprint,
-        base_link_to_pivot_transform,
+        base_link_blueprint,
+        base_link_to_pivot_transform.to_carla(),
         attach_to=ego)
 
-    spawn_sensors(world, base_link)
+    spawn_sensors(world, base_link, ego)
 
     return ego
 
@@ -199,7 +280,7 @@ def move_spectator(world, ego_vehicle):
     spectator = world.get_spectator()
 
     spectator_tf = ego_vehicle.get_transform()
-    spectator_offset = carla.Transform(carla.Location(x=-6.0, z=1.5))
+    spectator_offset = carla.Transform(ROS2.Location(x=-6.0, z=1.5))
 
     spectator_with_offset_position = spectator_tf.transform(spectator_offset.location)
 
