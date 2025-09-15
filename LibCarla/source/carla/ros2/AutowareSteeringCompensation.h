@@ -11,26 +11,29 @@ namespace carla {
 namespace ros2 {
 namespace autoware_steering_compensation {
 
-// Helper alias to use template type deduction
-using _p = std::pair<float, float>;
+constexpr std::tuple<float, float, float, float> __data_point(const float desired, const float actual) {
+  return std::make_tuple(desired, actual, desired / actual, actual / desired);
+}
 
 // Steering compensation lookup table
-// Pairs of (actual_steering_angle, ratio) where ratio = desired_angle / actual_angle
+// Tuples of (desired_steering_angle, actual_steering_angle, ratio1, ratio2) where:
+//   ratio1 = desired_angle / actual_angle
+//   ratio2 = actual_angle / desired_angle
 // Data from steer-angle-experiments.ods Sheet2
 // Only positive values stored; absolute value used for lookup
 constexpr std::array STEERING_COMPENSATION_TABLE{
-  _p{0.007f, 14.286f},  // 0.007 rad actual -> 14.286 ratio
-  _p{0.027f, 7.407f},   // 0.027 rad actual -> 7.407 ratio
-  _p{0.061f, 4.918f},   // 0.061 rad actual -> 4.918 ratio
-  _p{0.1085f, 3.687f},  // 0.1085 rad actual -> 3.687 ratio
-  _p{0.170f, 2.941f},   // 0.170 rad actual -> 2.941 ratio
-  _p{0.2445f, 2.454f},  // 0.2445 rad actual -> 2.454 ratio
-  _p{0.3345f, 2.093f},  // 0.3345 rad actual -> 2.093 ratio
-  _p{0.439f, 1.822f},   // 0.439 rad actual -> 1.822 ratio
-  _p{0.560f, 1.607f},   // 0.560 rad actual -> 1.607 ratio
-  _p{0.7005f, 1.428f},  // 0.7005 rad actual -> 1.428 ratio
-  _p{0.8625f, 1.275f},  // 0.8625 rad actual -> 1.275 ratio
-  _p{1.0565f, 1.136f}   // 1.0565 rad actual -> 1.136 ratio
+  __data_point(0.1f, 0.007f ),
+  __data_point(0.2f, 0.027f ),
+  __data_point(0.3f, 0.061f ),
+  __data_point(0.4f, 0.1085f),
+  __data_point(0.5f, 0.17f  ),
+  __data_point(0.6f, 0.2445f),
+  __data_point(0.7f, 0.3345f),
+  __data_point(0.8f, 0.439f ),
+  __data_point(0.9f, 0.56f  ),
+  __data_point(1.0f, 0.7005f),
+  __data_point(1.1f, 0.8625f),
+  __data_point(1.2f, 1.0565f),
 };
 
 // Linear interpolation function
@@ -39,33 +42,44 @@ inline float Lerp(const float a, const float b, const float t) {
 }
 
 // Get steering compensation ratio from lookup table with LERP
-inline float GetSteeringCompensationRatio(const float actual_steering_angle) {
+template<std::size_t key_idx, std::size_t value_idx>
+float __lookup_table_impl(const float angle) {
   // Use absolute value for symmetric steering
-  const float abs_angle = std::abs(actual_steering_angle);
+  const float key_angle = std::abs(angle);
 
   // Handle edge cases
-  if (abs_angle <= STEERING_COMPENSATION_TABLE.front().first) {
-    return STEERING_COMPENSATION_TABLE.front().second;
+  if (key_angle <= std::get<key_idx>(STEERING_COMPENSATION_TABLE.front())) {
+    return std::get<value_idx>(STEERING_COMPENSATION_TABLE.front());
   }
-  if (abs_angle >= STEERING_COMPENSATION_TABLE.back().first) {
-    return STEERING_COMPENSATION_TABLE.back().second;
+  if (key_angle >= std::get<key_idx>(STEERING_COMPENSATION_TABLE.back())) {
+    return std::get<value_idx>(STEERING_COMPENSATION_TABLE.back());
   }
 
   // Find the two points to interpolate between
   for (size_t i = 0; i < STEERING_COMPENSATION_TABLE.size() - 1; ++i) {
-    const auto [current_angle, current_compensation_ratio] = STEERING_COMPENSATION_TABLE[i];
-    const auto [next_angle, next_compensation_ratio] = STEERING_COMPENSATION_TABLE[i + 1];
+    const auto current_key_angle   = std::get<key_idx  >(STEERING_COMPENSATION_TABLE[i]);
+    const auto current_value_angle = std::get<value_idx>(STEERING_COMPENSATION_TABLE[i]);
+    const auto next_key_angle      = std::get<key_idx  >(STEERING_COMPENSATION_TABLE[i + 1]);
+    const auto next_value_angle    = std::get<value_idx>(STEERING_COMPENSATION_TABLE[i + 1]);
 
-    if (abs_angle >= current_angle && abs_angle <= next_angle) {
+    if (current_key_angle <= key_angle && key_angle <= next_key_angle) {
       // Calculate interpolation factor
-      const float t = (abs_angle - current_angle) / (next_angle - current_angle);
+      const float t = (key_angle - current_key_angle) / (next_key_angle - current_key_angle);
       // Interpolate between the two ratio values
-      return Lerp(current_compensation_ratio, next_compensation_ratio, t);
+      return Lerp(current_value_angle, next_value_angle, t);
     }
   }
 
   // Default fallback (should not reach here)
   return 1.0f;
+}
+
+inline float GetDesiredSteeringCompensationRatio(const float angle) {
+  return __lookup_table_impl<0, 3>(angle);
+}
+
+inline float GetActualSteeringCompensationRatio(const float angle) {
+  return __lookup_table_impl<1, 2>(angle);
 }
 
 } // namespace autoware_steering_compensation
