@@ -50,7 +50,7 @@ static float Lerp(float a, float b, float t) {
 static float GetSteeringCompensationRatio(float actual_steering_angle) {
     // Use absolute value for symmetric steering
     float abs_angle = std::abs(actual_steering_angle);
-    
+
     // Handle edge cases
     if (abs_angle <= STEERING_COMPENSATION_TABLE.front().first) {
         return STEERING_COMPENSATION_TABLE.front().second;
@@ -61,14 +61,14 @@ static float GetSteeringCompensationRatio(float actual_steering_angle) {
 
     // Find the two points to interpolate between
     for (size_t i = 0; i < STEERING_COMPENSATION_TABLE.size() - 1; ++i) {
-        const auto& current = STEERING_COMPENSATION_TABLE[i];
-        const auto& next = STEERING_COMPENSATION_TABLE[i + 1];
-        
-        if (abs_angle >= current.first && abs_angle <= next.first) {
+        const auto& [current_angle, current_compensation_ratio] = STEERING_COMPENSATION_TABLE[i];
+        const auto& [next_angle, next_compensation_ratio] = STEERING_COMPENSATION_TABLE[i + 1];
+
+        if (abs_angle >= current_angle && abs_angle <= next_angle) {
             // Calculate interpolation factor
-            float t = (abs_angle - current.first) / (next.first - current.first);
+            float t = (abs_angle - current_angle) / (next_angle - current_angle);
             // Interpolate between the two ratio values
-            return Lerp(current.second, next.second, t);
+            return Lerp(current_compensation_ratio, next_compensation_ratio, t);
         }
     }
 
@@ -253,11 +253,11 @@ VehicleAckermannControl AutowareController::GetControl() {
 
   /// @note Set lateral negative, because Carla treats positive as right and Autoware expects positive to represent left (all when moving forward)
   float raw_steering = -control_in.lateral().steering_tire_angle();
-  
+
   // Apply steering compensation using lookup table
   float compensation_ratio = GetSteeringCompensationRatio(raw_steering);
   control_out.steer = raw_steering * compensation_ratio;
-  
+
   if (control_in.lateral().is_defined_steering_tire_rotation_rate()) {
     control_out.steer_speed = -control_in.lateral().steering_tire_rotation_rate();
   }
