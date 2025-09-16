@@ -9,6 +9,12 @@
 
 namespace carla {
 namespace ros2 {
+/**
+ * @note This solution is not ideal and it should be temporary. Ideally a root cause should be found
+ * and some other solution should be implemented based on the findings.
+ * This solution is purely based on experiments. For better accuracy more data points can be added
+ * to the lookup table.
+ */
 namespace autoware_steering_compensation {
 namespace detail {
 
