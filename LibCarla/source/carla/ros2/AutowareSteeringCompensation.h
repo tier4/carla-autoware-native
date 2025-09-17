@@ -29,18 +29,20 @@ constexpr std::tuple<float, float, float, float> MakeDataPoint(const float desir
 // Data from steer-angle-experiments.ods Sheet2
 // Only positive values stored; absolute value used for lookup
 constexpr std::array DATA{
-  MakeDataPoint(0.1f, 0.007f ),
-  MakeDataPoint(0.2f, 0.027f ),
-  MakeDataPoint(0.3f, 0.061f ),
-  MakeDataPoint(0.4f, 0.1085f),
-  MakeDataPoint(0.5f, 0.17f  ),
-  MakeDataPoint(0.6f, 0.2445f),
-  MakeDataPoint(0.7f, 0.3345f),
-  MakeDataPoint(0.8f, 0.439f ),
-  MakeDataPoint(0.9f, 0.56f  ),
-  MakeDataPoint(1.0f, 0.7005f),
-  MakeDataPoint(1.1f, 0.8625f),
-  MakeDataPoint(1.2f, 1.0565f),
+  MakeDataPoint(0.05f, 0.00169385076570676f),
+  MakeDataPoint(0.1f,  0.00677632808733058f),
+  MakeDataPoint(0.15f, 0.0152462102343951f ),
+  MakeDataPoint(0.2f,  0.0271044833179276f ),
+  MakeDataPoint(0.3f,  0.0609967091764939f ),
+  MakeDataPoint(0.4f,  0.108495713869826f  ),
+  MakeDataPoint(0.5f,  0.169711138981533f  ),
+  MakeDataPoint(0.6f,  0.244878420701064f  ),
+  MakeDataPoint(0.7f,  0.334437792152296f  ),
+  MakeDataPoint(0.8f,  0.439158114503963f  ),
+  MakeDataPoint(0.9f,  0.560342817094746f  ),
+  MakeDataPoint(1.0f,  0.700223573899356f  ),
+  MakeDataPoint(1.1f,  0.862832383469225f  ),
+  MakeDataPoint(1.2f,  1.05646389689452f   ),
 };
 
 // Linear interpolation function
