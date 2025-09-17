@@ -58,3 +58,28 @@ void ActorROS2Handler::operator()(carla::ros2::MessageControl Message)
   // FString ROSMessage = Message.message;
   // UE_LOG(LogCarla, Warning, TEXT("ROS2 Message received: %s"), *ROSMessage);
 }
+
+bool ActorROS2Handler::FlattenSteeringCurve(AActor * Actor)
+{
+  if (!Actor) return false;
+
+  ACarlaWheeledVehicle * const Vehicle = Cast<ACarlaWheeledVehicle>(Actor);
+  if (!Vehicle) return false;
+
+  UChaosWheeledVehicleMovementComponent * const MovementComponent = Vehicle->GetChaosWheeledVehicleMovementComponent();
+  if (!MovementComponent) return false;
+
+  FRichCurve * const Curve = MovementComponent->SteeringSetup.SteeringCurve.GetRichCurve();
+  if (!Curve) return false;
+
+  /// @note Flatten steering curve to be always 1.0 to properly map wheel angle to steering at all speeds
+  Curve->Reset();
+  Curve->AddKey(0.0f,   1.0f);
+  Curve->AddKey(40.0f,  1.0f);
+  Curve->AddKey(80.0f,  1.0f);
+  Curve->AddKey(120.0f, 1.0f);
+  Curve->AutoSetTangents();
+  std::cerr << "Resetting SteeringCurve!" << std::endl;
+
+  return true;
+}
