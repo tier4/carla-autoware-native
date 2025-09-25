@@ -468,7 +468,6 @@ void ACarlaGameModeBase::ParseOpenDrive()
 
   if (auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
   {
-    UE_LOG(LogCarla, Warning, TEXT("Autoware Settings fetch succeded."));
     auto* Data = WS->MgrsDataAsset.LoadSynchronous();;
 
     if (IsValid(Data))
