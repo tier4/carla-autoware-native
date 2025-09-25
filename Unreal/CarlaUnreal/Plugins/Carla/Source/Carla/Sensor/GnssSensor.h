@@ -15,6 +15,7 @@
 #include "carla/geom/GeoLocation.h"
 #include <util/enable-ue4-macros.h>
 
+#include "Autoware/Data/MgrsDataAsset.h"
 #include "GnssSensor.generated.h"
 
 /// Gnss sensor representation
@@ -55,6 +56,10 @@ public:
   double GetLongitudeValue() const;
   double GetAltitudeValue() const;
 
+  // Temporary until AutowareGameModeBase is not valid to use. Later on swap to get this value from game mode.
+  UFUNCTION(BlueprintCallable, Category = "Sensor|Gnss")
+  void LoadMgrsData();
+
 protected:
 
   virtual void BeginPlay() override;
@@ -71,7 +76,9 @@ private:
   float LongitudeBias;
   float AltitudeBias;
 
-  double LatitudeValue;
-  double LongitudeValue;
+  double LatitudeValue; 
   double AltitudeValue;
+  
+  UPROPERTY()
+  TObjectPtr<UMgrsDataAsset> MgrsDataAsset = nullptr;
 };

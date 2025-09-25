@@ -469,7 +469,7 @@ void AAutowareGameModeBase::ParseOpenDrive()
   if (auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
   {
     UE_LOG(LogCarla, Warning, TEXT("Autoware Settings fetch succeded."));
-    auto* Data = WS->MgrsDataAsset.LoadSynchronous();
+    auto* Data = WS->MgrsDataAssetSoftPtr.LoadSynchronous();
 
     if (IsValid(Data))
     {

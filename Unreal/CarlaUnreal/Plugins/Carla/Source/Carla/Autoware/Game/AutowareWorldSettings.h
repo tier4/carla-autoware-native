@@ -17,5 +17,5 @@ class CARLA_API AAutowareWorldSettings : public AWorldSettings
 
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MGRS")
-	TSoftObjectPtr<UMgrsDataAsset> MgrsDataAsset;
+	TSoftObjectPtr<UMgrsDataAsset> MgrsDataAssetSoftPtr;
 };
