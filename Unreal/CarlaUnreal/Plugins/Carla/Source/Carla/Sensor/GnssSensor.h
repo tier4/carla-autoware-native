@@ -76,8 +76,8 @@ private:
   float LongitudeBias;
   float AltitudeBias;
 
-  double LatitudeValue; 
-  double LongitudeValue; 
+  double LatitudeValue;
+  double LongitudeValue;
   double AltitudeValue;
   
   UPROPERTY()
