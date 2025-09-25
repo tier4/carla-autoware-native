@@ -468,7 +468,7 @@ void ACarlaGameModeBase::ParseOpenDrive()
 
   if (auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
   {
-    auto* Data = WS->MgrsDataAsset.LoadSynchronous();;
+    auto* Data = WS->MgrsDataAsset.LoadSynchronous();
 
     if (IsValid(Data))
     {
