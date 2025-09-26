@@ -66,19 +66,14 @@ bool ActorROS2Handler::FlattenSteeringCurve(AActor * Actor)
   ACarlaWheeledVehicle * const Vehicle = Cast<ACarlaWheeledVehicle>(Actor);
   if (!Vehicle) return false;
 
-  UChaosWheeledVehicleMovementComponent * const MovementComponent = Vehicle->GetChaosWheeledVehicleMovementComponent();
-  if (!MovementComponent) return false;
-
-  FRichCurve * const Curve = MovementComponent->SteeringSetup.SteeringCurve.GetRichCurve();
-  if (!Curve) return false;
+  auto VehiclePhysicsControl = Vehicle->GetVehiclePhysicsControl();
 
   /// @note Flatten steering curve to be always 1.0 to properly map wheel angle to steering at all speeds
-  Curve->Reset();
-  Curve->AddKey(0.0f,   1.0f);
-  Curve->AddKey(40.0f,  1.0f);
-  Curve->AddKey(80.0f,  1.0f);
-  Curve->AddKey(120.0f, 1.0f);
-  Curve->AutoSetTangents();
+  VehiclePhysicsControl.SteeringCurve.Reset();
+  VehiclePhysicsControl.SteeringCurve.AddKey(0.f,   1.f);
+  VehiclePhysicsControl.SteeringCurve.AddKey(120.f, 1.f);
+
+  Vehicle->ApplyVehiclePhysicsControl(VehiclePhysicsControl);
   std::cerr << "Resetting SteeringCurve!" << std::endl;
 
   return true;
