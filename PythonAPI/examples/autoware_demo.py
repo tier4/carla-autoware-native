@@ -203,11 +203,12 @@ def spawn_sensors(world, base_link, ego):
     lidar_top.enable_for_ros()
 
     # Spawn traffic light camera
-    sensor_kit_to_traffic_light_left_camera_transform = carla.Transform(
-        ROS2.Location(x=0.05, y=0.0175, z=-0.1))
+    sensor_kit_to_traffic_light_left_camera_transform = ROS2.Transform(x=0.05,
+                                                                       y=0.0175,
+                                                                       z=-0.1)
     traffic_light_left_camera = world.spawn_actor(
         traffic_light_camera_blueprint,
-        sensor_kit_to_traffic_light_left_camera_transform,
+        sensor_kit_to_traffic_light_left_camera_transform.to_carla(),
         attach_to=sensor_kit)
     traffic_light_left_camera.enable_for_ros()
 
@@ -280,7 +281,7 @@ def move_spectator(world, ego_vehicle):
     spectator = world.get_spectator()
 
     spectator_tf = ego_vehicle.get_transform()
-    spectator_offset = carla.Transform(ROS2.Location(x=-6.0, z=1.5))
+    spectator_offset = ROS2.Transform(x=-6.0, z=1.5).to_carla()
 
     spectator_with_offset_position = spectator_tf.transform(spectator_offset.location)
 
