@@ -53,15 +53,21 @@ inline float Lerp(const float a, const float b, const float t) {
 // Get steering compensation ratio from lookup table with LERP
 template<std::size_t key_idx, std::size_t value_idx>
 float GetSteeringCompensationRatio(const float angle) {
+  const auto AdjustSign = [angle](const float value) -> float {
+    return angle < 0.0f ? -value : value;
+  };
+
   // Use absolute value for symmetric steering
   const float key_angle = std::abs(angle);
 
   // Handle edge cases
-  if (key_angle <= std::get<key_idx>(DATA.front())) {
-    return std::get<value_idx>(DATA.front());
+  if (const auto front_key = std::get<key_idx>(DATA.front()); key_angle <= front_key) {
+    // Interpolate between 0 and first data point
+    const float t = key_angle / front_key;
+    return AdjustSign(Lerp(0.0f, std::get<value_idx>(DATA.front()), t));
   }
   if (key_angle >= std::get<key_idx>(DATA.back())) {
-    return std::get<value_idx>(DATA.back());
+    return AdjustSign(std::get<value_idx>(DATA.back()));
   }
 
   // Find the two points to interpolate between
@@ -75,21 +81,21 @@ float GetSteeringCompensationRatio(const float angle) {
       // Calculate interpolation factor
       const float t = (key_angle - current_key_angle) / (next_key_angle - current_key_angle);
       // Interpolate between the two ratio values
-      return Lerp(current_value_angle, next_value_angle, t);
+      return AdjustSign(Lerp(current_value_angle, next_value_angle, t));
     }
   }
 
   // Default fallback (should not reach here)
-  return 1.0f;
+  return angle;
 }
 } // namespace detail
 
 inline float GetDesiredSteeringCompensationRatio(const float angle) {
-  return detail::GetSteeringCompensationRatio<0, 3>(angle);
+  return detail::GetSteeringCompensationRatio<0, 1>(angle);
 }
 
 inline float GetActualSteeringCompensationRatio(const float angle) {
-  return detail::GetSteeringCompensationRatio<1, 2>(angle);
+  return detail::GetSteeringCompensationRatio<1, 0>(angle);
 }
 } // namespace autoware_steering_compensation
 } // namespace ros2
