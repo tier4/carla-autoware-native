@@ -202,7 +202,7 @@ VehicleAckermannControl AutowareController::GetControl() {
   const auto raw_steering = -control_in.lateral().steering_tire_angle();
 
   // Apply steering compensation using lookup table
-  control_out.steer = autoware_steering_compensation::GetActualSteeringCompensationRatio(raw_steering);
+  control_out.steer = autoware_steering_compensation::GetSteeringInput(raw_steering);
 
   if (control_in.lateral().is_defined_steering_tire_rotation_rate()) {
     control_out.steer_speed = -control_in.lateral().steering_tire_rotation_rate();

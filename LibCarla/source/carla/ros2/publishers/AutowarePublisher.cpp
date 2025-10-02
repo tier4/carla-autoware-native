@@ -163,7 +163,7 @@ void AutowarePublisher::SetSteering(float steering_tire_angle)
 {
   autoware_vehicle_msgs::msg::SteeringReport report;
 
-  report.steering_tire_angle(autoware_steering_compensation::GetDesiredSteeringCompensationRatio(steering_tire_angle));
+  report.steering_tire_angle(autoware_steering_compensation::GetSteeringOutput(steering_tire_angle));
 
   _impl->_steering_publisher.SetData(report);
 }

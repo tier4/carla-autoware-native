@@ -52,7 +52,7 @@ inline float Lerp(const float a, const float b, const float t) {
 
 // Get steering compensation ratio from lookup table with LERP
 template<std::size_t key_idx, std::size_t value_idx>
-float GetSteeringCompensationRatio(const float angle) {
+float InterpolateSteeringData(const float angle) {
   const auto AdjustSign = [angle](const float value) -> float {
     return angle < 0.0f ? -value : value;
   };
@@ -90,12 +90,12 @@ float GetSteeringCompensationRatio(const float angle) {
 }
 } // namespace detail
 
-inline float GetDesiredSteeringCompensationRatio(const float angle) {
-  return detail::GetSteeringCompensationRatio<0, 1>(angle);
+inline float GetSteeringOutput(const float input_angle) {
+  return detail::InterpolateSteeringData<0, 1>(input_angle);
 }
 
-inline float GetActualSteeringCompensationRatio(const float angle) {
-  return detail::GetSteeringCompensationRatio<1, 0>(angle);
+inline float GetSteeringInput(const float output_angle) {
+  return detail::InterpolateSteeringData<1, 0>(output_angle);
 }
 } // namespace autoware_steering_compensation
 } // namespace ros2
