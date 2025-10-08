@@ -10,10 +10,10 @@
 
 void ActorROS2Handler::operator()(carla::ros2::VehicleControl &Source)
 {
-  if (!_Actor) return;
+  if (!IsValid(_Actor)) return;
 
   ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
-  if (!Vehicle) return;
+  if (!IsValid(Vehicle)) return;
 
   // setup control values
   FVehicleControl NewControl;
@@ -30,10 +30,10 @@ void ActorROS2Handler::operator()(carla::ros2::VehicleControl &Source)
 
 void ActorROS2Handler::operator()(carla::ros2::VehicleAckermannControl &Source)
 {
-  if (!_Actor) return;
+  if (!IsValid(_Actor)) return;
 
   ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
-  if (!Vehicle) return;
+  if (!IsValid(Vehicle)) return;
 
   // setup control values
   FVehicleAckermannControl NewControl;
@@ -48,10 +48,10 @@ void ActorROS2Handler::operator()(carla::ros2::VehicleAckermannControl &Source)
 
 void ActorROS2Handler::operator()(carla::ros2::MessageControl Message)
 {
-  if (!_Actor) return;
+  if (!IsValid(_Actor)) return;
 
   ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
-  if (!Vehicle) return;
+  if (!IsValid(Vehicle)) return;
 
   Vehicle->PrintROS2Message(Message.message);
 
@@ -61,10 +61,10 @@ void ActorROS2Handler::operator()(carla::ros2::MessageControl Message)
 
 bool ActorROS2Handler::FlattenSteeringCurve(AActor * Actor)
 {
-  if (!Actor) return false;
+  if (!IsValid(Actor)) return false;
 
   ACarlaWheeledVehicle * const Vehicle = Cast<ACarlaWheeledVehicle>(Actor);
-  if (!Vehicle) return false;
+  if (!IsValid(Vehicle)) return false;
 
   auto VehiclePhysicsControl = Vehicle->GetVehiclePhysicsControl();
 
