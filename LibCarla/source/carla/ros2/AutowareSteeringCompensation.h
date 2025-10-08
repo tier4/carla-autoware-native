@@ -22,9 +22,15 @@ constexpr std::tuple<float, float> MakeDataPoint(const float desired, const floa
   return std::make_tuple(desired, actual);
 }
 
-// Steering compensation lookup table
-// Tuples of (desired_steering_angle, actual_steering_angle)
-// Only positive values stored; absolute value used for lookup
+/**
+ * @note Steering compensation lookup table.
+ * Tuples of (desired_steering_angle, actual_steering_angle).
+ * The values were obtained in experiments with no compensation mechanism in place.
+ * The Lincoln MKZ vehicle was used in the experiments.
+ * Desired steering angle is what was set as an input.
+ * Actual steering angle is what was observed based on the input (average of two steering wheels).
+ * Only positive values stored; absolute value used for lookup.
+ */
 constexpr std::array DATA{
   MakeDataPoint(0.01,  6.7395889065761E-05 ),
   MakeDataPoint(0.025, 0.000423556502873984),
