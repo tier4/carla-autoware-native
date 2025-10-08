@@ -74,7 +74,7 @@ bool ActorROS2Handler::FlattenSteeringCurve(AActor * Actor)
   VehiclePhysicsControl.SteeringCurve.AddKey(120.f, 1.f);
 
   Vehicle->ApplyVehiclePhysicsControl(VehiclePhysicsControl);
-  std::cerr << "Resetting SteeringCurve!" << std::endl;
+  UE_LOG(LogCarla, Log, TEXT("Resetting SteeringCurve!"));
 
   return true;
 }
