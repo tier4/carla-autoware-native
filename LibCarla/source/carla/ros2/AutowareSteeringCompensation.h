@@ -18,15 +18,12 @@ namespace ros2 {
 namespace autoware_steering_compensation {
 namespace detail {
 
-constexpr std::tuple<float, float, float, float> MakeDataPoint(const float desired, const float actual) {
-  return std::make_tuple(desired, actual, desired / actual, actual / desired);
+constexpr std::tuple<float, float> MakeDataPoint(const float desired, const float actual) {
+  return std::make_tuple(desired, actual);
 }
 
 // Steering compensation lookup table
-// Tuples of (desired_steering_angle, actual_steering_angle, ratio1, ratio2) where:
-//   ratio1 = desired_angle / actual_angle
-//   ratio2 = actual_angle / desired_angle
-// Data from steer-angle-experiments.ods Sheet2
+// Tuples of (desired_steering_angle, actual_steering_angle)
 // Only positive values stored; absolute value used for lookup
 constexpr std::array DATA{
   MakeDataPoint(0.01,  6.7395889065761E-05 ),
