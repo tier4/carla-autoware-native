@@ -100,10 +100,8 @@ const carla::geom::Vector3D AInertialMeasurementUnit::ComputeGyroscopeNoise(
   };
 }
 
-carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer()
+carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(const float CurrentTime)
 {
-  const float CurrentTime = GetWorld()->GetTimeSeconds();
-
   if (!FMath::IsFinite(PrevTime)) {
     PrevTime = CurrentTime;
     return {};
@@ -201,7 +199,7 @@ float AInertialMeasurementUnit::ComputeCompass()
 void AInertialMeasurementUnit::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaTime)
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(AInertialMeasurementUnit::PostPhysTick);
-  AccelerometerValue = ComputeAccelerometer();
+  AccelerometerValue = ComputeAccelerometer(World->GetTimeSeconds());
   GyroscopeValue = ComputeGyroscope();
   CompassValue = ComputeCompass();
 

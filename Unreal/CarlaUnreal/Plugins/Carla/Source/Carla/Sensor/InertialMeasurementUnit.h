@@ -43,7 +43,7 @@ public:
       const FVector &Gyroscope);
 
   /// Accelerometer: measures linear acceleration in m/s^2
-  carla::geom::Vector3D ComputeAccelerometer();
+  carla::geom::Vector3D ComputeAccelerometer(const float CurrentTime);
 
   /// Gyroscope: measures angular velocity in rad/sec
   carla::geom::Vector3D ComputeGyroscope();
