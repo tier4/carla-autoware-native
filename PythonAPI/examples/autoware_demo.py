@@ -385,10 +385,9 @@ def main():
 
             # If we are behind, log and catch up
             lag = time.time() - next_tick_time
-            if lag > 0.02:  # more than 50ms lag
+            if lag > 0.05:  # more than 50ms lag
                 log_warning(f"Simulation is {lag*1000:.1f} ms behind schedule")
-                # Option 1: reset next_tick_time = current_time  (resynchronize)
-                next_tick_time = time.time()
+                next_tick_time = time.time() # resynchronize
 
     except:  # KeyboardInterrupt:
         log_info("Exiting, restoring asynchronous mode...")
