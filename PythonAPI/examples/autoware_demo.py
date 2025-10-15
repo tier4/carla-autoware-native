@@ -290,6 +290,12 @@ def move_spectator(world, ego_vehicle):
     spectator.set_transform(spectator_tf)
 
 def apply_world_settings(client, world, map_name="Town10HD_Opt"):
+    """
+    Applies Synchronous mode + fixed time-step into world settings.
+
+    Store here all settings related to simulation world.
+    """
+
     # Load the desired map
     client.load_world(map_name)
 
@@ -304,6 +310,9 @@ def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     settings.substepping = True
     settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no neet of extreme physics realism
     settings.max_substeps = 10
+
+    # Disable TF publishing in CARLA to avoid conflicts.
+    world.set_publish_tf(False) # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
 
     world.apply_settings(settings)
     client.reload_world(False)  # reload map keeping the world settings
@@ -336,11 +345,6 @@ def main():
 
     # Apply Settings
     apply_world_settings(client, world, "Town10HD_Opt")
-
-    # Autoware will be publishing TF information based on the URDF files
-    # of the vehicle and sensor kit. Disable TF publishing in CARLA
-    # to avoid conflicts.
-    world.set_publish_tf(False)
 
     spawn_point = random.choice(world.get_map().get_spawn_points())
     ego = spawn_ego_with_sensors(world, spawn_point)
