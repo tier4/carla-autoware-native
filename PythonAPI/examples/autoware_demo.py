@@ -6,15 +6,16 @@ import time
 import PyKDL as kdl
 
 # Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
-DESIRED_SIM_RATE = 100
+DESIRED_SIM_RATE = 100.0 # Hz
+SIM_DT = 1.0 / DESIRED_SIM_RATE # Simulation delta time
 
-def info(text):
+def log_info(text):
     print("[INFO]: %s" % text)
 
-def warning(text):
+def log_warning(text):
     print("[WARNING]: %s" % text)
 
-def error(text):
+def log_error(text):
     print("[ERROR]: %s" % text)
 
 class ROS2:
@@ -251,7 +252,7 @@ def spawn_ego_with_sensors(world, spawn_point):
     """Spawns a controllable vehicle with a basic sensor configuration
 
     The sensor configuration is compatible with the one for Lexus RX450h in AWSIM.
-    The vehicle itself is replaced by Linkoln MKZ available in CARLA."""
+    The vehicle itself is replaced by Lincoln MKZ available in CARLA."""
 
     blueprint_library = world.get_blueprint_library()
 
@@ -288,6 +289,26 @@ def move_spectator(world, ego_vehicle):
 
     spectator.set_transform(spectator_tf)
 
+def apply_world_settings(client, world, map_name="Town10HD_Opt"):
+    # Load the desired map
+    client.load_world(map_name)
+
+    # Get Settings
+    settings = world.get_settings()
+
+    # Set synchronous mode
+    settings.synchronous_mode = True
+    settings.fixed_delta_seconds = SIM_DT
+
+    # Set physics substepping
+    settings.substepping = True
+    settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no neet of extreme physics realism
+    settings.max_substeps = 10
+
+    world.apply_settings(settings)
+    client.reload_world(False)  # reload map keeping the world settings
+    log_info("Simulation time scale is %f" % args.time_scale)
+
 def main():
     argparser = argparse.ArgumentParser(
         description='CARLA Automatic Control Client')
@@ -308,9 +329,13 @@ def main():
         help='Follow Ego vehicle')
     args = argparser.parse_args()
 
+    # Get Client info
     client = carla.Client(args.host, args.port)
     client.set_timeout(60.0)
     world = client.get_world()
+
+    # Apply Settings
+    apply_world_settings(client, world, "Town10HD_Opt")
 
     # Autoware will be publishing TF information based on the URDF files
     # of the vehicle and sensor kit. Disable TF publishing in CARLA
@@ -321,48 +346,48 @@ def main():
     ego = spawn_ego_with_sensors(world, spawn_point)
     move_spectator(world, ego)
 
-    info('Ego spawned!')
+    log_info('Ego spawned!')
     time.sleep(0.05)  # Without this sometimes spectator would not move
 
-    # Set synchronous mode
-    settings = world.get_settings()
-    settings.synchronous_mode = True
-    settings.fixed_delta_seconds = 1.0 / DESIRED_SIM_RATE
-    world.apply_settings(settings)
+    log_warning('Kill this script before stopping simulation!')
 
-    info("Simulation time scale is %f" % args.time_scale)
-
-    warning('Kill this script before stopping simulation!')
+    # Run simulation loop
+    time_scale = args.time_scale  # 1.0 for real-time, >1 for faster sim
+    real_dt = SIM_DT / time_scale  # how much real time per sim tick
 
     frame_count = 0
-
     start_time = time.time()
-    last_behind_error_time = start_time
-    # Tick world to follow desired time_scale
+    next_tick_time = start_time
+
     try:
         while True:
             current_time = time.time()
-            real_time_passed = current_time - start_time
-            sim_time_passed = real_time_passed * args.time_scale
-            desired_frame_count = math.floor(sim_time_passed * DESIRED_SIM_RATE)
 
-            if desired_frame_count <= frame_count:
-                continue
+            # Wait until it's time for next tick
+            wait_time = next_tick_time - current_time
+            if wait_time > 0:
+                time.sleep(wait_time)
 
-            frame_behind_count = max(desired_frame_count - frame_count, 0)
-            if (frame_behind_count > 10) and \
-                (current_time > last_behind_error_time + 2.0):  # Error every 2 seconds
-                    last_behind_error_time = current_time
-                    error(f'Simulation cannot keep up with the desired time scale!!! ({frame_behind_count} frames behind)')
-
+            # Advance simulation deterministically
             world.tick()
             frame_count += 1
 
+            # Move spectator if needed
             if args.follow:
                 move_spectator(world, ego)
 
+            # Schedule the next tick
+            next_tick_time += real_dt
+
+            # If we are behind, log and catch up
+            lag = time.time() - next_tick_time
+            if lag > 0.02:  # more than 50ms lag
+                log_warning(f"Simulation is {lag*1000:.1f} ms behind schedule")
+                # Option 1: reset next_tick_time = current_time  (resynchronize)
+                next_tick_time = time.time()
+
     except:  # KeyboardInterrupt:
-        info("Exiting, restoring asynchronous mode...")
+        log_info("Exiting, restoring asynchronous mode...")
         # Set asynchronous mode, otherwise simulation will crash
         settings = world.get_settings()
         settings.synchronous_mode = False
