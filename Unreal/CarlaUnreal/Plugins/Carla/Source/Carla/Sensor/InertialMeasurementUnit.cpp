@@ -100,9 +100,17 @@ const carla::geom::Vector3D AInertialMeasurementUnit::ComputeGyroscopeNoise(
   };
 }
 
-carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(
-    const float DeltaTime)
+carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer()
 {
+  const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+  if (!FMath::IsFinite(PrevTime)) {
+    PrevTime = CurrentTime;
+    return {};
+  }
+
+  const float DeltaTime = CurrentTime - PrevTime;
+
   // Used to convert from UE4's cm to meters
   constexpr float TO_METERS = 1e-2;
   // Earth's gravitational acceleration is approximately 9.81 m/s^2
@@ -125,10 +133,17 @@ carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(
   const FVector C = Y0 / ( H1 * (H1AndH2) );
   FVector FVectorAccelerometer = TO_METERS * -2.0f * ( A - B - C );
 
+  // If data from previous steps is not set - set it and do not return the calculated data
+  const bool MissingPrev =
+      PrevLocation[0].ContainsNaN() || PrevLocation[1].ContainsNaN() || !FMath::IsFinite(PrevDeltaTime);
+
   // Update the previous locations
   PrevLocation[0] = PrevLocation[1];
   PrevLocation[1] = CurrentLocation;
   PrevDeltaTime = DeltaTime;
+  PrevTime = CurrentTime;
+
+  if (MissingPrev) return {};
 
   // Add gravitational acceleration
   FVectorAccelerometer.Z += GRAVITY;
@@ -186,7 +201,7 @@ float AInertialMeasurementUnit::ComputeCompass()
 void AInertialMeasurementUnit::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaTime)
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(AInertialMeasurementUnit::PostPhysTick);
-  AccelerometerValue = ComputeAccelerometer(DeltaTime);
+  AccelerometerValue = ComputeAccelerometer();
   GyroscopeValue = ComputeGyroscope();
   CompassValue = ComputeCompass();
 
