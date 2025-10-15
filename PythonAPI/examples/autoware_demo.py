@@ -315,8 +315,7 @@ def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     world.set_publish_tf(False) # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
 
     world.apply_settings(settings)
-    client.reload_world(False)  # reload map keeping the world settings
-    log_info("Simulation time scale is %f" % args.time_scale)
+    # client.reload_world(False)  # reload map keeping the world settings
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -344,14 +343,16 @@ def main():
     world = client.get_world()
 
     # Apply Settings
-    apply_world_settings(client, world, "Town10HD_Opt")
+    apply_world_settings(client, world)
+
+    log_info("Simulation time scale is %f" % args.time_scale)
 
     spawn_point = random.choice(world.get_map().get_spawn_points())
     ego = spawn_ego_with_sensors(world, spawn_point)
-    move_spectator(world, ego)
 
+    world.tick()
+    move_spectator(world, ego)
     log_info('Ego spawned!')
-    time.sleep(0.05)  # Without this sometimes spectator would not move
 
     log_warning('Kill this script before stopping simulation!')
 
