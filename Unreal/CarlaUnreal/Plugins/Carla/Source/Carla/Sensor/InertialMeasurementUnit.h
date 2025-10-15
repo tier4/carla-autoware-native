@@ -103,5 +103,4 @@ private:
 
   /// Magnetometer value calculated after each PostPhysTick
   float CompassValue;
-	
 };
