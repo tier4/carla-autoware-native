@@ -6,17 +6,21 @@ import time
 import PyKDL as kdl
 
 # Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
-DESIRED_SIM_RATE = 100.0 # Hz
-SIM_DT = 1.0 / DESIRED_SIM_RATE # Simulation delta time
+DESIRED_SIM_RATE = 100.0  # Hz
+SIM_DT = 1.0 / DESIRED_SIM_RATE  # Simulation delta time
+
 
 def log_info(text):
     print("[INFO]: %s" % text)
 
+
 def log_warning(text):
     print("[WARNING]: %s" % text)
 
+
 def log_error(text):
     print("[ERROR]: %s" % text)
+
 
 class ROS2:
     """
@@ -27,17 +31,18 @@ class ROS2:
     - CARLA uses degrees
     https://github.com/carla-simulator/ros-bridge/blob/e9063d97ff5a724f76adbb1b852dc71da1dcfeec/carla_common/src/carla_common/transforms.py#L307-L310
     """
-    def Location(x : float = 0.0, y : float = 0.0, z : float = 0.0):
-        """In meters"""
-        return carla.Location(x =  x,
-                              y = -y,
-                              z =  z)
 
-    def Rotation(roll : float = 0.0, pitch : float = 0.0, yaw : float = 0.0):
+    def Location(x: float = 0.0, y: float = 0.0, z: float = 0.0):
+        """In meters"""
+        return carla.Location(x=x,
+                              y=-y,
+                              z=z)
+
+    def Rotation(roll: float = 0.0, pitch: float = 0.0, yaw: float = 0.0):
         """In radians"""
-        return carla.Rotation(roll  =  math.degrees(roll),
-                              pitch = -math.degrees(pitch),
-                              yaw   = -math.degrees(yaw))
+        return carla.Rotation(roll=math.degrees(roll),
+                              pitch=-math.degrees(pitch),
+                              yaw=-math.degrees(yaw))
 
     class Transform:
         """
@@ -51,12 +56,12 @@ class ROS2:
         yaw = 0.0
 
         def __init__(self,
-                     x : float = 0.0,
-                     y : float = 0.0,
-                     z : float = 0.0,
-                     roll : float = 0.0,
-                     pitch : float = 0.0,
-                     yaw : float = 0.0):
+                     x: float = 0.0,
+                     y: float = 0.0,
+                     z: float = 0.0,
+                     roll: float = 0.0,
+                     pitch: float = 0.0,
+                     yaw: float = 0.0):
             self.x = x
             self.y = y
             self.z = z
@@ -83,6 +88,7 @@ class ROS2:
 
             return ROS2.Transform(x, y, z, roll, pitch, yaw)
 
+
 def chain_transforms(transforms):
     """
     :param transforms: list of ROS2.Transform
@@ -92,6 +98,7 @@ def chain_transforms(transforms):
     for t in transforms[1:]:
         F = F * t.to_kdl()
     return ROS2.Transform.from_kdl(F)
+
 
 def generate_vlp16_blueprint(blueprint_library):
     """Generates a blueprint for VLP16
@@ -119,6 +126,7 @@ def generate_vlp16_blueprint(blueprint_library):
 
     return blueprint
 
+
 def generate_traffic_light_camera_blueprint(blueprint_library):
     """Generates a traffic light camera
 
@@ -140,6 +148,7 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
 
     return blueprint
 
+
 def generate_imu_blueprint(blueprint_library):
     """Generates a blueprint for IMU"""
 
@@ -153,6 +162,7 @@ def generate_imu_blueprint(blueprint_library):
 
     return blueprint
 
+
 def generate_gnss_blueprint(blueprint_library):
     """Generates a blueprint for GNSS"""
 
@@ -165,6 +175,7 @@ def generate_gnss_blueprint(blueprint_library):
     blueprint.set_attribute("ros_topic_name", "/sensing/gnss")
 
     return blueprint
+
 
 def spawn_sensors(world, base_link, ego):
     """Spawns sensors relatively to the provided base_link actor
@@ -248,6 +259,7 @@ def spawn_sensors(world, base_link, ego):
     # # NOTE: Enable for ros is not needed, because this sensor uses a global publisher
     # vehicle_status_sensor.enable_for_ros()
 
+
 def spawn_ego_with_sensors(world, spawn_point):
     """Spawns a controllable vehicle with a basic sensor configuration
 
@@ -277,6 +289,7 @@ def spawn_ego_with_sensors(world, spawn_point):
 
     return ego
 
+
 def move_spectator(world, ego_vehicle):
     spectator = world.get_spectator()
 
@@ -288,6 +301,7 @@ def move_spectator(world, ego_vehicle):
     spectator_tf = carla.Transform(spectator_with_offset_position, spectator_tf.rotation)
 
     spectator.set_transform(spectator_tf)
+
 
 def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     """
@@ -311,11 +325,84 @@ def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no neet of extreme physics realism
     settings.max_substeps = 10
 
-    # Disable TF publishing in CARLA to avoid conflicts.
-    world.set_publish_tf(False) # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
 
     world.apply_settings(settings)
+
+    # Disable TF publishing in CARLA to avoid conflicts.
+    world.set_publish_tf(
+        False)  # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
     # client.reload_world(False)  # reload map keeping the world settings
+
+
+def run_simulation_loop(target_time_scale=1.0, acceptable_lag=0.05, should_resync=False, world=None, ego=None, follow_ego=False):
+    """
+    Runs a real-time simulation loop for a synchronous simulation environment.
+
+    The loop advances the simulation world in fixed time steps determined by
+    `target_time_scale`, maintaining real-time pacing. It adjusts for timing
+    and can optionally resynchronize if the simulation falls behind.
+
+    Parameters
+    ----------
+    world : object
+        The simulation world instance.
+    ego : object, optional
+        The main vehicle actor - player pawn.
+    target_time_scale : float, default=1.0
+        The simulation speed multiplier. Higher values make the simulation run faster, and lower to run slower
+        relative to real time (2.0 = twice real-time speed, 0.5 = half the real-time speed).
+    acceptable_lag : float, default=0.05
+        The maximum acceptable lag. If the loop falls behind by more than
+        this value, a warning is logged.
+    should_resync : bool, default=False
+        If True, the simulation will resynchronize to the current time when lag exceeds
+        the acceptable threshold.
+    follow_ego : bool, default=False
+        If True, moves the spectator camera to follow the ego actor each tick.
+
+    Notes
+    -----
+    - This function runs indefinitely until interrupted (e.g., with Ctrl+C).
+    - When interrupted, it restores the world to asynchronous mode to prevent crashes.
+    """
+
+    real_dt = SIM_DT / target_time_scale
+    frame_count = 0
+    next_tick_time = time.time()
+
+    try:
+        while True:
+            current_time = time.time()
+
+            # Sleep until it's time for the next tick
+            wait_time = next_tick_time - current_time
+            if wait_time > 0:
+                time.sleep(wait_time)
+
+            # Advance simulation
+            world.tick()
+            frame_count += 1
+
+            # Optional spectator movement
+            if follow_ego and ego is not None:
+                move_spectator(world, ego)
+
+            # Schedule next tick
+            next_tick_time += real_dt
+
+            # Detect and handle lag
+            lag = time.time() - next_tick_time
+            if lag > acceptable_lag:
+                log_warning(f"Simulation is {lag * 1000:.1f} ms behind schedule")
+                if should_resync:
+                    next_tick_time = time.time()
+
+    except KeyboardInterrupt:
+        log_info("Exiting simulation loop, restoring asynchronous mode...")
+        settings = world.get_settings()
+        settings.synchronous_mode = False
+        world.apply_settings(settings)
+
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -344,58 +431,21 @@ def main():
 
     # Apply Settings
     apply_world_settings(client, world)
-
     log_info("Simulation time scale is %f" % args.time_scale)
 
+    # Spawn Ego
     spawn_point = random.choice(world.get_map().get_spawn_points())
     ego = spawn_ego_with_sensors(world, spawn_point)
 
-    world.tick()
+    world.tick()  # tick to process the changes (settings, ego + sensors spawn)
     move_spectator(world, ego)
-    log_info('Ego spawned!')
 
+    log_info('Ego spawned!')
     log_warning('Kill this script before stopping simulation!')
 
     # Run simulation loop
-    time_scale = args.time_scale  # 1.0 for real-time, >1 for faster sim
-    real_dt = SIM_DT / time_scale  # how much real time per sim tick
+    run_simulation_loop(target_time_scale=args.time_scale, follow_ego=True, world=world, ego=ego)
 
-    frame_count = 0
-    start_time = time.time()
-    next_tick_time = start_time
-
-    try:
-        while True:
-            current_time = time.time()
-
-            # Wait until it's time for next tick
-            wait_time = next_tick_time - current_time
-            if wait_time > 0:
-                time.sleep(wait_time)
-
-            # Advance simulation
-            world.tick()
-            frame_count += 1
-
-            # Move spectator
-            if args.follow:
-                move_spectator(world, ego)
-
-            # Schedule the next tick
-            next_tick_time += real_dt
-
-            # If behind, log and catch up
-            lag = time.time() - next_tick_time
-            if lag > 0.05:  # more than 50ms lag
-                log_warning(f"Simulation is {lag*1000:.1f} ms behind schedule")
-                # next_tick_time = time.time() # resynchronize - disabled since we want to catch up as fast as possible with loss
-
-    except:  # KeyboardInterrupt:
-        log_info("Exiting, restoring asynchronous mode...")
-        # Set asynchronous mode, otherwise simulation will crash
-        settings = world.get_settings()
-        settings.synchronous_mode = False
-        world.apply_settings(settings)
 
 if __name__ == '__main__':
     main()
