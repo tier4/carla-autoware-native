@@ -324,9 +324,9 @@ def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     settings.fixed_delta_seconds = SIM_DT
 
     # Set physics substepping
-    settings.substepping = True
-    settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no neet of extreme physics realism
-    settings.max_substeps = 10
+    settings.substepping = False
+    # settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no neet of extreme physics realism
+    # settings.max_substeps = 10
 
     world.apply_settings(settings)
 
@@ -418,6 +418,9 @@ def main():
     argparser.add_argument(
         '--follow', action='store_true',
         help='Follow Ego vehicle')
+    argparser.add_argument(
+        '--resync_mode', action='store_true',
+        help='Resynchronize to the current time when lag exceeds the acceptable threshold')
     args = argparser.parse_args()
 
     # Get Client info
@@ -440,7 +443,7 @@ def main():
     log_warning('Kill this script before stopping simulation!')
 
     # Run simulation loop
-    run_simulation_loop(target_time_scale=args.time_scale, follow_ego=True, world=world, ego=ego)
+    run_simulation_loop(target_time_scale=args.time_scale, follow_ego=True, world=world, ego=ego, should_resync=args.resync_mode)
 
 
 if __name__ == '__main__':
