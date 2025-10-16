@@ -345,28 +345,17 @@ def run_simulation_loop(world, target_time_scale=1.0, acceptable_lag=0.05, shoul
     `target_time_scale`, maintaining real-time pacing. It adjusts for timing
     and can optionally resynchronize if the simulation falls behind.
 
-    Parameters
-    ----------
-    world : object
-        The simulation world instance.
-    ego : object, optional
-        The main vehicle actor - player pawn.
-    target_time_scale : float, default=1.0
-        The simulation speed multiplier. Higher values make the simulation run faster, and lower to run slower
-        relative to real time (2.0 = twice real-time speed, 0.5 = half the real-time speed).
-    acceptable_lag : float, default=0.05
-        The maximum acceptable lag. If the loop falls behind by more than
-        this value, a warning is logged.
-    should_resync : bool, default=False
-        If True, the simulation will resynchronize to the current time when lag exceeds
-        the acceptable threshold.
-    follow_ego : bool, default=False
-        If True, moves the spectator camera to follow the ego actor each tick.
-
     Notes
     -----
     - This function runs indefinitely until interrupted (e.g., with Ctrl+C).
     - When interrupted, it restores the world to asynchronous mode to prevent crashes.
+
+    :param world: The simulation world instance.
+    :param ego: The main vehicle actor - player pawn.
+    :param target_time_scale: The simulation speed multiplier. Higher values make the simulation run faster, and lower to run slower relative to real time (2.0 = twice real-time speed, 0.5 = half the real-time speed).
+    :param acceptable_lag: The maximum acceptable lag. If the loop falls behind by more than this value, a warning is logged.
+    :param should_resync: If True, the simulation will resynchronize to the current time when lag exceeds the acceptable threshold.
+    :param follow_ego: If True, moves the spectator camera to follow the ego actor each tick.
     """
 
     real_dt = SIM_DT / target_time_scale
