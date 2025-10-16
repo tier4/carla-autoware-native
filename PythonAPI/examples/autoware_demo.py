@@ -328,7 +328,6 @@ def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no neet of extreme physics realism
     settings.max_substeps = 10
 
-
     world.apply_settings(settings)
 
     # Disable TF publishing in CARLA to avoid conflicts.
@@ -337,7 +336,8 @@ def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     # client.reload_world(False)  # reload map keeping the world settings
 
 
-def run_simulation_loop(world, target_time_scale=1.0, acceptable_lag=0.05, should_resync=False, ego=None, follow_ego=False):
+def run_simulation_loop(world, target_time_scale=1.0, acceptable_lag=0.05, should_resync=False, ego=None,
+                        follow_ego=False):
     """
     Runs a real-time simulation loop for a synchronous simulation environment.
 
