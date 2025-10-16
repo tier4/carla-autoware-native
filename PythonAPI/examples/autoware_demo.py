@@ -334,7 +334,7 @@ def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     # client.reload_world(False)  # reload map keeping the world settings
 
 
-def run_simulation_loop(target_time_scale=1.0, acceptable_lag=0.05, should_resync=False, world=None, ego=None, follow_ego=False):
+def run_simulation_loop(world, target_time_scale=1.0, acceptable_lag=0.05, should_resync=False, ego=None, follow_ego=False):
     """
     Runs a real-time simulation loop for a synchronous simulation environment.
 
@@ -369,6 +369,10 @@ def run_simulation_loop(target_time_scale=1.0, acceptable_lag=0.05, should_resyn
     real_dt = SIM_DT / target_time_scale
     frame_count = 0
     next_tick_time = time.time()
+
+    if world is None:
+        log_error("World instance is invalid! Cannot proceed with simulation tick.")
+        return
 
     try:
         while True:
