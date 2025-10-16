@@ -373,22 +373,22 @@ def main():
             if wait_time > 0:
                 time.sleep(wait_time)
 
-            # Advance simulation deterministically
+            # Advance simulation
             world.tick()
             frame_count += 1
 
-            # Move spectator if needed
+            # Move spectator
             if args.follow:
                 move_spectator(world, ego)
 
             # Schedule the next tick
             next_tick_time += real_dt
 
-            # If we are behind, log and catch up
+            # If behind, log and catch up
             lag = time.time() - next_tick_time
             if lag > 0.05:  # more than 50ms lag
                 log_warning(f"Simulation is {lag*1000:.1f} ms behind schedule")
-                next_tick_time = time.time() # resynchronize
+                # next_tick_time = time.time() # resynchronize - disabled since we want to catch up as fast as possible with loss
 
     except:  # KeyboardInterrupt:
         log_info("Exiting, restoring asynchronous mode...")
