@@ -305,9 +305,12 @@ def move_spectator(world, ego_vehicle):
 
 def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     """
+    Stores all settings related to the simulation world.
     Applies Synchronous mode + fixed time-step into world settings.
 
-    Store here all settings related to simulation world.
+    :param client: Connected client to the Carla server instance.
+    :param world: The simulation world instance.
+    :param map_name: Map to load and apply settings to.
     """
 
     # Load the desired map
