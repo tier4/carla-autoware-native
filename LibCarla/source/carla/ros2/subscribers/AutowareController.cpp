@@ -14,6 +14,11 @@
 #include "carla/ros2/types/EngagePubSubTypes.h"
 
 #include "carla/ros2/subscribers/AutowareSubscriber.h"
+#include "carla/ros2/AutowareSteeringCompensation.h"
+
+#include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace carla {
 namespace ros2 {
@@ -194,7 +199,11 @@ VehicleAckermannControl AutowareController::GetControl() {
   }
 
   /// @note Set lateral negative, because Carla treats positive as right and Autoware expects positive to represent left (all when moving forward)
-  control_out.steer = -control_in.lateral().steering_tire_angle();
+  const auto raw_steering = -control_in.lateral().steering_tire_angle();
+
+  // Apply steering compensation using lookup table
+  control_out.steer = autoware_steering_compensation::GetSteeringInput(raw_steering);
+
   if (control_in.lateral().is_defined_steering_tire_rotation_rate()) {
     control_out.steer_speed = -control_in.lateral().steering_tire_rotation_rate();
   }
