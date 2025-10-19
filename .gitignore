@@ -20,3 +20,6 @@ Help.md
 .idea/
 Unreal/CarlaUnreal/Plugins/Developer/RiderLink/
 Unreal/CarlaUnreal/Plugins/RiderLink/
+
+# Ignore perforce files
+.p4ignore
