@@ -21,6 +21,8 @@ class ActorROS2Handler
         void operator()(carla::ros2::VehicleAckermannControl &Source);
         void operator()(carla::ros2::MessageControl Message);
 
+        static bool FlattenSteeringCurve(AActor * Actor);
+
     private:
         AActor *_Actor {nullptr};
         std::string _RosName;
