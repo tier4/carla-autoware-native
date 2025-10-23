@@ -303,7 +303,7 @@ def move_spectator(world, ego_vehicle):
     spectator.set_transform(spectator_tf)
 
 
-def apply_world_settings(client, world, map_name="Town10HD_Opt"):
+def apply_world_settings(client, world, map_name=None):
     """
     Stores all settings related to the simulation world.
     Applies Synchronous mode + fixed time-step into world settings.
@@ -313,7 +313,12 @@ def apply_world_settings(client, world, map_name="Town10HD_Opt"):
     :param map_name: Map to load and apply settings to.
     """
 
+    if map_name is None:
+    	print('Cannot load provided map')
+    	return
+
     # Load the desired map
+    print(f"Loading map: {map_name}")
     client.load_world(map_name)
 
     # Get Settings
@@ -421,6 +426,9 @@ def main():
     argparser.add_argument(
         '--resync_mode', action='store_true',
         help='Resynchronize to the current time when lag exceeds the acceptable threshold')
+    argparser.add_argument(
+    	'--load_map', nargs='?', const='Town10HD_Opt',
+    	help='Load the provided map')
     args = argparser.parse_args()
 
     # Get Client info
@@ -428,8 +436,11 @@ def main():
     client.set_timeout(60.0)
     world = client.get_world()
 
+    # Determine which map to load
+    map_name = args.load_map if args.load_map is not None else 'Town10HD_Opt'
+
     # Apply Settings
-    apply_world_settings(client, world)
+    apply_world_settings(client, world, map_name)
     log_info("Simulation time scale is %f" % args.time_scale)
 
     # Spawn Ego
