@@ -35,8 +35,6 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include <util/ue-header-guard-end.h>
 
-#include "Autoware/Game/AutowareWorldSettings.h"
-
 namespace cr = carla::road;
 namespace crp = carla::rpc;
 namespace cre = carla::road::element;
@@ -160,14 +158,7 @@ void ACarlaGameModeBase::InitGame(
   Recorder->SetEpisode(Episode);
   Episode->SetRecorder(Recorder);
 
-  ParseOpenDrive();
-
-  StoreSpawnPoints();
-
-  // if(Map.has_value())
-  // {
-  //   StoreSpawnPoints();
-  // }
+  LoadGeoReference();
 }
 
 void ACarlaGameModeBase::RestartPlayer(AController *NewPlayer)
@@ -402,6 +393,16 @@ void ACarlaGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
   }
 }
 
+void ACarlaGameModeBase::LoadGeoReference()
+{
+  ParseOpenDrive();
+
+  if(Map.has_value())
+  {
+    StoreSpawnPoints();
+  }
+}
+
 void ACarlaGameModeBase::SpawnActorFactories()
 {
   auto *World = GetWorld();
@@ -464,24 +465,6 @@ void ACarlaGameModeBase::ParseOpenDrive()
   else
   {
     Episode->MapGeoReference = Map->GetGeoReference();
-  }
-
-  if (auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
-  {
-    auto* Data = WS->MgrsDataAssetSoftPtr.LoadSynchronous();
-
-    if (IsValid(Data))
-    {
-      carla::geom::GeoLocation GeoReference
-      (
-        Data->WorldOriginGeoCoordinate.Latitude,
-        Data->WorldOriginGeoCoordinate.Longitude,
-        Data->WorldOriginGeoCoordinate.Altitude
-      );
-      Episode->MapGeoReference = GeoReference;
-      
-      UE_LOG(LogCarla, Warning, TEXT("MGRS Offset loaded successfuly."));
-    }
   }
 }
 

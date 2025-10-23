@@ -16,8 +16,6 @@
 #include "carla/ros2/ROS2.h"
 #include <util/enable-ue4-macros.h>
 
-#include "Autoware/Game/AutowareWorldSettings.h"
-
 AGnssSensor::AGnssSensor(const FObjectInitializer &ObjectInitializer)
   : Super(ObjectInitializer)
 {
@@ -40,64 +38,45 @@ void AGnssSensor::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaSe
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(AGnssSensor::PostPhysTick);
 
-  if (!MgrsDataAsset)
-  {
-    return;
-  }
-  
-  FVector ActorLocation = GetActorLocation();
-  
-  // Apply MGRS offset (Unity equivalent)
-  ActorLocation += MgrsDataAsset->MgrsOffsetPosition;
-  const auto& OriginGeo = MgrsDataAsset->WorldOriginGeoCoordinate;
-  
-  carla::geom::Location Location{static_cast<float>(ActorLocation.X), static_cast<float>(ActorLocation.Y), static_cast<float>(ActorLocation.Z)};
-  carla::geom::GeoLocation GeoOrigin(OriginGeo.Latitude, OriginGeo.Longitude, OriginGeo.Altitude);
+  // Delegate the coordinate computation to a virtual helper
+  carla::geom::GeoLocation CurrentLocation = ComputeGeoLocation();
 
-  // Transform relative to world origin
-  carla::geom::GeoLocation CurrentLocation;
-  CurrentLocation.latitude  = OriginGeo.Latitude  + Location.y * 1e-5; // scale factor depends on conversion logic idk which is correct, keeping the previous in carla
-  CurrentLocation.longitude = OriginGeo.Longitude + Location.x * 1e-5;
-  CurrentLocation.altitude  = OriginGeo.Altitude  + Location.z;
-
-  // bias + noise
+  // Compute the noise for the sensor
   const float LatError = RandomEngine->GetNormalDistribution(0.0f, LatitudeDeviation);
   const float LonError = RandomEngine->GetNormalDistribution(0.0f, LongitudeDeviation);
   const float AltError = RandomEngine->GetNormalDistribution(0.0f, AltitudeDeviation);
 
+  // Apply the noise to the sensor
   LatitudeValue = CurrentLocation.latitude + LatitudeBias + LatError;
   LongitudeValue = CurrentLocation.longitude + LongitudeBias + LonError;
   AltitudeValue = CurrentLocation.altitude + AltitudeBias + AltError;
-  
-  auto DataStream = GetDataStream(*this);
-  carla::geom::GeoLocation OutData{LatitudeValue, LongitudeValue, AltitudeValue};
 
+  auto DataStream = GetDataStream(*this);
+
+  // ROS2
   #if defined(WITH_ROS2)
   auto ROS2 = carla::ros2::ROS2::GetInstance();
   if (ROS2->IsEnabled())
   {
+    TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Send");
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
+    AActor* ParentActor = GetAttachParentActor();
     const FTransform sensor_world_transform = GetActorTransform();
-
-    if (AActor* ParentActor = GetAttachParentActor())
+    if (ParentActor)
     {
-      FTransform LocalTransformRelativeToParent =
-          GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-
-      ROS2->ProcessDataFromGNSS(DataStream.GetSensorType(), StreamId,
-                                LocalTransformRelativeToParent, OutData,
-                                sensor_world_transform, this);
+      FTransform LocalTransformRelativeToParent = GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
+      ROS2->ProcessDataFromGNSS(DataStream.GetSensorType(), StreamId, LocalTransformRelativeToParent, carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue}, sensor_world_transform, this);
     }
     else
     {
-      ROS2->ProcessDataFromGNSS(DataStream.GetSensorType(), StreamId,
-                                DataStream.GetSensorTransform(), OutData,
-                                sensor_world_transform, this);
+      ROS2->ProcessDataFromGNSS(DataStream.GetSensorType(), StreamId, DataStream.GetSensorTransform(), carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue}, sensor_world_transform, this);
     }
   }
   #endif
-
-  DataStream.SerializeAndSend(*this, OutData);
+  {
+    TRACE_CPUPROFILER_EVENT_SCOPE_STR("AGnssSensor Stream Send");
+    DataStream.SerializeAndSend(*this, carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue});
+  }
 }
 
 void AGnssSensor::SetLatitudeDeviation(float Value)
@@ -177,31 +156,17 @@ void AGnssSensor::BeginPlay()
 
   const UCarlaEpisode* episode = UCarlaStatics::GetCurrentEpisode(GetWorld());
   CurrentGeoReference = episode->GetGeoReference();
-
-  LoadMgrsData();
 }
 
-void AGnssSensor::LoadMgrsData()
+carla::geom::GeoLocation AGnssSensor::ComputeGeoLocation() const
 {
-  if (MgrsDataAsset)
+  // Default implementation uses LargeMap for Carla (no modification)
+  FVector ActorLocation = GetActorLocation();
+  if (ALargeMapManager* LargeMap = UCarlaStatics::GetLargeMapManager(GetWorld()))
   {
-    return;
+    ActorLocation = LargeMap->LocalToGlobalLocation(ActorLocation);
   }
 
-  if (const auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
-  {
-    if (WS->MgrsDataAssetSoftPtr.IsNull())
-    {
-      UE_LOG(LogCarla, Warning, TEXT("MGRS Data Asset SoftPtr not set in WorldSettings."));
-      return;
-    }
-
-    UMgrsDataAsset* Data = WS->MgrsDataAssetSoftPtr.Get();
-    if (!IsValid(Data))
-    {
-      Data = WS->MgrsDataAssetSoftPtr.LoadSynchronous();
-    }
-
-    MgrsDataAsset = Data;
-  }
+  carla::geom::Location Location = ActorLocation;
+  return CurrentGeoReference.Transform(Location);
 }
