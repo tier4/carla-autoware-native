@@ -4,7 +4,7 @@
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
-#include "AutowareGameModeBase.h"
+#include "Game/AutowareGameModeBase.h"
 #include "Carla.h"
 #include "Carla/Game/Tagger.h"
 #include "Carla/Game/CarlaHUD.h"
@@ -35,7 +35,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include <util/ue-header-guard-end.h>
 
-#include "AutowareWorldSettings.h"
+#include "Game/AutowareWorldSettings.h"
 
 namespace cr = carla::road;
 namespace crp = carla::rpc;

@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Sensor/Sensor.h" 
+#include "Sensor/Sensor.h"
 #include "VehicleStatusSensor.generated.h"
 
 // Structure imported from LibCarla
@@ -50,7 +50,7 @@ struct FVelocityInfo
  * 
  */
 UCLASS()
-class CARLA_API AVehicleStatusSensor : public ASensor
+class CARLAAUTOWAREBRIDGE_API AVehicleStatusSensor : public ASensor
 {
 	GENERATED_BODY()
 

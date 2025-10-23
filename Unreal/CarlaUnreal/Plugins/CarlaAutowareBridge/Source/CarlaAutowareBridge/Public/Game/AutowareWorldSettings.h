@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Autoware/Data/MgrsDataAsset.h"
+#include "Data/MgrsDataAsset.h"
 #include "GameFramework/WorldSettings.h"
 #include "AutowareWorldSettings.generated.h"
 
@@ -11,7 +11,7 @@
  * 
  */
 UCLASS()
-class CARLA_API AAutowareWorldSettings : public AWorldSettings
+class CARLAAUTOWAREBRIDGE_API AAutowareWorldSettings : public AWorldSettings
 {
 	GENERATED_BODY()
 

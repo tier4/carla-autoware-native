@@ -36,7 +36,7 @@
 
 /// Base class for the CARLA + Autoware Game Mode.
 UCLASS(HideCategories=(ActorTick))
-class CARLA_API AAutowareGameModeBase : public AGameModeBase
+class CARLAAUTOWAREBRIDGE_API AAutowareGameModeBase : public AGameModeBase
 {
   GENERATED_BODY()
 

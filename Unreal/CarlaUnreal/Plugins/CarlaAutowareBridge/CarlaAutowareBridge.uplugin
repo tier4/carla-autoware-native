@@ -1,0 +1,43 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "CarlaAutowareBridge",
+	"Description": "Plugin that builds up Autoware support on top of Carla.",
+	"Category": "Science",
+	"CreatedBy": "RobotecAI",
+	"CreatedByURL": "https://robotec.ai/",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "CarlaAutowareBridge",
+			"Type": "Runtime",
+			"LoadingPhase": "PreDefault",
+			"AdditionalDependencies":
+			[
+				"Engine"
+			]
+		}
+	],
+	"Plugins":
+	[
+		{
+			"Name": "Carla",
+			"Enabled": true
+		},
+		{
+			"Name": "ProceduralMeshComponent",
+			"Enabled": true
+		},
+		{
+			"Name": "ChaosVehiclesPlugin",
+			"Enabled": true
+		}
+	]
+}

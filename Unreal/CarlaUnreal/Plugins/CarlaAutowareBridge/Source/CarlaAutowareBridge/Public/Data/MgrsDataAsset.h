@@ -9,7 +9,7 @@
  * Data Asset containing MGRS-related configuration.
  */
 UCLASS(BlueprintType)
-class CARLA_API UMgrsDataAsset : public UDataAsset
+class CARLAAUTOWAREBRIDGE_API UMgrsDataAsset : public UDataAsset
 {
 	GENERATED_BODY()
 
