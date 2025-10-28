@@ -5,8 +5,6 @@ import argparse
 import time
 import PyKDL as kdl
 
-from sympy.matrices.densearith import negate
-
 # Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
 DESIRED_SIM_RATE = 100.0  # Hz
 SIM_DT = 1.0 / DESIRED_SIM_RATE  # Simulation delta time
@@ -313,7 +311,7 @@ class TimeStepData:
         self.hz_rate = hz_rate
 
     def get_sim_dt(self):
-        return 1 / self.hz_rate if self.hz_rate is not None else None
+        return 1 / self.hz_rate if self.hz_rate not in (None, 0) else None
 
 
 def apply_world_settings(client, world, TimeStepData, map_name=None):
@@ -450,7 +448,7 @@ def main():
         help='Run the server and client in asynchronous mode.')
     argparser.add_argument(
         '--hz_rate', nargs=int, const=100,
-        help='Set None for variable time step, otherwise fixed time step will be used with target hz rate.')
+        help='Set None or 0 for variable time step, otherwise fixed time step will be used with target hz rate.')
     args = argparser.parse_args()
 
     # Get Client info
@@ -462,11 +460,15 @@ def main():
     map_name = args.load_map if args.load_map is not None else 'Town10HD_Opt'
 
     # Determine TimeStep Data to be used
-    time_step_info = TimeStepData(synchronous_mode=negate(args.async_run), hz_rate=args.hz_rate)
+    time_step_info = TimeStepData(synchronous_mode=(not args.async_run), hz_rate=args.hz_rate)
 
     # Apply Settings
     apply_world_settings(client=client, world=world, TimeStepData=time_step_info, map_name=map_name)
-    log_info("Simulation time scale: %f, fixed time step: %s, running in synchronous mode: %s" % args.time_scale % time_step_info.hz_rate % time_step_info.synchronous_mode)
+    log_info(
+        f"Simulation time scale: {args.time_scale:.2f}, "
+        f"fixed time step: {time_step_info.hz_rate}, "
+        f"running in synchronous mode: {time_step_info.synchronous_mode}"
+    )
 
     # Spawn Ego
     spawn_point = random.choice(world.get_map().get_spawn_points())
