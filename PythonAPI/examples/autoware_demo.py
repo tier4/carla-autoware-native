@@ -418,6 +418,13 @@ def run_simulation_loop(world, target_time_scale=1.0, acceptable_lag=0.05, shoul
         settings.fixed_delta_seconds = None
         world.apply_settings(settings)
 
+def parse_hz_rate(value):
+    if value.lower() == "none":
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("hz_rate must be an integer or 'None'.")
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -441,14 +448,21 @@ def main():
         '--resync_mode', action='store_true',
         help='Resynchronize to the current time when lag exceeds the acceptable threshold')
     argparser.add_argument(
-        '--load_map', nargs='?', const='Town10HD_Opt',
-        help='Load the provided map')
+        '--load_map',
+        nargs='?',
+        const='Town10HD_Opt',  # used when flag present but no value
+        default='Town10HD_Opt',  # used when flag absent
+        help="Load a map the provided map."
+    )
     argparser.add_argument(
         '--async_run', action='store_true',
         help='Run the server and client in asynchronous mode.')
     argparser.add_argument(
-        '--hz_rate', nargs=int, const=100,
-        help='Set None or 0 for variable time step, otherwise fixed time step will be used with target hz rate.')
+        '--hz_rate',
+        type=parse_hz_rate,
+        default=100,
+        help="Set 'None' or 0 for variable time step, otherwise use an integer for fixed time step rate."
+    )
     args = argparser.parse_args()
 
     # Get Client info
@@ -456,14 +470,11 @@ def main():
     client.set_timeout(60.0)
     world = client.get_world()
 
-    # Determine which map to load
-    map_name = args.load_map if args.load_map is not None else 'Town10HD_Opt'
-
     # Determine TimeStep Data to be used
     time_step_info = TimeStepData(synchronous_mode=(not args.async_run), hz_rate=args.hz_rate)
 
     # Apply Settings
-    apply_world_settings(client=client, world=world, TimeStepData=time_step_info, map_name=map_name)
+    apply_world_settings(client=client, world=world, TimeStepData=time_step_info, map_name=args.load_map)
     log_info(
         f"Simulation time scale: {args.time_scale:.2f}, "
         f"fixed time step: {time_step_info.hz_rate}, "
