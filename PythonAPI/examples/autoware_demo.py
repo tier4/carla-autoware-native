@@ -360,13 +360,13 @@ def apply_world_settings(client, world, time_step_info, map_name=None):
         False)  # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
 
 
-def run_simulation_loop(world,
-                        target_time_scale=1.0,
-                        acceptable_lag=0.05,
-                        should_resync=False,
-                        ego=None,
-                        follow_ego=False,
-                        target_sim_dt=0.01):
+def run_sync_simulation_loop(world,
+                             target_time_scale=1.0,
+                             acceptable_lag=0.05,
+                             should_resync=False,
+                             ego=None,
+                             follow_ego=False,
+                             target_sim_dt=0.01):
     """
 	Runs a real-time simulation loop for a synchronous simulation environment.
 
@@ -381,11 +381,17 @@ def run_simulation_loop(world,
 
 	:param world: The simulation world instance.
 	:param ego: The main vehicle actor - player pawn.
-	:param target_time_scale: The simulation speed multiplier. Higher values make the simulation run faster, and lower to run slower relative to real time (2.0 = twice real-time speed, 0.5 = half the real-time speed).
-	:param acceptable_lag: The maximum acceptable delay in seconds between real time and simulation time. If the loop falls behind by more than this value, a warning is logged.
-	:param should_resync: If True, when lag exceeds the acceptable threshold, the loop resets its internal schedule to the current wall time, causing the next tick to run immediately to catch up to real time.
+	:param target_time_scale: The simulation speed multiplier.
+	    Higher values make the simulation run faster, and lower to run slower relative to real time
+	    (2.0 = twice real-time speed, 0.5 = half the real-time speed).
+	:param acceptable_lag: The maximum acceptable delay in seconds between real time and simulation time.
+	    If the loop falls behind by more than this value, a warning is logged.
+	:param should_resync: If True, when lag exceeds the acceptable threshold,
+	    the loop resets its internal schedule to the current wall time,
+	    causing the next tick to run immediately to catch up to real time.
 	:param follow_ego: If True, moves the spectator camera to follow the ego actor each tick.
-	:param target_sim_dt: Fixed simulation step (in seconds). Used together with `target_time_scale` to determine real-time pacing between ticks.
+	:param target_sim_dt: Fixed simulation step (in seconds).
+	    Used together with `target_time_scale` to determine real-time pacing between ticks.
 	"""
 
     real_dt = target_sim_dt / target_time_scale
@@ -517,12 +523,12 @@ def main():
     log_warning('Kill this script before stopping simulation!')
 
     # Run simulation loop
-    run_simulation_loop(target_sim_dt=time_step_info.get_sim_dt(),
-                        target_time_scale=args.time_scale,
-                        should_resync=args.resync_mode,
-                        follow_ego=args.follow,
-                        world=world,
-                        ego=ego)
+    time_step_info.synchronous_mode and run_sync_simulation_loop(target_sim_dt=time_step_info.get_sim_dt(),
+                                                                 target_time_scale=args.time_scale,
+                                                                 should_resync=args.resync_mode,
+                                                                 follow_ego=args.follow,
+                                                                 world=world,
+                                                                 ego=ego)
 
 
 if __name__ == '__main__':
