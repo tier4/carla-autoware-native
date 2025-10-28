@@ -306,21 +306,26 @@ def move_spectator(world, ego_vehicle):
 
 
 class TimeStepData:
-    def __init__(self, synchronous_mode=True, hz_rate=100):
+    def __init__(self, synchronous_mode=True, hz_rate=100, phys_substepping=False):
         self.synchronous_mode = synchronous_mode
         self.hz_rate = hz_rate
+        self.phys_substepping = phys_substepping
 
     def get_sim_dt(self):
         return 1 / self.hz_rate if self.hz_rate not in (None, 0) else None
 
+    def is_pure_step_execution_enabled(self):
+        return self.synchronous_mode and self.hz_rate not in (None, 0) and not self.phys_substepping
 
-def apply_world_settings(client, world, TimeStepData, map_name=None):
+
+def apply_world_settings(client, world, time_step_info, map_name=None):
     """
 	Stores all settings related to the simulation world.
 	Applies Synchronous mode + fixed time-step into world settings.
 
 	:param client: Connected client to the Carla server instance.
 	:param world: The simulation world instance.
+	:param time_step_info: Instance of TimeStepData.
 	:param map_name: Map to load and apply settings to.
 	"""
 
@@ -336,22 +341,26 @@ def apply_world_settings(client, world, TimeStepData, map_name=None):
     settings = world.get_settings()
 
     # Set synchronous mode
-    settings.synchronous_mode = TimeStepData.synchronous_mode
-    settings.fixed_delta_seconds = SIM_DT
+    settings.synchronous_mode = time_step_info.synchronous_mode
+    settings.fixed_delta_seconds = time_step_info.get_sim_dt()
 
     # Set physics substepping
-    settings.substepping = False
-    # settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no neet of extreme physics realism
-    # settings.max_substeps = 10
+    if time_step_info.is_pure_step_execution_enabled():
+        settings.substepping = False
+    elif time_step_info.synchronous_mode:
+        settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no need of extreme physics realism
+        settings.max_substeps = 10
+        settings.substepping = settings.fixed_delta_seconds <= settings.max_substep_delta_time * settings.max_substeps # carla condition
+    else:
+        settings.substepping = time_step_info.phys_substepping
 
+    # Apply settings
     world.apply_settings(settings)
+    # client.reload_world(False)  # reload map keeping the world settings
 
     # Disable TF publishing in CARLA to avoid conflicts.
     world.set_publish_tf(
         False)  # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
-
-
-# client.reload_world(False)  # reload map keeping the world settings
 
 
 def run_simulation_loop(world, target_time_scale=1.0, acceptable_lag=0.05, should_resync=False, ego=None,
@@ -455,6 +464,9 @@ def main():
         help="Load a map the provided map."
     )
     argparser.add_argument(
+        '--phys_substepping', action='store_true',
+        help='Enable substepping for physics.')
+    argparser.add_argument(
         '--async_run', action='store_true',
         help='Run the server and client in asynchronous mode.')
     argparser.add_argument(
@@ -471,10 +483,15 @@ def main():
     world = client.get_world()
 
     # Determine TimeStep Data to be used
-    time_step_info = TimeStepData(synchronous_mode=(not args.async_run), hz_rate=args.hz_rate)
+    time_step_info = TimeStepData(synchronous_mode=(not args.async_run),
+                                  hz_rate=args.hz_rate,
+                                  phys_substepping=args.phys_substepping)
 
     # Apply Settings
-    apply_world_settings(client=client, world=world, TimeStepData=time_step_info, map_name=args.load_map)
+    apply_world_settings(client=client,
+                         world=world,
+                         time_step_info=time_step_info,
+                         map_name=args.load_map)
     log_info(
         f"Simulation time scale: {args.time_scale:.2f}, "
         f"fixed time step: {time_step_info.hz_rate}, "
