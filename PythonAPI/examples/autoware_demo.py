@@ -499,9 +499,12 @@ def main():
                          time_step_info=time_step_info,
                          map_name=args.load_map)
     log_info(
-        f"Simulation time scale: {args.time_scale:.2f}, "
-        f"fixed time step: {time_step_info.hz_rate}, "
-        f"running in synchronous mode: {time_step_info.synchronous_mode}"
+        f"Applied settings:\n"
+        f"\tsynchronous mode: {time_step_info.synchronous_mode}\n"
+        f"\tfixed time step: {time_step_info.hz_rate} (in Hz)\n"
+        f"\tphysics substepping: {time_step_info.phys_substepping}\n"
+        f"\ttime scale: {args.time_scale:.2f}\n"
+        f"\tpure step execution: {time_step_info.is_pure_step_execution_enabled()}"
     )
 
     # Spawn Ego
