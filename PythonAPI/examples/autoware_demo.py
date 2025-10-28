@@ -312,6 +312,13 @@ def main():
     client.set_timeout(60.0)
     world = client.get_world()
 
+    # Set synchronous mode
+    settings = world.get_settings()
+    settings.synchronous_mode = True
+    settings.fixed_delta_seconds = 1.0 / DESIRED_SIM_RATE
+    settings.substepping = False
+    world.apply_settings(settings)
+
     # Autoware will be publishing TF information based on the URDF files
     # of the vehicle and sensor kit. Disable TF publishing in CARLA
     # to avoid conflicts.
@@ -319,19 +326,12 @@ def main():
 
     spawn_point = random.choice(world.get_map().get_spawn_points())
     ego = spawn_ego_with_sensors(world, spawn_point)
+    info('Ego spawned!')
+    
+    world.tick() # tick to process the changes (settings, ego + sensors spawn)
     move_spectator(world, ego)
 
-    info('Ego spawned!')
-    time.sleep(0.05)  # Without this sometimes spectator would not move
-
-    # Set synchronous mode
-    settings = world.get_settings()
-    settings.synchronous_mode = True
-    settings.fixed_delta_seconds = 1.0 / DESIRED_SIM_RATE
-    world.apply_settings(settings)
-
     info("Simulation time scale is %f" % args.time_scale)
-
     warning('Kill this script before stopping simulation!')
 
     frame_count = 0
