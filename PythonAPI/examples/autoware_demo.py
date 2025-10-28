@@ -438,7 +438,7 @@ def run_sync_simulation_loop(world,
 
 
 def parse_hz_rate(value):
-    if value.lower() == "none":
+    if value.lower() in ("none", ''):
         return None
     try:
         return int(value)
