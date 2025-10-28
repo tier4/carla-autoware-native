@@ -1,13 +1,10 @@
-import carla
+import argparse
 import math
 import random
-import argparse
 import time
-import PyKDL as kdl
 
-# Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
-DESIRED_SIM_RATE = 100.0  # Hz
-SIM_DT = 1.0 / DESIRED_SIM_RATE  # Simulation delta time
+import PyKDL as kdl
+import carla
 
 
 def log_info(text):
@@ -350,7 +347,7 @@ def apply_world_settings(client, world, time_step_info, map_name=None):
     elif time_step_info.synchronous_mode:
         settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no need of extreme physics realism
         settings.max_substeps = 10
-        settings.substepping = settings.fixed_delta_seconds <= settings.max_substep_delta_time * settings.max_substeps # carla condition
+        settings.substepping = settings.fixed_delta_seconds <= settings.max_substep_delta_time * settings.max_substeps  # carla condition
     else:
         settings.substepping = time_step_info.phys_substepping
 
@@ -433,6 +430,7 @@ def run_simulation_loop(world,
         settings.fixed_delta_seconds = None
         world.apply_settings(settings)
 
+
 def parse_hz_rate(value):
     if value.lower() == "none":
         return None
@@ -440,6 +438,7 @@ def parse_hz_rate(value):
         return int(value)
     except ValueError:
         raise argparse.ArgumentTypeError("hz_rate must be an integer or 'None'.")
+
 
 def main():
     argparser = argparse.ArgumentParser(
