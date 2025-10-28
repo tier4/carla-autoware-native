@@ -305,7 +305,7 @@ def move_spectator(world, ego_vehicle):
 class TimeStepData:
     def __init__(self, synchronous_mode=True, hz_rate=100, phys_substepping=False):
         self.synchronous_mode = synchronous_mode
-        self.hz_rate = hz_rate
+        self.hz_rate = hz_rate if hz_rate not in (None, 0) else None
         self.phys_substepping = phys_substepping
 
     def get_sim_dt(self):
@@ -465,8 +465,10 @@ def main():
         '--follow', action='store_true',
         help='Follow Ego vehicle')
     argparser.add_argument(
-        '--resync_mode', action='store_true',
-        help='Resynchronize to the current time when lag exceeds the acceptable threshold')
+        '--resync', action='store_true',
+        help='Resynchronize to the current time when lag exceeds the acceptable threshold. '
+             'Only available for synchronized mode.'
+    )
     argparser.add_argument(
         '--load_map',
         nargs='?',
@@ -475,10 +477,10 @@ def main():
         help="Load a map the provided map."
     )
     argparser.add_argument(
-        '--phys_substepping', action='store_true',
+        '--substepping', action='store_true',
         help='Enable substepping for physics.')
     argparser.add_argument(
-        '--async_run', action='store_true',
+        '--run_async', action='store_true',
         help='Run the server and client in asynchronous mode.')
     argparser.add_argument(
         '--hz_rate',
@@ -494,9 +496,9 @@ def main():
     world = client.get_world()
 
     # Determine TimeStep Data to be used
-    time_step_info = TimeStepData(synchronous_mode=(not args.async_run),
+    time_step_info = TimeStepData(synchronous_mode=(not args.run_async),
                                   hz_rate=args.hz_rate,
-                                  phys_substepping=args.phys_substepping)
+                                  phys_substepping=args.substepping)
 
     # Apply Settings
     apply_world_settings(client=client,
@@ -507,6 +509,7 @@ def main():
         f"Applied settings:\n"
         f"\tsynchronous mode: {time_step_info.synchronous_mode}\n"
         f"\tfixed time step: {time_step_info.hz_rate} (in Hz)\n"
+        f"\tsimulation dt: {time_step_info.get_sim_dt()} (in seconds)\n"
         f"\tphysics substepping: {time_step_info.phys_substepping}\n"
         f"\ttime scale: {args.time_scale:.2f}\n"
         f"\tpure step execution: {time_step_info.is_pure_step_execution_enabled()}"
@@ -525,7 +528,7 @@ def main():
     # Run simulation loop
     time_step_info.synchronous_mode and run_sync_simulation_loop(target_sim_dt=time_step_info.get_sim_dt(),
                                                                  target_time_scale=args.time_scale,
-                                                                 should_resync=args.resync_mode,
+                                                                 should_resync=args.resync,
                                                                  follow_ego=args.follow,
                                                                  world=world,
                                                                  ego=ego)
