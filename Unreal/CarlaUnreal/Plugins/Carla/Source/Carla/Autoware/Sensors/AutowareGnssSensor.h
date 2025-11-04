@@ -17,7 +17,7 @@ public:
 	AAutowareGnssSensor(const FObjectInitializer& ObjectInitializer);
 	
 	// Temporary until AutowareGameModeBase is not valid to use. Later on swap to get this value from game mode.
-	UFUNCTION(Blueprintable, BlueprintCallable, Category = "Sensor|Gnss")
+	UFUNCTION(BlueprintCallable, Category = "Sensor|Gnss")
 	void LoadMgrsData();
 
 protected:

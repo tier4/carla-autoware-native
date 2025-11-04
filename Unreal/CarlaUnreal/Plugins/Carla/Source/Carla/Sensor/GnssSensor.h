@@ -55,7 +55,7 @@ public:
   double GetLongitudeValue() const;
   double GetAltitudeValue() const;
 
-  UFUNCTION(BlueprintCallable, Blueprintable)
+  UFUNCTION(BlueprintCallable, Category="Sensor|Gnss")
   bool IsNoiseErrorEnabled() const;
 
 protected:
