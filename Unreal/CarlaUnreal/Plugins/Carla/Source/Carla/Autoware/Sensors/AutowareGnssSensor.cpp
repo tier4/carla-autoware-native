@@ -10,6 +10,7 @@
 AAutowareGnssSensor::AAutowareGnssSensor(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	SetNoiseErrorActive(false);
 }
 
 // Called when the game starts or when spawned

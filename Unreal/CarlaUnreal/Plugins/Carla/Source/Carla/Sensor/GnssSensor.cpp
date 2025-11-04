@@ -41,15 +41,23 @@ void AGnssSensor::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaSe
   // Delegate the coordinate computation to a virtual helper
   carla::geom::GeoLocation CurrentLocation = ComputeGeoLocation();
 
-  // Compute the noise for the sensor
-  const float LatError = RandomEngine->GetNormalDistribution(0.0f, LatitudeDeviation);
-  const float LonError = RandomEngine->GetNormalDistribution(0.0f, LongitudeDeviation);
-  const float AltError = RandomEngine->GetNormalDistribution(0.0f, AltitudeDeviation);
-
   // Apply the noise to the sensor
-  LatitudeValue = CurrentLocation.latitude + LatitudeBias + LatError;
-  LongitudeValue = CurrentLocation.longitude + LongitudeBias + LonError;
-  AltitudeValue = CurrentLocation.altitude + AltitudeBias + AltError;
+  LatitudeValue = CurrentLocation.latitude;
+  LongitudeValue = CurrentLocation.longitude;
+  AltitudeValue = CurrentLocation.altitude;
+
+  if (IsNoiseErrorEnabled())
+  {
+    // Compute the noise for the sensor
+    const float LatError = RandomEngine->GetNormalDistribution(0.0f, LatitudeDeviation);
+    const float LonError = RandomEngine->GetNormalDistribution(0.0f, LongitudeDeviation);
+    const float AltError = RandomEngine->GetNormalDistribution(0.0f, AltitudeDeviation);
+
+    // Apply the noise to the sensor
+    LatitudeValue += + LatitudeBias + LatError;
+    LongitudeValue += LongitudeBias + LonError;
+    AltitudeValue += AltitudeBias + AltError;
+  }
 
   auto DataStream = GetDataStream(*this);
 
@@ -150,6 +158,11 @@ double AGnssSensor::GetAltitudeValue() const
   return AltitudeValue;
 }
 
+bool AGnssSensor::IsNoiseErrorEnabled() const
+{
+  return bApplyNoiseError;
+}
+
 void AGnssSensor::BeginPlay()
 {
   Super::BeginPlay();
@@ -169,4 +182,9 @@ carla::geom::GeoLocation AGnssSensor::ComputeGeoLocation() const
 
   carla::geom::Location Location = ActorLocation;
   return CurrentGeoReference.Transform(Location);
+}
+
+void AGnssSensor::SetNoiseErrorActive(bool bEnabled)
+{
+  bApplyNoiseError = bEnabled;
 }
