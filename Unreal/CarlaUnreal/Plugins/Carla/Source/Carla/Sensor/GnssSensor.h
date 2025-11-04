@@ -55,7 +55,7 @@ public:
   double GetLongitudeValue() const;
   double GetAltitudeValue() const;
 
-  UFUNCTION(BlueprintCallable, Category="Sensor|Gnss")
+  UFUNCTION(BlueprintCallable)
   bool IsNoiseErrorEnabled() const;
 
 protected:
@@ -64,6 +64,7 @@ protected:
   // Helper for subclasses implementation of custom geo-location computation
   virtual carla::geom::GeoLocation ComputeGeoLocation() const;
 
+  UFUNCTION(BlueprintCallable)
   void SetNoiseErrorActive(const bool bEnabled);
 
 private:
