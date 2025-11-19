@@ -315,7 +315,11 @@ class TimeStepData:
         return self.synchronous_mode and self.hz_rate not in (None, 0) and not self.phys_substepping
 
 
-def apply_world_settings(client, world, time_step_info, map_name=None):
+def get_current_map_name(world):
+    return world.get_map().name.split('/')[-1]
+
+
+def apply_world_settings(client, world, time_step_info, map_name=None, force_map_reload=False):
     """
 	Stores all settings related to the simulation world.
 	Applies Synchronous mode + fixed time-step into world settings.
@@ -324,6 +328,7 @@ def apply_world_settings(client, world, time_step_info, map_name=None):
 	:param world: The simulation world instance.
 	:param time_step_info: Instance of TimeStepData.
 	:param map_name: Map to load and apply settings to.
+	:param force_map_reload: Forces map to be reloaded. Reload action cleans up the scene.
 	"""
 
     if map_name is None:
@@ -331,8 +336,11 @@ def apply_world_settings(client, world, time_step_info, map_name=None):
         return
 
     # Load the desired map
-    print(f"Loading map: {map_name}")
-    client.load_world(map_name)
+    if force_map_reload or (get_current_map_name(world) != map_name):
+        print(f"Loading map: {map_name}")
+        client.load_world(map_name)
+
+    print(f'Loaded map: {get_current_map_name(world)}')
 
     # Get Settings
     settings = world.get_settings()
@@ -477,6 +485,9 @@ def main():
         help="Load a map the provided map."
     )
     argparser.add_argument(
+        '--force_reload', action='store_true',
+        help='Force map reload.')
+    argparser.add_argument(
         '--substepping', action='store_true',
         help='Enable substepping for physics.')
     argparser.add_argument(
@@ -504,7 +515,8 @@ def main():
     apply_world_settings(client=client,
                          world=world,
                          time_step_info=time_step_info,
-                         map_name=args.load_map)
+                         map_name=args.load_map,
+                         force_map_reload=args.force_reload)
     log_info(
         f"Applied settings:\n"
         f"\tsynchronous mode: {time_step_info.synchronous_mode}\n"
