@@ -132,7 +132,7 @@ carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(const float
   FVector FVectorAccelerometer = TO_METERS * -2.0f * ( A - B - C );
 
   // If data from previous steps is not set - set it and do not return the calculated data
-  const bool MissingPrev =
+  const bool bMissingPrev =
       PrevLocation[0].ContainsNaN() || PrevLocation[1].ContainsNaN() || !FMath::IsFinite(PrevDeltaTime);
 
   // Update the previous locations
@@ -141,7 +141,7 @@ carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(const float
   PrevDeltaTime = DeltaTime;
   PrevTime = CurrentTime;
 
-  if (MissingPrev) return {};
+  if (bMissingPrev) return {};
 
   // Add gravitational acceleration
   FVectorAccelerometer.Z += GRAVITY;
