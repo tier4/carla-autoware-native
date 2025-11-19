@@ -1049,11 +1049,11 @@ void ROS2::ProcessDataFromCollisionSensor(
 }
 
 void ROS2::ProcessDataFromStatusSensor(
-  uint64_t sensor_type, 
-  carla::streaming::detail::stream_id_type stream_id, 
-  const carla::geom::Transform sensor_transform, 
-  const sensor::s11n::VehicleStatusData data, 
-  void *vehicle_actor, 
+  uint64_t sensor_type,
+  carla::streaming::detail::stream_id_type stream_id,
+  const carla::geom::Transform sensor_transform,
+  const sensor::s11n::VehicleStatusData data,
+  void *vehicle_actor,
   void *actor)
 {
   // This callback is only for the Ego vehicle
@@ -1144,8 +1144,7 @@ void ROS2::ProcessDataFromStatusSensor(
 
   _autoware_publisher->SetHazardLights(is_hazard_lights_on);
 
-  const auto [seconds, nanoseconds] = Carla2RosTime(data.timestamp);
-  _autoware_publisher->Publish(seconds, nanoseconds);
+  _autoware_publisher->Publish(_seconds, _nanoseconds);
 
   // Debug
   if constexpr (false) {

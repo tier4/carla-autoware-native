@@ -215,6 +215,7 @@ FCarlaActor* UActorDispatcher::RegisterActor(
       {
         if (Attr.Key == "role_name" && (Attr.Value.Value == "hero" || Attr.Value.Value == "ego"))
         {
+          ActorROS2Handler::FlattenSteeringCurve(&Actor);
           ROS2->AddActorCallback(static_cast<void*>(&Actor), RosName, [RosName](void *Actor, carla::ros2::ROS2CallbackData Data) -> void
           {
             AActor *UEActor = reinterpret_cast<AActor *>(Actor);

@@ -14,6 +14,8 @@
 #include "carla/ros2/types/HazardLightsReport.h"
 #include "carla/ros2/types/HazardLightsReportPubSubTypes.h"
 
+#include "carla/ros2/AutowareSteeringCompensation.h"
+
 #include "AutowarePublisherBase.hpp"
 
 
@@ -160,7 +162,8 @@ void AutowarePublisher::SetVelocity(float longitudinal_velocity, float lateral_v
 void AutowarePublisher::SetSteering(float steering_tire_angle)
 {
   autoware_vehicle_msgs::msg::SteeringReport report;
-  report.steering_tire_angle(steering_tire_angle);
+
+  report.steering_tire_angle(autoware_steering_compensation::GetSteeringOutput(steering_tire_angle));
 
   _impl->_steering_publisher.SetData(report);
 }
