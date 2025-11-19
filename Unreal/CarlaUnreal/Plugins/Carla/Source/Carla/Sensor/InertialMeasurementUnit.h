@@ -86,7 +86,7 @@ private:
   FVector BiasGyro;
 
   /// Used to compute the acceleration
-  std::array<FVector, 2> PrevLocation{
+  TArray<FVector, TFixedAllocator<2>> PrevLocation{
     FVector::OneVector * std::numeric_limits<float>::quiet_NaN(),
     FVector::OneVector * std::numeric_limits<float>::quiet_NaN()
   };
