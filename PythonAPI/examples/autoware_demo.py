@@ -543,13 +543,14 @@ def main():
     log_info('Ego spawned!')
     log_warning('Kill this script before stopping simulation!')
 
-    # Run simulation loop
-    time_step_info.synchronous_mode and run_sync_simulation_loop(target_sim_dt=time_step_info.get_sim_dt(),
-                                                                 target_time_scale=args.time_scale,
-                                                                 should_resync=args.resync,
-                                                                 follow_ego=args.follow,
-                                                                 world=world,
-                                                                 ego=ego)
+    # Run synchronous simulation loop
+    if time_step_info.synchronous_mode:
+        run_sync_simulation_loop(target_sim_dt=time_step_info.get_sim_dt(),
+                                 target_time_scale=args.time_scale,
+                                 should_resync=args.resync,
+                                 follow_ego=args.follow,
+                                 world=world,
+                                 ego=ego)
 
 
 if __name__ == '__main__':
