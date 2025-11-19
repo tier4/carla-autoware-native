@@ -1,47 +1,50 @@
-import carla
+import argparse
 import math
 import random
-import argparse
 import time
+
 import PyKDL as kdl
+import carla
 
-# Sim rate has to be 100 to make /clock tick with 100Hz (it ticks each frame)
-DESIRED_SIM_RATE = 100
 
-def info(text):
+def log_info(text):
     print("[INFO]: %s" % text)
 
-def warning(text):
+
+def log_warning(text):
     print("[WARNING]: %s" % text)
 
-def error(text):
+
+def log_error(text):
     print("[ERROR]: %s" % text)
+
 
 class ROS2:
     """
-    ROS2 coordinate system to CARLA coordinate system conversions
-    ROS2 uses right-handed system and CARLA uses left-handed system.
-    Also converts rotation units
-    - ROS2 uses radians
-    - CARLA uses degrees
-    https://github.com/carla-simulator/ros-bridge/blob/e9063d97ff5a724f76adbb1b852dc71da1dcfeec/carla_common/src/carla_common/transforms.py#L307-L310
-    """
-    def Location(x : float = 0.0, y : float = 0.0, z : float = 0.0):
-        """In meters"""
-        return carla.Location(x =  x,
-                              y = -y,
-                              z =  z)
+	ROS2 coordinate system to CARLA coordinate system conversions
+	ROS2 uses right-handed system and CARLA uses left-handed system.
+	Also converts rotation units
+	- ROS2 uses radians
+	- CARLA uses degrees
+	https://github.com/carla-simulator/ros-bridge/blob/e9063d97ff5a724f76adbb1b852dc71da1dcfeec/carla_common/src/carla_common/transforms.py#L307-L310
+	"""
 
-    def Rotation(roll : float = 0.0, pitch : float = 0.0, yaw : float = 0.0):
+    def Location(x: float = 0.0, y: float = 0.0, z: float = 0.0):
+        """In meters"""
+        return carla.Location(x=x,
+                              y=-y,
+                              z=z)
+
+    def Rotation(roll: float = 0.0, pitch: float = 0.0, yaw: float = 0.0):
         """In radians"""
-        return carla.Rotation(roll  =  math.degrees(roll),
-                              pitch = -math.degrees(pitch),
-                              yaw   = -math.degrees(yaw))
+        return carla.Rotation(roll=math.degrees(roll),
+                              pitch=-math.degrees(pitch),
+                              yaw=-math.degrees(yaw))
 
     class Transform:
         """
-        Transform in ROS2 coordinate system
-        """
+		Transform in ROS2 coordinate system
+		"""
         x = 0.0
         y = 0.0
         z = 0.0
@@ -50,12 +53,12 @@ class ROS2:
         yaw = 0.0
 
         def __init__(self,
-                     x : float = 0.0,
-                     y : float = 0.0,
-                     z : float = 0.0,
-                     roll : float = 0.0,
-                     pitch : float = 0.0,
-                     yaw : float = 0.0):
+                     x: float = 0.0,
+                     y: float = 0.0,
+                     z: float = 0.0,
+                     roll: float = 0.0,
+                     pitch: float = 0.0,
+                     yaw: float = 0.0):
             self.x = x
             self.y = y
             self.z = z
@@ -82,22 +85,24 @@ class ROS2:
 
             return ROS2.Transform(x, y, z, roll, pitch, yaw)
 
+
 def chain_transforms(transforms):
     """
-    :param transforms: list of ROS2.Transform
-    :return: ROS2.Transform
-    """
+	:param transforms: list of ROS2.Transform
+	:return: ROS2.Transform
+	"""
     F = transforms[0].to_kdl()
     for t in transforms[1:]:
         F = F * t.to_kdl()
     return ROS2.Transform.from_kdl(F)
 
+
 def generate_vlp16_blueprint(blueprint_library):
     """Generates a blueprint for VLP16
 
-    The following assumptions were made based on the configuration in AWSIM:
-    - 10 Hz publish frequency
-    - 0.2 deg horizontal resolution"""
+	The following assumptions were made based on the configuration in AWSIM:
+	- 10 Hz publish frequency
+	- 0.2 deg horizontal resolution"""
 
     blueprint = blueprint_library.find("sensor.lidar.ray_cast")
 
@@ -118,13 +123,14 @@ def generate_vlp16_blueprint(blueprint_library):
 
     return blueprint
 
+
 def generate_traffic_light_camera_blueprint(blueprint_library):
     """Generates a traffic light camera
 
-    The following assumptions were made based on the configuration in AWSIM:
-    - 10 Hz publish frequency
-    - 1920 x 1080 image resolution
-    - 90 deg horizontal field of view"""
+	The following assumptions were made based on the configuration in AWSIM:
+	- 10 Hz publish frequency
+	- 1920 x 1080 image resolution
+	- 90 deg horizontal field of view"""
 
     blueprint = blueprint_library.find("sensor.camera.rgb")
 
@@ -139,6 +145,7 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
 
     return blueprint
 
+
 def generate_imu_blueprint(blueprint_library):
     """Generates a blueprint for IMU"""
 
@@ -151,6 +158,7 @@ def generate_imu_blueprint(blueprint_library):
     blueprint.set_attribute("ros_topic_name", "/sensing/imu/tamagawa/imu_raw")
 
     return blueprint
+
 
 def generate_gnss_blueprint(blueprint_library):
     """Generates a blueprint for GNSS"""
@@ -165,12 +173,13 @@ def generate_gnss_blueprint(blueprint_library):
 
     return blueprint
 
+
 def spawn_sensors(world, base_link, ego):
     """Spawns sensors relatively to the provided base_link actor
 
-    Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
-    https://github.com/autowarefoundation/autoware_launch/tree/0.45.3/sensor_kit/awsim_sensor_kit_launch/awsim_sensor_kit_description
-    """
+	Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
+	https://github.com/autowarefoundation/autoware_launch/tree/0.45.3/sensor_kit/awsim_sensor_kit_launch/awsim_sensor_kit_description
+	"""
 
     blueprint_library = world.get_blueprint_library()
 
@@ -244,14 +253,17 @@ def spawn_sensors(world, base_link, ego):
         vehicle_status_blueprint,
         carla.Transform(),
         attach_to=base_link)  # Attach to base_link with no offset, because velocities should come from rear axle
-    # # NOTE: Enable for ros is not needed, because this sensor uses a global publisher
-    # vehicle_status_sensor.enable_for_ros()
+
+
+# # NOTE: Enable for ros is not needed, because this sensor uses a global publisher
+# vehicle_status_sensor.enable_for_ros()
+
 
 def spawn_ego_with_sensors(world, spawn_point):
     """Spawns a controllable vehicle with a basic sensor configuration
 
-    The sensor configuration is compatible with the one for Lexus RX450h in AWSIM.
-    The vehicle itself is replaced by Linkoln MKZ available in CARLA."""
+	The sensor configuration is compatible with the one for Lexus RX450h in AWSIM.
+	The vehicle itself is replaced by Lincoln MKZ available in CARLA."""
 
     blueprint_library = world.get_blueprint_library()
 
@@ -276,6 +288,7 @@ def spawn_ego_with_sensors(world, spawn_point):
 
     return ego
 
+
 def move_spectator(world, ego_vehicle):
     spectator = world.get_spectator()
 
@@ -287,6 +300,166 @@ def move_spectator(world, ego_vehicle):
     spectator_tf = carla.Transform(spectator_with_offset_position, spectator_tf.rotation)
 
     spectator.set_transform(spectator_tf)
+
+
+class TimeStepData:
+    def __init__(self, synchronous_mode=True, hz_rate=100, phys_substepping=False):
+        self.synchronous_mode = synchronous_mode
+        self.hz_rate = hz_rate if hz_rate not in (None, 0) else None
+        self.phys_substepping = phys_substepping
+
+    def get_sim_dt(self):
+        return 1 / self.hz_rate if self.hz_rate not in (None, 0) else None
+
+    def is_pure_step_execution_enabled(self):
+        return self.synchronous_mode and self.hz_rate not in (None, 0) and not self.phys_substepping
+
+
+def get_current_map_name(world):
+    return world.get_map().name.split('/')[-1]
+
+
+def apply_world_settings(client, world, time_step_info, map_name=None, force_map_reload=False):
+    """
+	Stores all settings related to the simulation world.
+	Applies Synchronous mode + fixed time-step into world settings.
+
+	:param client: Connected client to the Carla server instance.
+	:param world: The simulation world instance.
+	:param time_step_info: Instance of TimeStepData.
+	:param map_name: Map to load and apply settings to.
+	:param force_map_reload: Forces map to be reloaded. Reload action cleans up the scene.
+	"""
+
+    # Load the desired map
+    current_map = get_current_map_name(world)
+    should_reload = map_name and (force_map_reload or current_map.lower() != map_name.lower())
+
+    if should_reload:
+        print(f"Loading map: {map_name}")
+        try:
+            client.load_world(map_name)
+            current_map = get_current_map_name(world) # set new world name to active one (current)
+        except Exception as exc:
+            traceback.print_exc()
+            print(
+                f"Provided invalid map name: {map_name}. "
+                f"Please check the spelling and make sure the map is available."
+            )
+
+    print(f'Loaded map: {current_map}')
+
+    # Get Settings
+    settings = world.get_settings()
+
+    # Set synchronous mode
+    settings.synchronous_mode = time_step_info.synchronous_mode
+    settings.fixed_delta_seconds = time_step_info.get_sim_dt()
+
+    # Set physics substepping
+    if time_step_info.is_pure_step_execution_enabled():
+        settings.substepping = False
+    elif time_step_info.synchronous_mode:
+        settings.max_substep_delta_time = 0.001  # max 1 ms per physics substep, swap to 0.01 if no need of extreme physics realism
+        settings.max_substeps = 10
+        settings.substepping = settings.fixed_delta_seconds <= settings.max_substep_delta_time * settings.max_substeps  # carla condition
+    else:
+        settings.substepping = time_step_info.phys_substepping
+
+    # Apply settings
+    world.apply_settings(settings)
+    # client.reload_world(False)  # reload map keeping the world settings
+
+    # Disable TF publishing in CARLA to avoid conflicts.
+    world.set_publish_tf(
+        False)  # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
+
+
+def run_sync_simulation_loop(world,
+                             target_time_scale=1.0,
+                             acceptable_lag=0.05,
+                             should_resync=False,
+                             ego=None,
+                             follow_ego=False,
+                             target_sim_dt=0.01):
+    """
+	Runs a real-time simulation loop for a synchronous simulation environment.
+
+	The loop advances the simulation world in fixed time steps determined by
+	`target_time_scale`, maintaining real-time pacing. It adjusts for timing
+	and can optionally resynchronize if the simulation falls behind.
+
+	Notes
+	-----
+	- This function runs indefinitely until interrupted (e.g., with Ctrl+C).
+	- When interrupted, it restores the world to asynchronous mode to prevent crashes.
+
+	:param world: The simulation world instance.
+	:param ego: The main vehicle actor - player pawn.
+	:param target_time_scale: The simulation speed multiplier.
+	    Higher values make the simulation run faster, and lower to run slower relative to real time
+	    (2.0 = twice real-time speed, 0.5 = half the real-time speed).
+	:param acceptable_lag: The maximum acceptable delay in seconds between real time and simulation time.
+	    If the loop falls behind by more than this value, a warning is logged.
+	:param should_resync: If True, when lag exceeds the acceptable threshold,
+	    the loop resets its internal schedule to the current wall time,
+	    causing the next tick to run immediately to catch up to real time.
+	:param follow_ego: If True, moves the spectator camera to follow the ego actor each tick.
+	:param target_sim_dt: Fixed simulation step (in seconds).
+	    Used together with `target_time_scale` to determine real-time pacing between ticks.
+	"""
+
+    real_dt = target_sim_dt / target_time_scale
+    frame_count = 0
+    next_tick_time = time.time()
+
+    if world is None:
+        log_error("World instance is invalid! Cannot proceed with simulation tick.")
+        return
+
+    try:
+        while True:
+            current_time = time.time()
+
+            # Sleep until it's time for the next tick
+            wait_time = next_tick_time - current_time
+            if wait_time > 0:
+                time.sleep(wait_time)
+
+            # Advance simulation
+            world.tick()
+            frame_count += 1
+
+            # Optional spectator movement
+            if follow_ego and ego is not None:
+                move_spectator(world, ego)
+
+            # Schedule next tick
+            next_tick_time += real_dt
+
+            # Detect and handle lag
+            lag = time.time() - next_tick_time
+            if lag > acceptable_lag:
+                log_warning(f"Simulation is {lag * 1000:.1f} ms behind schedule")
+                if should_resync:
+                    next_tick_time = time.time()
+
+    except KeyboardInterrupt:
+        log_info("Exiting simulation loop, restoring default Carla mode (asynchronous mode + variable time step)")
+        settings = world.get_settings()
+        settings.synchronous_mode = False
+        settings.fixed_delta_seconds = None
+        world.apply_settings(settings)
+
+
+def parse_hz_rate(value):
+    if value.lower() in ("none", ''):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("hz_rate must be an integer or 'None'.")
+
 
 def main():
     argparser = argparse.ArgumentParser(
@@ -306,67 +479,79 @@ def main():
     argparser.add_argument(
         '--follow', action='store_true',
         help='Follow Ego vehicle')
+    argparser.add_argument(
+        '--resync', action='store_true',
+        help='Resynchronize to the current time when lag exceeds the acceptable threshold. '
+             'Only available for synchronized mode.'
+    )
+    argparser.add_argument(
+        '--load_map',
+        nargs='?',
+        const='Town10HD_Opt',  # used when flag present but no value
+        help="Load a map the provided map."
+    )
+    argparser.add_argument(
+        '--force_reload', action='store_true',
+        help='Force map reload.')
+    argparser.add_argument(
+        '--substepping', action='store_true',
+        help='Enable substepping for physics.')
+    argparser.add_argument(
+        '--run_async', action='store_true',
+        help='Run the server and client in asynchronous mode.')
+    argparser.add_argument(
+        '--hz_rate',
+        type=parse_hz_rate,
+        default=100,
+        help="Set 'None' or 0 for variable time step, otherwise use an integer for fixed time step rate."
+    )
     args = argparser.parse_args()
 
+    # Get Client info
     client = carla.Client(args.host, args.port)
     client.set_timeout(60.0)
     world = client.get_world()
 
-    # Set synchronous mode
-    settings = world.get_settings()
-    settings.synchronous_mode = True
-    settings.fixed_delta_seconds = 1.0 / DESIRED_SIM_RATE
-    settings.substepping = False
-    world.apply_settings(settings)
+    # Determine TimeStep Data to be used
+    time_step_info = TimeStepData(synchronous_mode=(not args.run_async),
+                                  hz_rate=args.hz_rate,
+                                  phys_substepping=args.substepping)
 
-    # Autoware will be publishing TF information based on the URDF files
-    # of the vehicle and sensor kit. Disable TF publishing in CARLA
-    # to avoid conflicts.
-    world.set_publish_tf(False)
+    # Apply Settings
+    apply_world_settings(client=client,
+                         world=world,
+                         time_step_info=time_step_info,
+                         map_name=args.load_map,
+                         force_map_reload=args.force_reload)
+    log_info(
+        f"Applied settings:\n"
+        f"\tsynchronous mode: {time_step_info.synchronous_mode}\n"
+        f"\tfixed time step: {time_step_info.hz_rate} (in Hz)\n"
+        f"\tsimulation dt: {time_step_info.get_sim_dt()} (in seconds)\n"
+        f"\tphysics substepping: {time_step_info.phys_substepping}\n"
+        f"\ttime scale: {args.time_scale:.2f}\n"
+        f"\tpure step execution: {time_step_info.is_pure_step_execution_enabled()}"
+    )
 
+    # Spawn Ego
     spawn_point = random.choice(world.get_map().get_spawn_points())
     ego = spawn_ego_with_sensors(world, spawn_point)
-    info('Ego spawned!')
-    
-    world.tick() # tick to process the changes (settings, ego + sensors spawn)
+
+    world.tick()  # tick to process the changes (settings, ego + sensors spawn)
     move_spectator(world, ego)
 
-    info("Simulation time scale is %f" % args.time_scale)
-    warning('Kill this script before stopping simulation!')
+    log_info('Ego spawned!')
+    log_warning('Kill this script before stopping simulation!')
 
-    frame_count = 0
+    # Run synchronous simulation loop
+    if time_step_info.synchronous_mode:
+        run_sync_simulation_loop(target_sim_dt=time_step_info.get_sim_dt(),
+                                 target_time_scale=args.time_scale,
+                                 should_resync=args.resync,
+                                 follow_ego=args.follow,
+                                 world=world,
+                                 ego=ego)
 
-    start_time = time.time()
-    last_behind_error_time = start_time
-    # Tick world to follow desired time_scale
-    try:
-        while True:
-            current_time = time.time()
-            real_time_passed = current_time - start_time
-            sim_time_passed = real_time_passed * args.time_scale
-            desired_frame_count = math.floor(sim_time_passed * DESIRED_SIM_RATE)
-
-            if desired_frame_count <= frame_count:
-                continue
-
-            frame_behind_count = max(desired_frame_count - frame_count, 0)
-            if (frame_behind_count > 10) and \
-                (current_time > last_behind_error_time + 2.0):  # Error every 2 seconds
-                    last_behind_error_time = current_time
-                    error(f'Simulation cannot keep up with the desired time scale!!! ({frame_behind_count} frames behind)')
-
-            world.tick()
-            frame_count += 1
-
-            if args.follow:
-                move_spectator(world, ego)
-
-    except:  # KeyboardInterrupt:
-        info("Exiting, restoring asynchronous mode...")
-        # Set asynchronous mode, otherwise simulation will crash
-        settings = world.get_settings()
-        settings.synchronous_mode = False
-        world.apply_settings(settings)
 
 if __name__ == '__main__':
     main()
