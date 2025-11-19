@@ -333,7 +333,7 @@ def apply_world_settings(client, world, time_step_info, map_name=None, force_map
 
     # Load the desired map
     current_map = get_current_map_name(world)
-    should_reload = map_name and (force_map_reload or current_map.lower() != map_name.lower())
+    should_reload = force_map_reload or (map_name and current_map.lower() != map_name.lower())
 
     if should_reload:
         print(f"Loading map: {map_name}")
