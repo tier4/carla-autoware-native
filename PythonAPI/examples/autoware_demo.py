@@ -331,16 +331,23 @@ def apply_world_settings(client, world, time_step_info, map_name=None, force_map
 	:param force_map_reload: Forces map to be reloaded. Reload action cleans up the scene.
 	"""
 
-    if map_name is None:
-        print('Cannot load provided map')
-        return
-
     # Load the desired map
-    if force_map_reload or (get_current_map_name(world) != map_name):
-        print(f"Loading map: {map_name}")
-        client.load_world(map_name)
+    current_map = get_current_map_name(world)
+    should_reload = map_name and (force_map_reload or current_map.lower() != map_name.lower())
 
-    print(f'Loaded map: {get_current_map_name(world)}')
+    if should_reload:
+        print(f"Loading map: {map_name}")
+        try:
+            client.load_world(map_name)
+            current_map = get_current_map_name(world) # set new world name to active one (current)
+        except Exception as exc:
+            traceback.print_exc()
+            print(
+                f"Provided invalid map name: {map_name}. "
+                f"Please check the spelling and make sure the map is available."
+            )
+
+    print(f'Loaded map: {current_map}')
 
     # Get Settings
     settings = world.get_settings()
@@ -481,7 +488,6 @@ def main():
         '--load_map',
         nargs='?',
         const='Town10HD_Opt',  # used when flag present but no value
-        default='Town10HD_Opt',  # used when flag absent
         help="Load a map the provided map."
     )
     argparser.add_argument(
