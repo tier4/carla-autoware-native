@@ -535,7 +535,10 @@ def main():
     )
 
     # Spawn Ego
-    spawn_point = random.choice(world.get_map().get_spawn_points())
+    spawn_point = carla.Transform(
+        carla.Location(x=-266.9, y=216.1, z=1.0),
+        carla.Rotation(pitch=0.0, yaw=-33.0, roll=0)
+    )
     ego = spawn_ego_with_sensors(world, spawn_point)
 
     world.tick()  # tick to process the changes (settings, ego + sensors spawn)
