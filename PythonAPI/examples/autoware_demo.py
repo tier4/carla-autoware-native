@@ -1,6 +1,7 @@
 import argparse
 import math
 import random
+import traceback
 import time
 
 import PyKDL as kdl
@@ -163,7 +164,12 @@ def generate_imu_blueprint(blueprint_library):
 def generate_gnss_blueprint(blueprint_library):
     """Generates a blueprint for GNSS"""
 
-    blueprint = blueprint_library.find("sensor.other.gnss")
+    try:
+        blueprint = blueprint_library.find("sensor.other.autoware_gnss")
+    except Exception:
+        traceback.print_exc()
+        log_warning('Autoware GNSS does not exist, reverting to native Carla GNSS')
+        blueprint = blueprint_library.find("sensor.other.gnss")
 
     blueprint.set_attribute("sensor_tick", "1.0")
 
@@ -316,39 +322,53 @@ class TimeStepData:
         return self.synchronous_mode and self.hz_rate not in (None, 0) and not self.phys_substepping
 
 
-def get_current_map_name(world):
+def get_current_map_name(client):
+    """
+    Fetches active world from client to avoid stale pointer errors, and returns active world map name.
+    :returns: Active world map name (not a path).
+    """
+    world = client.get_world()
     return world.get_map().name.split('/')[-1]
 
 
-def apply_world_settings(client, world, time_step_info, map_name=None, force_map_reload=False):
+def apply_world_settings(client, time_step_info, map_name=None, force_map_reload=False):
     """
 	Stores all settings related to the simulation world.
-	Applies Synchronous mode + fixed time-step into world settings.
+	\nDefault: applies synchronous mode + fixed time-step.
+
 
 	:param client: Connected client to the Carla server instance.
-	:param world: The simulation world instance.
 	:param time_step_info: Instance of TimeStepData.
 	:param map_name: Map to load and apply settings to.
 	:param force_map_reload: Forces map to be reloaded. Reload action cleans up the scene.
+
+	:returns: world instance (possibly new) after loading a map
 	"""
 
-    # Load the desired map
-    current_map = get_current_map_name(world)
-    should_reload = force_map_reload or (map_name and current_map.lower() != map_name.lower())
+    # Get current world reference
+    world = client.get_world()
+    current_map = 'Not set yet'
 
-    if should_reload:
-        print(f"Loading map: {map_name}")
-        try:
-            client.load_world(map_name)
-            current_map = get_current_map_name(world) # set new world name to active one (current)
-        except Exception as exc:
-            traceback.print_exc()
-            print(
-                f"Provided invalid map name: {map_name}. "
-                f"Please check the spelling and make sure the map is available."
-            )
+    # Reload map
+    if force_map_reload:
+        print(f"Force reloading map: {current_map}")
+        world = client.load_world(get_current_map_name(client))
+        current_map = get_current_map_name(client)
 
-    print(f'Loaded map: {current_map}')
+    # Load a new map
+    elif map_name and map_name != current_map:
+        print(f"Loading new map: {map_name}")
+        client.load_world(map_name)
+        world = client.get_world()
+        current_map = map_name
+    else:
+        print(f"Map '{map_name}' is already loaded — skipping reload.")
+
+
+    print(f'Loaded map: {current_map if map_name is None else map_name}')
+
+    if world is None:
+        raise RuntimeError("World instance is invalid after map load.")
 
     # Get Settings
     settings = world.get_settings()
@@ -372,8 +392,13 @@ def apply_world_settings(client, world, time_step_info, map_name=None, force_map
     # client.reload_world(False)  # reload map keeping the world settings
 
     # Disable TF publishing in CARLA to avoid conflicts.
-    world.set_publish_tf(
-        False)  # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
+    try:
+        world.set_publish_tf(False) # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
+    except Exception:
+        # If API version doesn't have set_publish_tf, ignore
+        pass
+
+    return world
 
 
 def run_sync_simulation_loop(world,
@@ -506,12 +531,19 @@ def main():
         default=100,
         help="Set 'None' or 0 for variable time step, otherwise use an integer for fixed time step rate."
     )
+    argparser.add_argument(
+        '--list_maps', action='store_true',
+        help='Lists only available maps and exit. Omit applying world setting and ego spawn.')
     args = argparser.parse_args()
 
     # Get Client info
     client = carla.Client(args.host, args.port)
     client.set_timeout(60.0)
-    world = client.get_world()
+
+    if args.list_maps:
+        print("Available maps")
+        print(client.get_available_maps())
+        return
 
     # Determine TimeStep Data to be used
     time_step_info = TimeStepData(synchronous_mode=(not args.run_async),
@@ -519,8 +551,7 @@ def main():
                                   phys_substepping=args.substepping)
 
     # Apply Settings
-    apply_world_settings(client=client,
-                         world=world,
+    world = apply_world_settings(client=client,
                          time_step_info=time_step_info,
                          map_name=args.load_map,
                          force_map_reload=args.force_reload)
