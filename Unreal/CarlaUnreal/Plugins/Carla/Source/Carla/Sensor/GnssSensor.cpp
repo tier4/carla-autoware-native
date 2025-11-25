@@ -25,6 +25,7 @@ AGnssSensor::AGnssSensor(const FObjectInitializer &ObjectInitializer)
 
 FActorDefinition AGnssSensor::GetSensorDefinition()
 {
+  UE_LOG(LogCarla, Log, TEXT("GNSS Sensor Definition set to: CARLA GNSS"));
   return UActorBlueprintFunctionLibrary::MakeGnssDefinition();
 }
 
