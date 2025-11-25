@@ -90,12 +90,14 @@ public:
       bool &Success,
       FActorDefinition &Definition);
 
-  static FActorDefinition MakeGnssDefinition();
+  static FActorDefinition MakeGnssDefinition(); 
+  static FActorDefinition MakeAutowareGnssDefinition(); 
 
   UFUNCTION(Category = "Carla Actor", BlueprintCallable)
   static void MakeGnssDefinition(
       bool &Success,
-      FActorDefinition &Definition);
+      FActorDefinition &Definition,
+      FString Name);
 
   static FActorDefinition MakeIMUDefinition();
 

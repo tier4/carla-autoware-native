@@ -3,6 +3,7 @@
 
 #include "AutowareGnssSensor.h"
 
+#include "Actor/ActorBlueprintFunctionLibrary.h"
 #include "Autoware/Game/AutowareWorldSettings.h"
 
 
@@ -11,6 +12,12 @@ AAutowareGnssSensor::AAutowareGnssSensor(const FObjectInitializer& ObjectInitial
 	: Super(ObjectInitializer)
 {
 	SetNoiseErrorActive(false);
+}
+
+FActorDefinition AAutowareGnssSensor::GetSensorDefinition()
+{
+	UE_LOG(LogCarla, Log, TEXT("GNSS Sensor Definition set to: AUTOWARE GNSS"));
+	return UActorBlueprintFunctionLibrary::MakeAutowareGnssDefinition();
 }
 
 // Called when the game starts or when spawned

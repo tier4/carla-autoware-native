@@ -16,6 +16,8 @@ public:
 	// Sets default values for this actor's properties
 	AAutowareGnssSensor(const FObjectInitializer& ObjectInitializer);
 	
+	static FActorDefinition GetSensorDefinition();
+
 	// Temporary until AutowareGameModeBase is not valid to use. Later on swap to get this value from game mode.
 	UFUNCTION(BlueprintCallable)
 	void LoadMgrsData();
