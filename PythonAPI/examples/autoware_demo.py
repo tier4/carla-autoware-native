@@ -166,6 +166,7 @@ def generate_gnss_blueprint(blueprint_library):
 
     try:
         blueprint = blueprint_library.find("sensor.other.autoware_gnss")
+        print('Spawned Autoware GNSS successfully')
     except Exception:
         traceback.print_exc()
         log_warning('Autoware GNSS does not exist, reverting to native Carla GNSS')
@@ -567,8 +568,8 @@ def main():
 
     # Spawn Ego
     spawn_point = carla.Transform(
-        carla.Location(x=-266.9, y=216.1, z=1.0),
-        carla.Rotation(pitch=0.0, yaw=-33.0, roll=0)
+        carla.Location(x=-278.39, y=220.54, z=-1.265),
+        carla.Rotation(pitch=0.0, yaw=-34.98, roll=0)
     )
     ego = spawn_ego_with_sensors(world, spawn_point)
 
