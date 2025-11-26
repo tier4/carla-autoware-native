@@ -30,7 +30,6 @@
 #include "carla/sensor/s11n/GBufferUint8Serializer.h"
 #include "carla/sensor/s11n/GBufferFloatSerializer.h"
 #include "carla/sensor/s11n/VehicleStatusSerializer.h" // Autoware
-// #include "carla/sensor/s11n/AutowareGnssSerializer.h" // Autoware
 
 // 2. Add a forward-declaration of the sensor here.
 class ACollisionSensor;
