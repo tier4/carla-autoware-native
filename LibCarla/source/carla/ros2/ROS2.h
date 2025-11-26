@@ -124,6 +124,14 @@ class ROS2
       const carla::geom::GeoLocation &data,
       const carla::geom::Transform &sensor_world_transform,
       void *actor = nullptr);
+  void ProcessDataFromAutowareGNSS(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      const carla::geom::GeoLocation &data,
+      const carla::geom::Transform &sensor_world_transform,
+      const double mgrs_offset_position[3],
+      void *actor = nullptr);
   void ProcessDataFromIMU(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,

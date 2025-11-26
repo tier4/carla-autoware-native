@@ -1906,6 +1906,35 @@ void UActorBlueprintFunctionLibrary::SetGnss(
       RetrieveActorAttributeToFloat("noise_alt_bias", Description.Variations, 0.0f));
 }
 
+void UActorBlueprintFunctionLibrary::SetAutowareGnss(
+	const FActorDescription &Description,
+	AAutowareGnssSensor *Gnss)
+{
+	CARLA_ABFL_CHECK_ACTOR(Gnss);
+	if (Description.Variations.Contains("noise_seed"))
+	{
+		Gnss->SetSeed(
+		  RetrieveActorAttributeToInt("noise_seed", Description.Variations, 0));
+	}
+	else
+	{
+		Gnss->SetSeed(Gnss->GetRandomEngine()->GenerateRandomSeed());
+	}
+
+	Gnss->SetLatitudeDeviation(
+		RetrieveActorAttributeToFloat("noise_lat_stddev", Description.Variations, 0.0f));
+	Gnss->SetLongitudeDeviation(
+		RetrieveActorAttributeToFloat("noise_lon_stddev", Description.Variations, 0.0f));
+	Gnss->SetAltitudeDeviation(
+		RetrieveActorAttributeToFloat("noise_alt_stddev", Description.Variations, 0.0f));
+	Gnss->SetLatitudeBias(
+		RetrieveActorAttributeToFloat("noise_lat_bias", Description.Variations, 0.0f));
+	Gnss->SetLongitudeBias(
+		RetrieveActorAttributeToFloat("noise_lon_bias", Description.Variations, 0.0f));
+	Gnss->SetAltitudeBias(
+		RetrieveActorAttributeToFloat("noise_alt_bias", Description.Variations, 0.0f));
+}
+
 void UActorBlueprintFunctionLibrary::SetIMU(
     const FActorDescription &Description,
     AInertialMeasurementUnit *IMU)

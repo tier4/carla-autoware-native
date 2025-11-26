@@ -16,6 +16,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include <util/ue-header-guard-end.h>
 
+#include "Autoware/Sensors/AutowareGnssSensor.h"
 #include "ActorBlueprintFunctionLibrary.generated.h"
 
 class AGnssSensor;
@@ -247,6 +248,7 @@ public:
   static void SetLidar(const FActorDescription &Description, FLidarDescription &Lidar);
 
   static void SetGnss(const FActorDescription &Description, AGnssSensor *Gnss);
+  static void SetAutowareGnss(const FActorDescription &Description, AAutowareGnssSensor *Gnss);
 
   static void SetIMU(const FActorDescription &Description, AInertialMeasurementUnit *IMU);
 
