@@ -35,9 +35,9 @@ void AAutowareGameModeBase::LoadGeoReference()
 	
 	carla::geom::GeoLocation GeoReference
 	(
-	  Data->WorldOriginGeoCoordinate.Latitude,
-	  Data->WorldOriginGeoCoordinate.Longitude,
-	  Data->WorldOriginGeoCoordinate.Altitude
+		Data->GeoReference.Latitude,
+		Data->GeoReference.Longitude,
+		Data->GeoReference.Altitude
 	);
 	Episode->MapGeoReference = GeoReference;
 

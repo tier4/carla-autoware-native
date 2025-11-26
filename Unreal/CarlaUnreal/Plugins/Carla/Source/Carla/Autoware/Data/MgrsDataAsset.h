@@ -27,5 +27,5 @@ public:
 	FString MgrsGridZone;
 	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MGRS|Data")
-	FGeoLocation WorldOriginGeoCoordinate;
+	FGeoLocation GeoReference;
 };
