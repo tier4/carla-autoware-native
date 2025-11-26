@@ -55,23 +55,13 @@ public:
   double GetLongitudeValue() const;
   double GetAltitudeValue() const;
 
-  UFUNCTION(BlueprintCallable)
-  bool IsNoiseErrorEnabled() const;
-
 protected:
 
   virtual void BeginPlay() override;
-  // Helper for subclasses implementation of custom geo-location computation
-  virtual carla::geom::GeoLocation ComputeGeoLocation() const;
-
-  UFUNCTION(BlueprintCallable)
-  void SetNoiseErrorActive(const bool bEnabled);
 
 private:
 
   carla::geom::GeoLocation CurrentGeoReference;
-
-  bool bApplyNoiseError = true;
 
   float LatitudeDeviation;
   float LongitudeDeviation;

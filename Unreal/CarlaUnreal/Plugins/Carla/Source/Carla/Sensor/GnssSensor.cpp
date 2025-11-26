@@ -25,7 +25,6 @@ AGnssSensor::AGnssSensor(const FObjectInitializer &ObjectInitializer)
 
 FActorDefinition AGnssSensor::GetSensorDefinition()
 {
-  UE_LOG(LogCarla, Log, TEXT("GNSS Sensor Definition set to: CARLA GNSS"));
   return UActorBlueprintFunctionLibrary::MakeGnssDefinition();
 }
 
@@ -39,26 +38,24 @@ void AGnssSensor::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaSe
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(AGnssSensor::PostPhysTick);
 
-  // Delegate the coordinate computation to a virtual helper
-  carla::geom::GeoLocation CurrentLocation = ComputeGeoLocation();
+  FVector ActorLocation = GetActorLocation();
+  ALargeMapManager * LargeMap = UCarlaStatics::GetLargeMapManager(GetWorld());
+  if (LargeMap)
+  {
+    ActorLocation = LargeMap->LocalToGlobalLocation(ActorLocation);
+  }
+  carla::geom::Location Location = ActorLocation;
+  carla::geom::GeoLocation CurrentLocation = CurrentGeoReference.Transform(Location);
+
+  // Compute the noise for the sensor
+  const float LatError = RandomEngine->GetNormalDistribution(0.0f, LatitudeDeviation);
+  const float LonError = RandomEngine->GetNormalDistribution(0.0f, LongitudeDeviation);
+  const float AltError = RandomEngine->GetNormalDistribution(0.0f, AltitudeDeviation);
 
   // Apply the noise to the sensor
-  LatitudeValue = CurrentLocation.latitude;
-  LongitudeValue = CurrentLocation.longitude;
-  AltitudeValue = CurrentLocation.altitude;
-
-  if (IsNoiseErrorEnabled())
-  {
-    // Compute the noise for the sensor
-    const float LatError = RandomEngine->GetNormalDistribution(0.0f, LatitudeDeviation);
-    const float LonError = RandomEngine->GetNormalDistribution(0.0f, LongitudeDeviation);
-    const float AltError = RandomEngine->GetNormalDistribution(0.0f, AltitudeDeviation);
-
-    // Apply the noise to the sensor
-    LatitudeValue += + LatitudeBias + LatError;
-    LongitudeValue += LongitudeBias + LonError;
-    AltitudeValue += AltitudeBias + AltError;
-  }
+  LatitudeValue = CurrentLocation.latitude + LatitudeBias + LatError;
+  LongitudeValue = CurrentLocation.longitude + LongitudeBias + LonError;
+  AltitudeValue = CurrentLocation.altitude + AltitudeBias + AltError;
 
   auto DataStream = GetDataStream(*this);
 
@@ -159,33 +156,10 @@ double AGnssSensor::GetAltitudeValue() const
   return AltitudeValue;
 }
 
-bool AGnssSensor::IsNoiseErrorEnabled() const
-{
-  return bApplyNoiseError;
-}
-
 void AGnssSensor::BeginPlay()
 {
   Super::BeginPlay();
 
   const UCarlaEpisode* episode = UCarlaStatics::GetCurrentEpisode(GetWorld());
   CurrentGeoReference = episode->GetGeoReference();
-}
-
-carla::geom::GeoLocation AGnssSensor::ComputeGeoLocation() const
-{
-  // Default implementation uses LargeMap for Carla (no modification)
-  FVector ActorLocation = GetActorLocation();
-  if (ALargeMapManager* LargeMap = UCarlaStatics::GetLargeMapManager(GetWorld()))
-  {
-    ActorLocation = LargeMap->LocalToGlobalLocation(ActorLocation);
-  }
-
-  carla::geom::Location Location = ActorLocation;
-  return CurrentGeoReference.Transform(Location);
-}
-
-void AGnssSensor::SetNoiseErrorActive(bool bEnabled)
-{
-  bApplyNoiseError = bEnabled;
 }
