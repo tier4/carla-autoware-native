@@ -110,55 +110,8 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
 
 void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation)
 {
-	geometry_msgs::msg::Pose pose;
-
-	/// @note: Copied from CarlaTransformPublisher
-	const float tx = *translation++;
-	const float ty = *translation++;
-	const float tz = *translation++;
-
-	const float rx = ((*rotation++) * -1.0f) * (M_PIf32 / 180.0f);
-	const float ry = ((*rotation++) * -1.0f) * (M_PIf32 / 180.0f);
-	const float rz = *rotation++ * (M_PIf32 / 180.0f);
-
-	const float cr = cosf(rz * 0.5f);
-	const float sr = sinf(rz * 0.5f);
-	const float cp = cosf(rx * 0.5f);
-	const float sp = sinf(rx * 0.5f);
-	const float cy = cosf(ry * 0.5f);
-	const float sy = sinf(ry * 0.5f);
-
-	// TODO: Verify whether this data layout is correct
-
-	// Publish pose with MGRS offset
-	pose.position().x(tx);
-	pose.position().y(-ty);  // note original y was negated
-	pose.position().z(tz);
-
-	pose.orientation().w(cr * cp * cy + sr * sp * sy);
-	pose.orientation().x(sr * cp * cy - cr * sp * sy);
-	pose.orientation().y(cr * sp * cy + sr * cp * sy);
-	pose.orientation().z(cr * cp * sy - sr * sp * cy);
-
-	_impl->_pose_publisher.SetData(pose);
-
-	geometry_msgs::msg::PoseWithCovarianceStamped pose_with_covariance;
-
-	builtin_interfaces::msg::Time time;
-	time.sec(seconds);
-	time.nanosec(nanoseconds);
-
-	std_msgs::msg::Header header;
-	header.stamp(std::move(time));
-	header.frame_id(_impl->_pose_with_covariance_publisher.frame_id());
-
-	std::array<double, 36> covariance{};  // TODO: Add some covariance matrix
-
-	pose_with_covariance.header(std::move(header));
-	pose_with_covariance.pose().pose(std::move(pose));
-	pose_with_covariance.pose().covariance(std::move(covariance));
-
-	_impl->_pose_with_covariance_publisher.SetData(pose_with_covariance);
+	const double none_mgrs_offset[3] = {0, 0, 0}; // Do not apply mgrs offset, pass 0 values instead
+	SetData(seconds, nanoseconds, translation, rotation, none_mgrs_offset);
 }
 
 AutowareGNSSPublisher::AutowareGNSSPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
@@ -167,7 +120,6 @@ _impl(std::make_shared<Implementation>(ros_name, parent, ros_topic_name)) {
   _parent = parent;
   _topic_name = ros_topic_name;
 }
-
 
 AutowareGNSSPublisher::AutowareGNSSPublisher(const AutowareGNSSPublisher& other) {
   _frame_id = other._frame_id;
