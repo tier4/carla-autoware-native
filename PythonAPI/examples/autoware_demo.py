@@ -200,7 +200,7 @@ def spawn_sensors(world, base_link, ego, additional_args=None):
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = generate_imu_blueprint(blueprint_library)
-    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library, not additional_args.mgrs_off)
+    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library, additional_args.mgrs_off)
     vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     base_link_to_sensor_kit_transform = ROS2.Transform(
