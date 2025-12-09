@@ -1,7 +1,5 @@
 import argparse
 import math
-import random
-import traceback
 import time
 
 import PyKDL as kdl
@@ -161,16 +159,22 @@ def generate_imu_blueprint(blueprint_library):
     return blueprint
 
 
-def generate_gnss_blueprint(blueprint_library):
+def generate_gnss_blueprint(blueprint_library, is_mgrs_enabled):
     """Generates a blueprint for GNSS"""
 
+    sensor_name = "sensor.other.autoware_gnss" if is_mgrs_enabled else "sensor.other.gnss"
+
     try:
-        blueprint = blueprint_library.find("sensor.other.autoware_gnss")
-        print('Spawned Autoware GNSS successfully')
+        blueprint = blueprint_library.find(sensor_name)
     except Exception:
-        traceback.print_exc()
-        log_warning('Autoware GNSS does not exist, reverting to native Carla GNSS')
-        blueprint = blueprint_library.find("sensor.other.gnss")
+        if is_mgrs_enabled:
+            log_warning(
+                "Tried to spawn Autoware GNSS Sensor, but it is inaccessible. "
+                "Try running without MGRS offset: autoware_demo.py --mgrs_off"
+            )
+        else:
+            log_error("Cannot spawn Carla GNSS sensor!")
+        return None
 
     blueprint.set_attribute("sensor_tick", "1.0")
 
@@ -181,7 +185,7 @@ def generate_gnss_blueprint(blueprint_library):
     return blueprint
 
 
-def spawn_sensors(world, base_link, ego):
+def spawn_sensors(world, base_link, ego, additional_args=None):
     """Spawns sensors relatively to the provided base_link actor
 
 	Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
@@ -196,7 +200,7 @@ def spawn_sensors(world, base_link, ego):
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = generate_imu_blueprint(blueprint_library)
-    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library)
+    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library, not additional_args.mgrs_off)
     vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     base_link_to_sensor_kit_transform = ROS2.Transform(
@@ -267,7 +271,7 @@ def spawn_sensors(world, base_link, ego):
 # vehicle_status_sensor.enable_for_ros()
 
 
-def spawn_ego_with_sensors(world, spawn_point):
+def spawn_ego_with_sensors(world, spawn_point, additional_args=None):
     """Spawns a controllable vehicle with a basic sensor configuration
 
 	The sensor configuration is compatible with the one for Lexus RX450h in AWSIM.
@@ -292,7 +296,7 @@ def spawn_ego_with_sensors(world, spawn_point):
         pivot_to_base_link_transform.to_carla(),
         attach_to=ego)
 
-    spawn_sensors(world, base_link, ego)
+    spawn_sensors(world, base_link, ego, additional_args)
 
     return ego
 
@@ -515,7 +519,7 @@ def main():
         '--load_map',
         nargs='?',
         const='Town10HD_Opt',  # used when flag present but no value
-        help="Load a map the provided map."
+        help="Load the provided map by it's name."
     )
     argparser.add_argument(
         '--force_reload', action='store_true',
@@ -532,6 +536,9 @@ def main():
         default=100,
         help="Set 'None' or 0 for variable time step, otherwise use an integer for fixed time step rate."
     )
+    argparser.add_argument(
+        '--mgrs_off', action='store_false',
+        help='Disable application of MGRS offset.')
     argparser.add_argument(
         '--list_maps', action='store_true',
         help='Lists only available maps and exit. Omit applying world setting and ego spawn.')
@@ -571,7 +578,7 @@ def main():
         carla.Location(x=-278.39, y=220.54, z=-1.265),
         carla.Rotation(pitch=0.0, yaw=-34.98, roll=0)
     )
-    ego = spawn_ego_with_sensors(world, spawn_point)
+    ego = spawn_ego_with_sensors(world, spawn_point, args)
 
     world.tick()  # tick to process the changes (settings, ego + sensors spawn)
     move_spectator(world, ego)
