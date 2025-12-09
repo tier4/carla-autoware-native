@@ -398,7 +398,7 @@ def apply_world_settings(client, time_step_info, map_name=None, force_map_reload
 
     # Disable TF publishing in CARLA to avoid conflicts.
     world.set_publish_tf(False) # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
-    
+
     return world
 
 
@@ -556,9 +556,9 @@ def main():
 
     # Apply Settings
     world = apply_world_settings(client=client,
-                         time_step_info=time_step_info,
-                         map_name=args.load_map,
-                         force_map_reload=args.force_reload)
+                                 time_step_info=time_step_info,
+                                 map_name=args.load_map,
+                                 force_map_reload=args.force_reload)
     log_info(
         f"Applied settings:\n"
         f"\tsynchronous mode: {time_step_info.synchronous_mode}\n"
