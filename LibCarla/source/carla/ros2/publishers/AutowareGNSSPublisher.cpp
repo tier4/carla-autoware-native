@@ -130,13 +130,9 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
 
 	// TODO: Verify whether this data layout is correct
 
-	// Apply MGRS offsets
-	const double mgrs_x = 81655.73;
-	const double mgrs_y = 50137.43;
-
 	// Publish pose with MGRS offset
-	pose.position().x(tx + mgrs_x);
-	pose.position().y(-ty + mgrs_y);  // note original y was negated
+	pose.position().x(tx);
+	pose.position().y(-ty);  // note original y was negated
 	pose.position().z(tz);
 
 	pose.orientation().w(cr * cp * cy + sr * sp * sy);
