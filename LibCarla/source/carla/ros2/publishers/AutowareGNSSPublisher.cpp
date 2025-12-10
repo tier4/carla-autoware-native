@@ -54,64 +54,64 @@ bool AutowareGNSSPublisher::Publish() {
 
 void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation, const double* mgrs_offset_position)
 {
-	geometry_msgs::msg::Pose pose;
+  geometry_msgs::msg::Pose pose;
 
-	/// @note: Copied from CarlaTransformPublisher
-	const float tx = *translation++;
-	const float ty = *translation++;
-	const float tz = *translation++;
+  /// @note: Copied from CarlaTransformPublisher
+  const float tx = *translation++;
+  const float ty = *translation++;
+  const float tz = *translation++;
 
-	const float rx = ((*rotation++) * -1.0f) * (M_PIf32 / 180.0f);
-	const float ry = ((*rotation++) * -1.0f) * (M_PIf32 / 180.0f);
-	const float rz = *rotation++ * (M_PIf32 / 180.0f);
+  const float rx = ((*rotation++) * -1.0f) * (M_PIf32 / 180.0f);
+  const float ry = ((*rotation++) * -1.0f) * (M_PIf32 / 180.0f);
+  const float rz = *rotation++ * (M_PIf32 / 180.0f);
 
-	const float cr = cosf(rz * 0.5f);
-	const float sr = sinf(rz * 0.5f);
-	const float cp = cosf(rx * 0.5f);
-	const float sp = sinf(rx * 0.5f);
-	const float cy = cosf(ry * 0.5f);
-	const float sy = sinf(ry * 0.5f);
+  const float cr = cosf(rz * 0.5f);
+  const float sr = sinf(rz * 0.5f);
+  const float cp = cosf(rx * 0.5f);
+  const float sp = sinf(rx * 0.5f);
+  const float cy = cosf(ry * 0.5f);
+  const float sy = sinf(ry * 0.5f);
 
-	// TODO: Verify whether this data layout is correct
+  // TODO: Verify whether this data layout is correct
 
-	const double mgrs_x = mgrs_offset_position[0];
-	const double mgrs_y = mgrs_offset_position[1];
-	const double mgrs_z = mgrs_offset_position[2];
+  const double mgrs_x = mgrs_offset_position[0];
+  const double mgrs_y = mgrs_offset_position[1];
+  const double mgrs_z = mgrs_offset_position[2];
 
-	pose.position().x(tx + mgrs_x);
-	pose.position().y(-ty + mgrs_y);  // note original y was negated
-	pose.position().z(tz + mgrs_z);
+  pose.position().x(tx + mgrs_x);
+  pose.position().y(-ty + mgrs_y);  // note original y was negated
+  pose.position().z(tz + mgrs_z);
 
-	pose.orientation().w(cr * cp * cy + sr * sp * sy);
-	pose.orientation().x(sr * cp * cy - cr * sp * sy);
-	pose.orientation().y(cr * sp * cy + sr * cp * sy);
-	pose.orientation().z(cr * cp * sy - sr * sp * cy);
+  pose.orientation().w(cr * cp * cy + sr * sp * sy);
+  pose.orientation().x(sr * cp * cy - cr * sp * sy);
+  pose.orientation().y(cr * sp * cy + sr * cp * sy);
+  pose.orientation().z(cr * cp * sy - sr * sp * cy);
 
-	_impl->_pose_publisher.SetData(pose);
+  _impl->_pose_publisher.SetData(pose);
 
-	geometry_msgs::msg::PoseWithCovarianceStamped pose_with_covariance;
+  geometry_msgs::msg::PoseWithCovarianceStamped pose_with_covariance;
 
-	builtin_interfaces::msg::Time time;
-	time.sec(seconds);
-	time.nanosec(nanoseconds);
+  builtin_interfaces::msg::Time time;
+  time.sec(seconds);
+  time.nanosec(nanoseconds);
 
-	std_msgs::msg::Header header;
-	header.stamp(std::move(time));
-	header.frame_id(_impl->_pose_with_covariance_publisher.frame_id());
+  std_msgs::msg::Header header;
+  header.stamp(std::move(time));
+  header.frame_id(_impl->_pose_with_covariance_publisher.frame_id());
 
-	std::array<double, 36> covariance{};  // TODO: Add some covariance matrix
+  std::array<double, 36> covariance{};  // TODO: Add some covariance matrix
 
-	pose_with_covariance.header(std::move(header));
-	pose_with_covariance.pose().pose(std::move(pose));
-	pose_with_covariance.pose().covariance(std::move(covariance));
+  pose_with_covariance.header(std::move(header));
+  pose_with_covariance.pose().pose(std::move(pose));
+  pose_with_covariance.pose().covariance(std::move(covariance));
 
-	_impl->_pose_with_covariance_publisher.SetData(pose_with_covariance);
+  _impl->_pose_with_covariance_publisher.SetData(pose_with_covariance);
 }
 
 void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation)
 {
-	const double none_mgrs_offset[3] = {0, 0, 0}; // Do not apply mgrs offset, pass 0 values instead
-	SetData(seconds, nanoseconds, translation, rotation, none_mgrs_offset);
+  const double none_mgrs_offset[3] = {0, 0, 0}; // Do not apply mgrs offset, pass 0 values instead
+  SetData(seconds, nanoseconds, translation, rotation, none_mgrs_offset);
 }
 
 AutowareGNSSPublisher::AutowareGNSSPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
