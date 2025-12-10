@@ -1,6 +1,7 @@
 import argparse
 import math
 import time
+import random
 
 import PyKDL as kdl
 import carla
@@ -569,11 +570,9 @@ def main():
         f"\tpure step execution: {time_step_info.is_pure_step_execution_enabled()}"
     )
 
+
     # Spawn Ego
-    spawn_point = carla.Transform(
-        carla.Location(x=-278.39, y=220.54, z=-1.265),
-        carla.Rotation(pitch=0.0, yaw=-34.98, roll=0)
-    )
+    spawn_point = random.choice(world.get_ego_spawn_points())
     ego = spawn_ego_with_sensors(world, spawn_point, args)
 
     world.tick()  # tick to process the changes (settings, ego + sensors spawn)

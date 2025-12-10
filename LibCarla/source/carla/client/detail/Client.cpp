@@ -295,6 +295,10 @@ namespace detail {
     return _pimpl->CallAndWait<bool>("get_publish_tf");
   }
 
+  std::vector<geom::Transform> Client::GetEgoSpawnPoints() const {
+    return _pimpl->CallAndWait<std::vector<carla::geom::Transform>>("get_ego_spawn_points");
+  }
+
   std::vector<rpc::Actor> Client::GetActorsById(
       const std::vector<ActorId> &ids) {
     using return_t = std::vector<rpc::Actor>;

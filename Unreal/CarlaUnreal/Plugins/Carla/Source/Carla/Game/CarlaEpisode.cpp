@@ -33,6 +33,8 @@
 #include "Misc/Paths.h"
 #include <util/ue-header-guard-end.h>
 
+#include "Autoware/Game/AutowareGameModeBase.h"
+
 constexpr TCHAR DefaultRecastBuilderPath[] = TEXT(RECASTBUILDER_PATH);
 
 static FString BuildRecastBuilderFile()
@@ -225,6 +227,11 @@ void UCarlaEpisode::ApplySettings(const FEpisodeSettings &Settings)
 TArray<FTransform> UCarlaEpisode::GetRecommendedSpawnPoints() const
 {
   ACarlaGameModeBase *GM = UCarlaStatics::GetGameMode(GetWorld());
+  
+  if (auto AGM = Cast<AAutowareGameModeBase>(GM))
+  {
+    return AGM->GetSpawnPointsTransforms();
+  }
 
   return GM->GetSpawnPointsTransforms();
 }
