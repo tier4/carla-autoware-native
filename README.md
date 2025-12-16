@@ -56,12 +56,12 @@ After successful linkage of Epic Account + Github proceed with the next steps.
 
 # Installation Guide
 
-1. Clone tier4 Carla Autoware support repo
+1. **Clone tier4 Carla Autoware support repo**
     ```shell
     git clone -b autoware-support git@github.com:tier4/carla-autoware-native.git CarlaUE5
     ```
    
-2. Modify a Carla setup script
+2. **Modify a Carla setup script**
     ```shell
     cd CarlaUE5
     nano ./CarlaSetup.sh
@@ -72,14 +72,14 @@ After successful linkage of Epic Account + Github proceed with the next steps.
     + UE5_URL=git@github.com:CarlaUnreal/UnrealEngine.git
     ```
 
-3. Run installation script
+3. **Run installation script**
     ```shell
     ./CarlaSetup.sh --interactive
     ```
     
 > [!IMPORTANT]
-> UnrealEngine5_carla is built alongside the CarlaUE5 - in the same root directory.
-> Building Unreal Engine from source can take 3-4 hours, depending on your machine!
+> _UnrealEngine5_carla is built alongside the CarlaUE5 - in the same root directory.
+> Building Unreal Engine from source can take 3-4 hours, depending on your machine!_
 
 The following actions will be taken by running the script:
 - installation of dependencies
@@ -90,21 +90,21 @@ The following actions will be taken by running the script:
 - building and installing the Python API - carla package
 - building the Carla Unreal Project ( including built Lib Carla )
 
-4. Build Carla 
+4. **Build Carla** 
     ```shell
     cmake --build Build
     ```
 > [!IMPORTANT]
-> If it's the first time running the project in the editor, it might take up to 1 hour to build the project
+> _If it's the first time running the project in the editor, it might take up to 1 hour to build the project_
 
 
-5. Install Python API
+5. **Install Python API**
     ```shell
     pip3 install Build/PythonAPI/dist/carla-***.whl
     ```
 
 > [!NOTE] 
-> Step 4. and 5. can be combined into one command:
+> _Step 4. and 5. can be combined into one command:_
 ```shell
 cmake --build Build --target carla-python-api-install
 ```
