@@ -316,7 +316,8 @@ python3 PythonAPI/examples/autoware_demo.py --run_async
 python3 PythonAPI/examples/autoware_demo.py --resync
 ```
 
-> [!IMPORTANT] Only works with synchronous mode! Do not combine it with `run_async` - if you do, this argument will be ignored.
+> [!IMPORTANT] 
+> Only works with synchronous mode! Do not combine it with `run_async` - if you do, this argument will be ignored.
 
 ### Follow Ego
 By default, the spectator is not attached to the ego vehicle.
