@@ -149,4 +149,115 @@ cd Build/Package/Carla-0.10.0-Linux-Shipping/Linux
 > Please follow next section to understand how to connect a client, to spawn ego vehicles with sensors.
 
 ## Launching Carla simulation
+All Carla demos and showcases are available at PythonAPI/examples. 
+Feel free to explore them. To run our autoware demo, follow these steps:
+
+1. Either run the Carla in Unreal Editor or the packaged version
+    ```shell
+    # Unreal Editor, then click play (ALT+P)
+    cmake --build Build --target launch
+   
+    # Or packed version
+    cd Carla-0.10.0-Linux-Shipping/Linux
+    ./CarlaUnreal.sh --ros2
+    ```
+2. Run the Python client script
+   This script spawns Ego and attaches all sensors to it at runtime.
+    ```shell
+    # Source build
+    cd CarlaUE5
+    python3 PythonAPI/examples/autoware_demo.py
+    
+    # Or packaged version
+    cd Carla-0.10.0-Linux-Shipping/
+    python3 PythonAPI/examples/autoware_demo.py
+    ```
+### Example - Test Environment
+1. Source ros2 and Autoware
+    ```shell
+    source /opt/ros/humble/setup.bash
+    # Autoware Workspace is path where you've installed autoware
+    source AutowareWorkspace/release-0.45.1/install/setup.bash
+    ```
+
+2. Run ros2 command to drive forward
+    ```shell
+    ros2 topic pub --once /control/command/control_cmd autoware_control_msgs/msg/Control "{
+      stamp: {sec: 0, nanosec: 0},
+      control_time: {sec: 0, nanosec: 0},
+      lateral: {
+        stamp: {sec: 0, nanosec: 0},
+        control_time: {sec: 0, nanosec: 0},
+        steering_tire_angle: 0.0,
+        steering_tire_rotation_rate: 0.0,
+        is_defined_steering_tire_rotation_rate: false
+      },
+      longitudinal: {
+        stamp: {sec: 0, nanosec: 0},
+        control_time: {sec: 0, nanosec: 0},
+        velocity: 20.0,
+        acceleration: 1.0,
+        jerk: 0.5,
+        is_defined_acceleration: true,
+        is_defined_jerk: true
+      }
+    }"
+    ```
+
 ## Launching Carla with Autoware
+1. Navigate to the Autoware repo and source Autoware
+    Open 1st terminal window and source environment:
+    ```shell
+    cd AutowareWorkspace/release-0.45.1
+    source /opt/ros/humble/setup.bash
+    source install/setup.bash
+    ```
+   
+2. Run Carla either in the editor or the packaged version
+    In the 2nd terminal run:
+    ```shell
+    # Unreal Editor, then click play (ALT+P)
+    cd CarlaUE5
+    cmake --build Build --target launch
+   
+    # Or packed version
+    cd Carla-0.10.0-Linux-Shipping/Linux
+    ./CarlaUnreal.sh --ros2
+    ```
+   
+3. Run the Python client
+    In the 3rd terminal window run demo scenario script to spawn the Ego with sensors:
+    ```shell
+    cd CarlaUE5
+    python3 PythonAPI/examples/autoware_demo.py
+    ```
+
+4. Get the path of the Autoware map
+
+   We will be launching the `Town10HD_Opt` since it’s a default map for `CarlaUE5`. Reference: https://github.com/autowarefoundation/autoware_universe/tree/main/simulator/autoware_carla_interface/#Setup
+
+   To obtain compatible map, follow steps:
+
+   1. Download Town10 lanelet2 and point cloud from this link: https://bitbucket.org/carla-simulator/autoware-contents/src/master/maps/
+   Put those 2 files in one directory, f.e autoware_map/Town10/
+   2. Rename files:
+    ```shell
+    mv Town10HD.pcd pointcloud_map.pcd
+    mv Town10HD.osm lanelet2_map.osm
+    ```
+
+   3. Create a map projector
+    ```shell
+    touch map_projector_info.yaml
+    echo "projector_type: Local" >> map_projector_info.yaml
+    ```
+
+   4. Save the path of <path_to>/autoware_map/Town10/ for later
+
+5. Launch Autoware with the map file
+   Go back the 1st terminal, where you sourced Autoware.
+   Replace accordingly a `<path_to>/autoware_map/Town10/` - path of the directory with lanelet2 map, pointcloud map, and map projector file.
+
+    ```shell
+    ros2 launch autoware_launch e2e_simulator.launch.xml vehicle_model:=sample_vehicle sensor_model:=awsim_sensor_kit map_path:=<path_to>/autoware_map/Town10/
+    ```
