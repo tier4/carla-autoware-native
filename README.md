@@ -21,8 +21,6 @@ Autoware provides a comprehensive, production-ready software stack designed to a
 > This branch exists in parallel with the Unreal Engine 4.26 version of CARLA, in the `ue4-dev` branch.
 > Please be sure that this version of CARLA is suitable for your needs as there are significant differences between the UE 5.5 and UE 4.26 versions of CARLA. 
 
-# Installation Guide
-
 ## System Requirements
 - Ubuntu 22.04
 - NVIDIA Drivers 560 (or above)
@@ -56,3 +54,58 @@ Please follow the instructions at https://github.com/EpicGames/Signup.
 
 After successful linkage of Epic Account + Github proceed with the next steps.
 
+# Installation Guide
+
+1. Clone tier4 Carla Autoware support repo
+    ```shell
+    git clone -b autoware-support git@github.com:tier4/carla-autoware-native.git CarlaUE5
+    ```
+   
+2. Modify a Carla setup script
+    ```shell
+    cd CarlaUE5
+    nano ./CarlaSetup.sh
+    ```
+   Then find line 108 and change `https` to `ssh`:
+    ```diff
+    - UE5_URL=https://github.com/CarlaUnreal/UnrealEngine.git
+    + UE5_URL=git@github.com:CarlaUnreal/UnrealEngine.git
+    ```
+
+3. Run installation script
+    > ![IMPORTANT] UnrealEngine5_carla is built alongside the CarlaUE5 - in the same root directory.
+    > Building Unreal Engine from source can take 3-4 hours, depending on your machine!
+
+    ```shell
+    ./CarlaSetup.sh --interactive
+    ```
+   
+    The following actions will be taken by running the script:
+   - installation of dependencies
+   - downloading the Carla source repository
+   -  the Carla Unreal Content
+   - downloading and building the dedicated fork of Unreal Engine 5.5 for Carla
+   - building the cmake project - Lib Carla
+   - building and installing the Python API - carla package
+   - building the Carla Unreal Project ( including built Lib Carla )
+
+4. Build Carla 
+    ```shell
+    cmake --build Build
+    ```
+   > ![IMPORTANT] If it's the first time running the project in the editor, it might take up to 1 hour to build the project
+
+5. Install Python API
+    ```shell
+    pip3 install Build/PythonAPI/dist/carla-***.whl
+    ```
+
+> ![NOTE] Step 4. and 5. can be combined into one command:
+> ```cmake --build Build --target carla-python-api-install```
+
+
+## Opening Carla in Unreal Editor
+## Shipping Carla in a package
+
+## Launching Carla simulation
+## Launching Carla with Autoware
