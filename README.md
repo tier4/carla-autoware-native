@@ -46,6 +46,7 @@ Install from source:
 - ROS2 humble - https://docs.ros.org/en/humble/Installation.html
 - Autoware - [release version 0.45.1](github.com/autowarefoundation/autoware/tree/0.45.1) or relatively new version
 
+> [!IMPORTANT]
 > Please note, `ROS_LOCALHOST_ONLY` is not supported.
 > Make sure to use a unique `ROS_DOMAIN_ID` instead, which is optional.
 
