@@ -124,12 +124,13 @@ There are two ways to open Carla in Unreal Editor:
     $CARLA_UNREAL_ENGINE_PATH/Engine/Binaries/Linux/UnrealEditor $PWD/Unreal/CarlaUnreal/CarlaUnreal.uproject
     ```
    
-### Recommended approach to save time:
+### Recommended approach to save time
 Run the first command (with cmake) only and only when you've made changes inside LibCarla or PythonAPI.
+
 If you've made only changes inside Carla Unreal - use the 2nd command to only launch editor.
 
 ## Shipping Carla in a package
-Carla provides option to ship builds into packages. 
+Carla provides option to ship builds into packages.
 Before running command ensure you are in the `CarlaUE5` directory (root where you’ve cloned the project).
 
 The package will be generated in the directory `/Build/Package`.
