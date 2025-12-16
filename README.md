@@ -266,3 +266,82 @@ Feel free to explore them. To run our autoware demo, follow these steps:
     ```shell
     ros2 launch autoware_launch e2e_simulator.launch.xml vehicle_model:=sample_vehicle sensor_model:=awsim_sensor_kit map_path:=<path_to>/autoware_map/Town10/
     ```
+   
+## Additional arguments for python client demo script
+`autoware_demo.py` script by default runs in step execution mode with settings:
+- Time scale: 1.0
+- Hz rate: 100 Hz - (0,01 s)
+- Synchronous mode: Enabled
+- Physics substepping: Disabled
+
+Those setting can be adjusted by running the script with additional arguments:
+
+### Change Time Scale
+```shell
+python3 PythonAPI/examples/autoware_demo.py --time_scale 0.5
+```
+
+### Change Time Step
+Simulation can work in 2 different time steps:
+- [Variable time step](https://carla-ue5.readthedocs.io/en/latest/adv_synchrony_timestep/#variable-time-step)
+- [Fixed time step](https://carla-ue5.readthedocs.io/en/latest/adv_synchrony_timestep/#fixed-time-step)
+
+By default fixed time step with a 100 Hz rate is applied (0,01 s). 
+To change it, provide a positive integer with the argument `hz_rate`. Providing `0` or `None` results in variable time step, otherwise fixed time step is applied.
+
+```shell
+python3 PythonAPI/examples/autoware_demo.py --hz_rate 50
+```
+
+### Enable Physics Substepping
+By default, simulation works in step execution - which has disabled physics substepping.
+
+To enable it, run the script with an additional argument:
+```shell
+python3 PythonAPI/examples/autoware_demo.py --substepping
+```
+
+### Enable Asynchronous Mode
+To run simulation in asynchronous mode, run the script with the additional run_async flag.
+
+Please note [all Carla's possible configurations](https://carla-ue5.readthedocs.io/en/latest/adv_synchrony_timestep/#possible-configurations) before you run in asynchronous mode.
+```shell
+python3 PythonAPI/examples/autoware_demo.py --run_async
+```
+
+### Enable Client Resynchronization
+> Resynchronize the client to the current time when a delay from the server occurred (lag) - for example, computation on the server took longer than expected.
+
+```shell
+python3 PythonAPI/examples/autoware_demo.py --resync
+```
+
+> [!IMPORTANT] Only works with synchronous mode! Do not combine it with `run_async` - if you do, this argument will be ignored.
+
+### Follow Ego
+By default, the spectator is not attached to the ego vehicle.
+
+To enable the spectator to follow the ego, use the follow argument.
+```shell
+python3 PythonAPI/examples/autoware_demo.py --follow
+```
+
+### Change Map
+To change between different maps when running a single simulation, provide the `load_map` argument with the map name.
+
+```shell
+python3 PythonAPI/examples/autoware_demo.py --load_map NishinjukuMap
+```
+
+> [!IMPORTANT]
+> Please note, if you try to load the same map as your current active map (in the simulation) - this operation will be skipped since there is nothing to load.
+> For example, your active map in simulation is `Town10HD_Opt`.
+> Loading again `Town10HD_Opt` will take no action in this case. Please use the `force_reload` argument instead.
+
+### Reload Map
+To reload the active map in simulation, run the script with `force_reload` argument.
+
+This is useful if you want to clean up the scene without closing the simulation.
+```shell
+python3 PythonAPI/examples/autoware_demo.py --force_reload
+```
