@@ -10,7 +10,7 @@ environmental conditions.
 
 ![Carla Official Documentation](https://carla-ue5.readthedocs.io)
 
-![Autoware Logo](https://www.klasgroup.com/wp-content/uploads/2022/04/Autoware-Main-Logo-whiteBG.png)
+![Autoware Logo](https://autoware.org/wp-content/uploads/2023/02/984e93_61c0e31c437c4be294009b8effdd3fe0_mv2.webp)
 
 Autoware is the world's leading open-source autonomous driving framework. 
 Autoware provides a comprehensive, production-ready software stack designed to accelerate the commercial deployment of autonomous vehicles across diverse platforms and use cases.
