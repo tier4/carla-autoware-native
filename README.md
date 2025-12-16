@@ -258,7 +258,9 @@ Feel free to explore them. To run our autoware demo, follow these steps:
    4. Save the path of <path_to>/autoware_map/Town10/ for later
 
 5. Launch Autoware with the map file
+
    Go back the 1st terminal, where you sourced Autoware.
+
    Replace accordingly a `<path_to>/autoware_map/Town10/` - path of the directory with lanelet2 map, pointcloud map, and map projector file.
 
     ```shell
