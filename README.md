@@ -94,9 +94,6 @@ The following actions will be taken by running the script:
     ```shell
     cmake --build Build
     ```
-> [!IMPORTANT]
-> _If it's the first time running the project in the editor, it might take up to 1 hour to build the project_
-
 
 5. **Install Python API**
     ```shell
@@ -109,9 +106,45 @@ The following actions will be taken by running the script:
 cmake --build Build --target carla-python-api-install
 ```
 
+## Open Carla in Unreal Editor
+> [!IMPORTANT]
+> _If it's the first time running the project in the editor, it might take up to 1 hour to build the project_
 
-## Opening Carla in Unreal Editor
+There are two ways to open Carla in Unreal Editor:
+1. Using cmake command - Carla predefined command
+    This process takes longer, because all carla dependencies are being built and linked before lunching UE Editor
+    ```shell
+    cmake --build Build --target launch
+    ```
+2. Using Unreal Build Tool
+    Previous cmake command runs this part to open editor. Remember to run this command in `CarlaUE5` directory, otherwise provide absolute paths.
+    ```shell
+    $CARLA_UNREAL_ENGINE_PATH/Engine/Binaries/Linux/UnrealEditor $PWD/Unreal/CarlaUnreal/CarlaUnreal.uproject
+    ```
+   
+### Recommended approach to save time:
+Run the first command (with cmake) only and only when you've made changes inside LibCarla or PythonAPI.
+If you've made only changes inside Carla Unreal - use the 2nd command to only launch editor.
+
 ## Shipping Carla in a package
+Carla provides option to ship builds into packages. 
+Before running command ensure you are in the `CarlaUE5` directory (root where you’ve cloned the project).
+
+The package will be generated in the directory `/Build/Package`.
+```shell
+cmake --build Build --target package
+```
+
+### Launching shipped project
+```shell
+cd Build/Package/Carla-0.10.0-Linux-Shipping/Linux
+./CarlaUnreal.sh --ros2
+```
+
+> [!IMPORTANT]
+> This script runs only the Carla Server!
+> Please follow next section to understand how to connect a client, to spawn ego vehicles with sensors.
+
 
 ## Launching Carla simulation
 ## Launching Carla with Autoware
