@@ -206,6 +206,7 @@ Feel free to explore them. To run our autoware demo, follow these steps:
 
 ## Launching Carla with Autoware
 1. Navigate to the Autoware repo and source Autoware
+
     Open 1st terminal window and source environment:
     ```shell
     cd AutowareWorkspace/release-0.45.1
@@ -214,6 +215,7 @@ Feel free to explore them. To run our autoware demo, follow these steps:
     ```
    
 2. Run Carla either in the editor or the packaged version
+
     In the 2nd terminal run:
     ```shell
     # Unreal Editor, then click play (ALT+P)
@@ -226,6 +228,7 @@ Feel free to explore them. To run our autoware demo, follow these steps:
     ```
    
 3. Run the Python client
+
     In the 3rd terminal window run demo scenario script to spawn the Ego with sensors:
     ```shell
     cd CarlaUE5
