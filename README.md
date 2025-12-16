@@ -21,3 +21,16 @@ Autoware provides a comprehensive, production-ready software stack designed to a
 > This branch exists in parallel with the Unreal Engine 4.26 version of CARLA, in the `ue4-dev` branch.
 > Please be sure that this version of CARLA is suitable for your needs as there are significant differences between the UE 5.5 and UE 4.26 versions of CARLA. 
 
+# Installation
+
+## System Requirements
+- Ubuntu 22.04
+- NVIDIA Drivers 560 (or above)
+- CUDA 12 (or above)
+- NVIDIA Graphics card with 16Gb VRAM (or more)
+- 32Gb RAM Memory (or more for Unreal Editor)
+- Intel i7 gen 9th - 11th / Intel i9 gen 9th - 11th / AMD Ryzen 7 / AMD Ryzen 9
+- Clang 14 (or above)
+- Default system Python 3.10 ONLY (otherwise work with Python environment)
+- Around 300Gb free disk space
+Reference: https://carla-ue5.readthedocs.io/en/latest/start_quickstart/#before-you-begin
