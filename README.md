@@ -112,11 +112,13 @@ cmake --build Build --target carla-python-api-install
 
 There are two ways to open Carla in Unreal Editor:
 1. Using cmake command - Carla predefined command
+
     This process takes longer, because all carla dependencies are being built and linked before lunching UE Editor
     ```shell
     cmake --build Build --target launch
     ```
 2. Using Unreal Build Tool
+
     Previous cmake command runs this part to open editor. Remember to run this command in `CarlaUE5` directory, otherwise provide absolute paths.
     ```shell
     $CARLA_UNREAL_ENGINE_PATH/Engine/Binaries/Linux/UnrealEditor $PWD/Unreal/CarlaUnreal/CarlaUnreal.uproject
@@ -144,7 +146,6 @@ cd Build/Package/Carla-0.10.0-Linux-Shipping/Linux
 > [!IMPORTANT]
 > This script runs only the Carla Server!
 > Please follow next section to understand how to connect a client, to spawn ego vehicles with sensors.
-
 
 ## Launching Carla simulation
 ## Launching Carla with Autoware
