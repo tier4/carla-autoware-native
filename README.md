@@ -73,29 +73,30 @@ After successful linkage of Epic Account + Github proceed with the next steps.
     ```
 
 3. Run installation script
-    > [!IMPORTANT]
-    > UnrealEngine5_carla is built alongside the CarlaUE5 - in the same root directory.
-    > Building Unreal Engine from source can take 3-4 hours, depending on your machine!
-
     ```shell
     ./CarlaSetup.sh --interactive
     ```
-   
-    The following actions will be taken by running the script:
-   - installation of dependencies
-   - downloading the Carla source repository
-   -  the Carla Unreal Content
-   - downloading and building the dedicated fork of Unreal Engine 5.5 for Carla
-   - building the cmake project - Lib Carla
-   - building and installing the Python API - carla package
-   - building the Carla Unreal Project ( including built Lib Carla )
+    
+> [!IMPORTANT]
+> UnrealEngine5_carla is built alongside the CarlaUE5 - in the same root directory.
+> Building Unreal Engine from source can take 3-4 hours, depending on your machine!
+
+The following actions will be taken by running the script:
+- installation of dependencies
+- downloading the Carla source repository
+-  the Carla Unreal Content
+- downloading and building the dedicated fork of Unreal Engine 5.5 for Carla
+- building the cmake project - Lib Carla
+- building and installing the Python API - carla package
+- building the Carla Unreal Project ( including built Lib Carla )
 
 4. Build Carla 
     ```shell
     cmake --build Build
     ```
-   > [!IMPORTANT]
-   > If it's the first time running the project in the editor, it might take up to 1 hour to build the project
+> [!IMPORTANT]
+> If it's the first time running the project in the editor, it might take up to 1 hour to build the project
+
 
 5. Install Python API
     ```shell
