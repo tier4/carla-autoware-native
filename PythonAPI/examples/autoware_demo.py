@@ -186,7 +186,7 @@ def generate_gnss_blueprint(blueprint_library, is_mgrs_enabled):
     return blueprint
 
 
-def spawn_sensors(world, base_link, ego, additional_args=None):
+def spawn_sensors(world, base_link, ego, args):
     """Spawns sensors relatively to the provided base_link actor
 
 	Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
@@ -201,7 +201,7 @@ def spawn_sensors(world, base_link, ego, additional_args=None):
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = generate_imu_blueprint(blueprint_library)
-    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library, additional_args.mgrs_off)
+    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library, args.mgrs_off)
     vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     base_link_to_sensor_kit_transform = ROS2.Transform(
@@ -272,7 +272,7 @@ def spawn_sensors(world, base_link, ego, additional_args=None):
 # vehicle_status_sensor.enable_for_ros()
 
 
-def spawn_ego_with_sensors(world, spawn_point, additional_args=None):
+def spawn_ego_with_sensors(world, spawn_point, args):
     """Spawns a controllable vehicle with a basic sensor configuration
 
 	The sensor configuration is compatible with the one for Lexus RX450h in AWSIM.
@@ -297,7 +297,7 @@ def spawn_ego_with_sensors(world, spawn_point, additional_args=None):
         pivot_to_base_link_transform.to_carla(),
         attach_to=ego)
 
-    spawn_sensors(world, base_link, ego, additional_args)
+    spawn_sensors(world, base_link, ego, args)
 
     return ego
 
