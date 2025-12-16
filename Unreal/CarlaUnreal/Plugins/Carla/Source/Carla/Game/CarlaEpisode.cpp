@@ -227,12 +227,6 @@ void UCarlaEpisode::ApplySettings(const FEpisodeSettings &Settings)
 TArray<FTransform> UCarlaEpisode::GetRecommendedSpawnPoints() const
 {
   ACarlaGameModeBase *GM = UCarlaStatics::GetGameMode(GetWorld());
-  
-  if (auto AGM = Cast<AAutowareGameModeBase>(GM))
-  {
-    return AGM->GetSpawnPointsTransforms();
-  }
-
   return GM->GetSpawnPointsTransforms();
 }
 
