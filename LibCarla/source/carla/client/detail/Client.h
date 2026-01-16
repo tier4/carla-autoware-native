@@ -163,7 +163,9 @@ namespace detail {
 
     void SetPublishTF(bool publish_tf);
 
-    bool GetPublishTF() const; 
+    bool GetPublishTF() const;
+
+    std::vector<geom::Transform> GetEgoSpawnPoints() const;
 
     std::vector<rpc::Actor> GetActorsById(const std::vector<ActorId> &ids);
 

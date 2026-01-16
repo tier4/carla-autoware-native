@@ -271,6 +271,10 @@ namespace detail {
       return _client.GetPublishTF();
     }
 
+    std::vector<geom::Transform> GetEgoSpawnPoints() const {
+      return _client.GetEgoSpawnPoints();
+    }
+
     rpc::VehiclePhysicsControl GetVehiclePhysicsControl(const Vehicle &vehicle) const {
       return _client.GetVehiclePhysicsControl(vehicle.GetId());
     }

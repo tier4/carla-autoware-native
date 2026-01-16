@@ -52,7 +52,8 @@ bool AutowareGNSSPublisher::Publish() {
     _impl->_pose_with_covariance_publisher.Publish();
 }
 
-void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation) {
+void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation, const double* mgrs_offset_position)
+{
   geometry_msgs::msg::Pose pose;
 
   /// @note: Copied from CarlaTransformPublisher
@@ -72,9 +73,14 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
   const float sy = sinf(ry * 0.5f);
 
   // TODO: Verify whether this data layout is correct
-  pose.position().x(tx);
-  pose.position().y(-ty);
-  pose.position().z(tz);
+
+  const double mgrs_x = mgrs_offset_position[0];
+  const double mgrs_y = mgrs_offset_position[1];
+  const double mgrs_z = mgrs_offset_position[2];
+
+  pose.position().x(tx + mgrs_x);
+  pose.position().y(-ty + mgrs_y);  // note original y was negated
+  pose.position().z(tz + mgrs_z);
 
   pose.orientation().w(cr * cp * cy + sr * sp * sy);
   pose.orientation().x(sr * cp * cy - cr * sp * sy);
@@ -102,13 +108,18 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
   _impl->_pose_with_covariance_publisher.SetData(pose_with_covariance);
 }
 
+void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation)
+{
+  const double none_mgrs_offset[3] = {0, 0, 0}; // Do not apply mgrs offset, pass 0 values instead
+  SetData(seconds, nanoseconds, translation, rotation, none_mgrs_offset);
+}
+
 AutowareGNSSPublisher::AutowareGNSSPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
 _impl(std::make_shared<Implementation>(ros_name, parent, ros_topic_name)) {
   _name = ros_name;
   _parent = parent;
   _topic_name = ros_topic_name;
 }
-
 
 AutowareGNSSPublisher::AutowareGNSSPublisher(const AutowareGNSSPublisher& other) {
   _frame_id = other._frame_id;

@@ -395,5 +395,8 @@ namespace client {
     return _episode.Lock()->GetPublishTF();
   }
 
+  std::vector<geom::Transform> World::GetEgoSpawnPoints() const {
+    return _episode.Lock()->GetEgoSpawnPoints();
+  }
 } // namespace client
 } // namespace carla

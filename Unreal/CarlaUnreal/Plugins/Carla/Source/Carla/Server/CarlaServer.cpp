@@ -757,6 +757,14 @@ void FCarlaServer::FPimpl::BindActions()
     #endif
   };
 
+  BIND_SYNC(get_ego_spawn_points) << [this]() -> R<std::vector<carla::geom::Transform>>
+  {
+    REQUIRE_CARLA_EPISODE();
+    const auto &SpawnPoints = Episode->GetRecommendedSpawnPoints();
+    auto result = MakeVectorFromTArray<cg::Transform>(SpawnPoints);
+    return result;
+  };
+
   // ~~ Actor operations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   BIND_SYNC(get_actors_by_id) << [this](

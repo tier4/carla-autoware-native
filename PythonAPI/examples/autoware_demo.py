@@ -1,7 +1,7 @@
 import argparse
 import math
-import random
 import time
+import random
 
 import PyKDL as kdl
 import carla
@@ -160,10 +160,22 @@ def generate_imu_blueprint(blueprint_library):
     return blueprint
 
 
-def generate_gnss_blueprint(blueprint_library):
+def generate_gnss_blueprint(blueprint_library, is_mgrs_enabled):
     """Generates a blueprint for GNSS"""
 
-    blueprint = blueprint_library.find("sensor.other.gnss")
+    sensor_name = "sensor.other.autoware_gnss" if is_mgrs_enabled else "sensor.other.gnss"
+
+    try:
+        blueprint = blueprint_library.find(sensor_name)
+    except Exception:
+        if is_mgrs_enabled:
+            log_warning(
+                "Tried to spawn Autoware GNSS Sensor, but it is inaccessible. "
+                "Try running without MGRS offset: autoware_demo.py --mgrs_off"
+            )
+        else:
+            log_error("Cannot spawn Carla GNSS sensor!")
+        return None
 
     blueprint.set_attribute("sensor_tick", "1.0")
 
@@ -174,7 +186,7 @@ def generate_gnss_blueprint(blueprint_library):
     return blueprint
 
 
-def spawn_sensors(world, base_link, ego):
+def spawn_sensors(world, base_link, ego, args):
     """Spawns sensors relatively to the provided base_link actor
 
 	Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
@@ -189,7 +201,7 @@ def spawn_sensors(world, base_link, ego):
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = generate_imu_blueprint(blueprint_library)
-    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library)
+    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library, args.mgrs_off)
     vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     base_link_to_sensor_kit_transform = ROS2.Transform(
@@ -260,7 +272,7 @@ def spawn_sensors(world, base_link, ego):
 # vehicle_status_sensor.enable_for_ros()
 
 
-def spawn_ego_with_sensors(world, spawn_point):
+def spawn_ego_with_sensors(world, spawn_point, args):
     """Spawns a controllable vehicle with a basic sensor configuration
 
 	The sensor configuration is compatible with the one for Lexus RX450h in AWSIM.
@@ -285,7 +297,7 @@ def spawn_ego_with_sensors(world, spawn_point):
         pivot_to_base_link_transform.to_carla(),
         attach_to=ego)
 
-    spawn_sensors(world, base_link, ego)
+    spawn_sensors(world, base_link, ego, args)
 
     return ego
 
@@ -316,39 +328,53 @@ class TimeStepData:
         return self.synchronous_mode and self.hz_rate not in (None, 0) and not self.phys_substepping
 
 
-def get_current_map_name(world):
+def get_current_map_name(client):
+    """
+    Fetches active world from client to avoid stale pointer errors, and returns active world map name.
+    :returns: Active world map name (not a path).
+    """
+    world = client.get_world()
     return world.get_map().name.split('/')[-1]
 
 
-def apply_world_settings(client, world, time_step_info, map_name=None, force_map_reload=False):
+def apply_world_settings(client, time_step_info, map_name=None, force_map_reload=False):
     """
 	Stores all settings related to the simulation world.
-	Applies Synchronous mode + fixed time-step into world settings.
+	\nDefault: applies synchronous mode + fixed time-step.
+
 
 	:param client: Connected client to the Carla server instance.
-	:param world: The simulation world instance.
 	:param time_step_info: Instance of TimeStepData.
 	:param map_name: Map to load and apply settings to.
 	:param force_map_reload: Forces map to be reloaded. Reload action cleans up the scene.
+
+	:returns: world instance (possibly new) after loading a map
 	"""
 
-    # Load the desired map
-    current_map = get_current_map_name(world)
-    should_reload = force_map_reload or (map_name and current_map.lower() != map_name.lower())
+    # Get current world reference
+    world = client.get_world()
+    current_map = 'Not set yet'
 
-    if should_reload:
-        print(f"Loading map: {map_name}")
-        try:
-            client.load_world(map_name)
-            current_map = get_current_map_name(world) # set new world name to active one (current)
-        except Exception as exc:
-            traceback.print_exc()
-            print(
-                f"Provided invalid map name: {map_name}. "
-                f"Please check the spelling and make sure the map is available."
-            )
+    # Reload map
+    if force_map_reload:
+        print(f"Force reloading map: {current_map}")
+        world = client.load_world(get_current_map_name(client))
+        current_map = get_current_map_name(client)
 
-    print(f'Loaded map: {current_map}')
+    # Load a new map
+    elif map_name and map_name != current_map:
+        print(f"Loading new map: {map_name}")
+        client.load_world(map_name)
+        world = client.get_world()
+        current_map = map_name
+    else:
+        print(f"Map '{map_name}' is already loaded — skipping reload.")
+
+
+    print(f'Loaded map: {current_map if map_name is None else map_name}')
+
+    if world is None:
+        raise RuntimeError("World instance is invalid after map load.")
 
     # Get Settings
     settings = world.get_settings()
@@ -372,8 +398,9 @@ def apply_world_settings(client, world, time_step_info, map_name=None, force_map
     # client.reload_world(False)  # reload map keeping the world settings
 
     # Disable TF publishing in CARLA to avoid conflicts.
-    world.set_publish_tf(
-        False)  # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
+    world.set_publish_tf(False) # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
+
+    return world
 
 
 def run_sync_simulation_loop(world,
@@ -489,7 +516,7 @@ def main():
         '--load_map',
         nargs='?',
         const='Town10HD_Opt',  # used when flag present but no value
-        help="Load a map the provided map."
+        help="Load the provided map by it's name."
     )
     argparser.add_argument(
         '--force_reload', action='store_true',
@@ -506,12 +533,22 @@ def main():
         default=100,
         help="Set 'None' or 0 for variable time step, otherwise use an integer for fixed time step rate."
     )
+    argparser.add_argument(
+        '--mgrs_off', action='store_false',
+        help='Disable application of MGRS offset.')
+    argparser.add_argument(
+        '--list_maps', action='store_true',
+        help='Lists only available maps and exit. Omit applying world setting and ego spawn.')
     args = argparser.parse_args()
 
     # Get Client info
     client = carla.Client(args.host, args.port)
     client.set_timeout(60.0)
-    world = client.get_world()
+
+    if args.list_maps:
+        print("Available maps")
+        print(client.get_available_maps())
+        return
 
     # Determine TimeStep Data to be used
     time_step_info = TimeStepData(synchronous_mode=(not args.run_async),
@@ -519,11 +556,10 @@ def main():
                                   phys_substepping=args.substepping)
 
     # Apply Settings
-    apply_world_settings(client=client,
-                         world=world,
-                         time_step_info=time_step_info,
-                         map_name=args.load_map,
-                         force_map_reload=args.force_reload)
+    world = apply_world_settings(client=client,
+                                 time_step_info=time_step_info,
+                                 map_name=args.load_map,
+                                 force_map_reload=args.force_reload)
     log_info(
         f"Applied settings:\n"
         f"\tsynchronous mode: {time_step_info.synchronous_mode}\n"
@@ -534,9 +570,10 @@ def main():
         f"\tpure step execution: {time_step_info.is_pure_step_execution_enabled()}"
     )
 
+
     # Spawn Ego
-    spawn_point = random.choice(world.get_map().get_spawn_points())
-    ego = spawn_ego_with_sensors(world, spawn_point)
+    spawn_point = random.choice(world.get_ego_spawn_points())
+    ego = spawn_ego_with_sensors(world, spawn_point, args)
 
     world.tick()  # tick to process the changes (settings, ego + sensors spawn)
     move_spectator(world, ego)

@@ -242,6 +242,9 @@ namespace client {
     /// Simple test method to verify binding
     // int GetTestValue() const { return 42; }
 
+    /// Get all ego spawn points available in the level.
+    std::vector<geom::Transform> GetEgoSpawnPoints() const;
+
   private:
 
     detail::EpisodeProxy _episode;
