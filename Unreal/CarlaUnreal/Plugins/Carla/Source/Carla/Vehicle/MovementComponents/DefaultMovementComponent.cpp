@@ -23,8 +23,29 @@ void UDefaultMovementComponent::BeginPlay()
 void UDefaultMovementComponent::ProcessControl(FVehicleControl &Control)
 {
   auto *MovementComponent = CarlaVehicle->GetChaosWheeledVehicleMovementComponent();
+
+  // The following code block ensures the steering angle is normalized according
+  // to the same mapping function as configured for the Chaos Wheeled Vehicle.
+  // See: https://github.com/autowarefoundation/autoware-projects/issues/78
+  switch (MovementComponent->SteeringInputRate.InputCurveFunction)
+  {
+    case EInputFunctionType::LinearFunction:
+      MovementComponent->SetSteeringInput(Control.Steer);
+      break;
+    case EInputFunctionType::SquaredFunction:
+    {
+      auto normalizedSteeringMagnitude = std::sqrt(std::abs(Control.Steer));
+      MovementComponent->SetSteeringInput(
+        Control.Steer < 0 ? -normalizedSteeringMagnitude : normalizedSteeringMagnitude);
+      break;
+    }
+    default:
+      UE_LOG(LogCarla, Warning, TEXT("Unsupported InputCurveFunction for steering, defaulting to LinearFunction"));
+      MovementComponent->SetSteeringInput(Control.Steer);
+      break;
+  }
+
   MovementComponent->SetThrottleInput(Control.Throttle);
-  MovementComponent->SetSteeringInput(Control.Steer);
   MovementComponent->SetBrakeInput(Control.Brake);
   MovementComponent->SetHandbrakeInput(Control.bHandBrake);
 
