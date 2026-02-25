@@ -31,9 +31,12 @@ void UNavMeshMapScanner::CollectMaps()
         FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 
     FARFilter Filter;
+
+    // EXACT folder only (no subfolders)
     Filter.PackagePaths.Add("/Game/Carla/Maps");
+    Filter.bRecursivePaths = false;   // 🔥 IMPORTANT
+
     Filter.ClassPaths.Add(UWorld::StaticClass()->GetClassPathName());
-    Filter.bRecursivePaths = true;
 
     TArray<FAssetData> AssetList;
     AssetRegistry.Get().GetAssets(Filter, AssetList);
@@ -43,7 +46,7 @@ void UNavMeshMapScanner::CollectMaps()
         MapsToScan.Add(Asset.PackageName.ToString());
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("Found %d maps"), MapsToScan.Num());
+    UE_LOG(LogTemp, Warning, TEXT("Found %d maps (non-recursive)"), MapsToScan.Num());
 }
 
 void UNavMeshMapScanner::LoadNextMap()
