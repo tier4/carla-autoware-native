@@ -31,11 +31,10 @@ void UNavMeshMapScanner::CollectMaps()
         FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 
     FARFilter Filter;
-
-    // EXACT folder only (no subfolders)
+    
     Filter.PackagePaths.Add("/Game/Carla/Maps");
-    Filter.bRecursivePaths = false;   // 🔥 IMPORTANT
-
+    Filter.bRecursivePaths = false;
+    
     Filter.ClassPaths.Add(UWorld::StaticClass()->GetClassPathName());
 
     TArray<FAssetData> AssetList;
