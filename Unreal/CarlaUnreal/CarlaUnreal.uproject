@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "{EFC07C98-4070-2F0E-BE31-319DCE259DFF}",
+	"EngineAssociation": "{4BA15FB7-8B8C-44E6-8F10-183A00B2C826}",
 	"Category": "",
 	"Description": "",
 	"Modules": [
@@ -13,6 +13,11 @@
 				"Carla",
 				"CoreUObject"
 			]
+		},
+		{
+			"Name": "CarlaUnrealEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
 		}
 	],
 	"Plugins": [

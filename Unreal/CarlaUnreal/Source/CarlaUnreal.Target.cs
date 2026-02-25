@@ -32,5 +32,12 @@ public class CarlaUnrealTarget : TargetRules
             bForceUnityBuild =
             bUseAdaptiveUnityBuild = false;
         }
+
+        RegisterModulesCreatedByRider();
+    }
+
+    private void RegisterModulesCreatedByRider()
+    {
+        ExtraModuleNames.AddRange(new string[] { "CarlaUnrealEditor" });
     }
 }
