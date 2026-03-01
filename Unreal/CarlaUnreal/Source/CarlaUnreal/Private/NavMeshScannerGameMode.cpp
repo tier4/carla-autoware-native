@@ -10,5 +10,6 @@ void ANavMeshScannerGameMode::BeginPlay()
 	Super::BeginPlay();
 
 	UNavMeshMapScanner* Scanner = NewObject<UNavMeshMapScanner>();
+	Scanner->AddToRoot();
 	Scanner->StartScan(true);
 }

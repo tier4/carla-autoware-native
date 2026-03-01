@@ -91,6 +91,26 @@ void UNavMeshMapScanner::OnMapLoaded(UWorld* LoadedWorld)
 
 void UNavMeshMapScanner::ScanCurrentWorld(UWorld* World)
 {
+#if WITH_EDITOR
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(
+            -1,
+            15.f,
+            FColor::Green,
+            "Scanning Map");
+    }
+#else
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(
+            -1,
+            15.f,
+            FColor::Green,
+            "Scanning Map");
+    }
+#endif
+    
     FNavMeshScanResult Result;
     Result.MapName = World->GetName();
 
@@ -108,6 +128,26 @@ void UNavMeshMapScanner::ScanCurrentWorld(UWorld* World)
     {
         ScanResults.Add(Result);
     }
+
+#if WITH_EDITOR
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(
+            -1,
+            15.f,
+            FColor::Green,
+            "Map Scanned");
+    }
+#else
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(
+            -1,
+            15.f,
+            FColor::Green,
+            "Map Scanned");
+    }
+#endif
 }
 
 void UNavMeshMapScanner::ShowFinalReport()
