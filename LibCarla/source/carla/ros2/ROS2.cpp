@@ -118,13 +118,13 @@ void ROS2::SetFrame(uint64_t frame) {
       RemoveActorCallback(actor);
     }
    }
-  if (_autoware_controller) {  // Autoware input has priority
+  if (_autoware_controller) {  // Autoware input has priority (acceleration control from /control/command/control_cmd)
     void* actor = _autoware_controller->GetVehicle();
     if (_autoware_controller->HasNewControl()) {
       auto it = _actor_callbacks.find(actor);
       if (it != _actor_callbacks.cend()) {
         const auto control = _autoware_controller->GetControl();
-        it->second(actor, control);
+        it->second(actor, ROS2CallbackData(control));
       }
     }
   }

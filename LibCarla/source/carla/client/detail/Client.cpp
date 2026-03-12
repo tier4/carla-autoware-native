@@ -416,6 +416,14 @@ namespace detail {
     _pimpl->AsyncCall("disable_actor_constant_velocity", actor);
   }
 
+  void Client::EnableActorConstantAcceleration(rpc::ActorId actor, const geom::Vector3D &vector) {
+    _pimpl->AsyncCall("enable_actor_constant_acceleration", actor, vector);
+  }
+
+  void Client::DisableActorConstantAcceleration(rpc::ActorId actor) {
+    _pimpl->AsyncCall("disable_actor_constant_acceleration", actor);
+  }
+
   void Client::AddActorImpulse(rpc::ActorId actor, const geom::Vector3D &impulse) {
     _pimpl->AsyncCall("add_actor_impulse", actor, impulse);
   }

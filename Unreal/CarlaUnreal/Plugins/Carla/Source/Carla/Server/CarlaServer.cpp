@@ -1220,6 +1220,59 @@ BIND_SYNC(is_sensor_enabled_for_ros) << [this](carla::streaming::detail::stream_
     return R<void>::Success();
   };
 
+  BIND_SYNC(enable_actor_constant_acceleration) << [this](
+      cr::ActorId ActorId,
+      cr::Vector3D vector) -> R<void>
+  {
+    REQUIRE_CARLA_EPISODE();
+    FCarlaActor* CarlaActor = Episode->FindCarlaActor(ActorId);
+    if (!CarlaActor)
+    {
+      return RespondError(
+          "enable_actor_constant_acceleration",
+          ECarlaServerResponse::ActorNotFound,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+
+    ECarlaServerResponse Response =
+        CarlaActor->EnableActorConstantAcceleration(vector.ToCentimeters().ToFVector());
+    if (Response != ECarlaServerResponse::Success)
+    {
+      return RespondError(
+          "enable_actor_constant_acceleration",
+          Response,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+
+    return R<void>::Success();
+  };
+
+  BIND_SYNC(disable_actor_constant_acceleration) << [this](
+      cr::ActorId ActorId) -> R<void>
+  {
+    REQUIRE_CARLA_EPISODE();
+    FCarlaActor* CarlaActor = Episode->FindCarlaActor(ActorId);
+    if (!CarlaActor)
+    {
+      return RespondError(
+          "disable_actor_constant_acceleration",
+          ECarlaServerResponse::ActorNotFound,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+
+    ECarlaServerResponse Response =
+        CarlaActor->DisableActorConstantAcceleration();
+    if (Response != ECarlaServerResponse::Success)
+    {
+      return RespondError(
+          "disable_actor_constant_acceleration",
+          Response,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+
+    return R<void>::Success();
+  };
+
   BIND_SYNC(add_actor_impulse) << [this](
       cr::ActorId ActorId,
       cr::Vector3D vector) -> R<void>
