@@ -1,5 +1,7 @@
 // Copyright (c) 2026 TIER IV, Inc.
 
+// TODO: Add gear-aware input (e.g. allow reverse when in reverse gear, keep forward-only in drive).
+
 #include "VehicleAccelerationControl.h"
 #include "Carla/Vehicle/CarlaWheeledVehicle.h"
 
@@ -78,6 +80,9 @@ void UVehicleAccelerationControl::TickComponent(float DeltaTime, enum ELevelTick
 
   // Integrate only forward speed; preserve lateral velocity from physics so tires can generate cornering force
   ControlledForwardSpeed += ForwardAccel * DeltaTime;
+  // Clamp to non-negative so we never go into reverse
+  // TODO: Add gear-aware input (e.g. allow reverse when in reverse gear, keep forward-only in drive).
+  ControlledForwardSpeed = FMath::Max(0.f, ControlledForwardSpeed);
 
   const FVector CurrentVel = PrimitiveComponent->GetPhysicsLinearVelocity();
   const FVector LateralVel = CurrentVel - FVector::DotProduct(CurrentVel, ForwardDir) * ForwardDir;
