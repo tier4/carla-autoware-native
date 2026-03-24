@@ -282,7 +282,8 @@ def spawn_ego_with_sensors(world, spawn_point, args):
 
     ego_blueprint = blueprint_library.find("vehicle.lincoln.mkz")
     ego_blueprint.set_attribute("role_name", "ego")
-    ego_blueprint.set_attribute("ros_topic_name", "/carla/input")  # Default Carla ROS input topic name
+    # Ego uses acceleration control from Autoware /control/command/control_cmd (not ackermann)
+    ego_blueprint.set_attribute("ros_topic_name", "/carla/input")  # Fallback; Autoware control_cmd has priority
 
     ego = world.spawn_actor(ego_blueprint, spawn_point)
 
@@ -572,7 +573,14 @@ def main():
 
 
     # Spawn Ego
-    spawn_point = random.choice(world.get_ego_spawn_points())
+    try:
+        spawn_points = world.get_ego_spawn_points()
+    except AttributeError:
+        # Fallback when get_ego_spawn_points is not available (e.g. standard carla package)
+        spawn_points = world.get_map().get_spawn_points()
+    if not spawn_points:
+        raise RuntimeError("No spawn points available. Load a map that provides spawn points.")
+    spawn_point = random.choice(spawn_points)
     ego = spawn_ego_with_sensors(world, spawn_point, args)
 
     world.tick()  # tick to process the changes (settings, ego + sensors spawn)

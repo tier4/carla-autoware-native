@@ -46,6 +46,17 @@ void ActorROS2Handler::operator()(carla::ros2::VehicleAckermannControl &Source)
   Vehicle->ApplyVehicleAckermannControl(NewControl, EVehicleInputPriority::User);
 }
 
+void ActorROS2Handler::operator()(carla::ros2::VehicleAccelerationControl &Source)
+{
+  if (!IsValid(_Actor)) return;
+
+  ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
+  if (!IsValid(Vehicle)) return;
+
+  // /control/command/control_cmd: use acceleration [m/s^2] + steering for acceleration control
+  Vehicle->ApplyVehicleAccelerationControl(Source.acceleration, Source.steer, Source.steer_speed);
+}
+
 void ActorROS2Handler::operator()(carla::ros2::MessageControl Message)
 {
   if (!IsValid(_Actor)) return;

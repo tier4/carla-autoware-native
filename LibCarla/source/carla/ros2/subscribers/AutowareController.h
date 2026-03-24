@@ -17,7 +17,7 @@ public:
 
   bool HasNewControl() const;
 
-  VehicleAckermannControl GetControl();
+  VehicleAccelerationControl GetControl();
   void* GetVehicle();
 
 private:

@@ -226,6 +226,13 @@ namespace detail {
     void DisableActorConstantVelocity(
         rpc::ActorId actor);
 
+    void EnableActorConstantAcceleration(
+        rpc::ActorId actor,
+        const geom::Vector3D &vector);
+
+    void DisableActorConstantAcceleration(
+        rpc::ActorId actor);
+
     void AddActorImpulse(
         rpc::ActorId actor,
         const geom::Vector3D &impulse);
