@@ -95,9 +95,11 @@ void ROS2::Enable(bool enable) {
     return config;
   }();
   _clock_publisher->Init(topic_config);
-  // Start the async publish queue
+  // Start the async publish queues
   _publish_queue = std::make_unique<ROS2PublishQueue>();
   _publish_queue->Start();
+  _camera_publish_queue = std::make_unique<ROS2PublishQueue>();
+  _camera_publish_queue->Start();
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher = std::make_shared<BasicPublisher>("basic_publisher", "");
   _basic_publisher->Init(_domain_id);
@@ -1212,7 +1214,11 @@ void ROS2::ProcessDataFromStatusSensor(
 }
 
 void ROS2::Shutdown() {
-  // Stop the async publish queue
+  // Stop the async publish queues
+  if (_camera_publish_queue) {
+    _camera_publish_queue->Shutdown();
+    _camera_publish_queue.reset();
+  }
   if (_publish_queue) {
     _publish_queue->Shutdown();
     _publish_queue.reset();

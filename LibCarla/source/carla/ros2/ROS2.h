@@ -80,6 +80,7 @@ class ROS2
   void Shutdown();
   bool IsEnabled() { return _enabled; }
   ROS2PublishQueue& GetPublishQueue() { return *_publish_queue; }
+  ROS2PublishQueue& GetCameraPublishQueue() { return *_camera_publish_queue; }
   void SetFrame(uint64_t frame);
   void SetTimestamp(double timestamp);
 
@@ -220,6 +221,7 @@ class ROS2
   std::shared_ptr<AutowarePublisher> _autoware_publisher;
   std::shared_ptr<CarlaClockPublisher> _clock_publisher;
   std::unique_ptr<ROS2PublishQueue> _publish_queue;
+  std::unique_ptr<ROS2PublishQueue> _camera_publish_queue;
   std::unordered_map<void *, std::shared_ptr<CarlaPublisher>> _publishers;
   std::unordered_map<void *, std::shared_ptr<CarlaTransformPublisher>> _transforms;
   std::unordered_set<carla::streaming::detail::stream_id_type> _publish_stream;

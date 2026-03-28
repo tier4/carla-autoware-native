@@ -188,7 +188,7 @@ protected:
 
     auto Stream = Sensor.GetDataStream(Sensor);
     Stream.SetFrameNumber(FrameIndex);
-    
+
     auto Buffer = Stream.PopBufferFromPool();
     Buffer.copy_from(
       HeaderOffset,
@@ -207,37 +207,38 @@ protected:
     auto ROS2 = carla::ros2::ROS2::GetInstance();
     if (ROS2->IsEnabled())
     {
-      TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 SendDataToClient");
+      TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 SendDataToClient Enqueue");
       auto StreamId = carla::streaming::detail::token_type(Sensor.GetToken()).get_stream_id();
-      auto Res = std::async(std::launch::async, [&Sensor, ROS2, &Stream, StreamId, BufferView]()
-      {
-        // get resolution of camera
-        int W = -1, H = -1;
-        float Fov = -1.0f;
-        auto WidthOpt = Sensor.GetAttribute("image_size_x");
-        if (WidthOpt.has_value())
-          W = FCString::Atoi(*WidthOpt->Value);
-        auto HeightOpt = Sensor.GetAttribute("image_size_y");
-        if (HeightOpt.has_value())
-          H = FCString::Atoi(*HeightOpt->Value);
-        auto FovOpt = Sensor.GetAttribute("fov");
-        if (FovOpt.has_value())
-          Fov = FCString::Atof(*FovOpt->Value);
-        // send data to ROS2
-        auto ParentActor = Sensor.GetAttachParentActor();
-        auto Transform =
-          ParentActor ?
-          Sensor.GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform()) :
-          Stream.GetSensorTransform();
-        ROS2->ProcessDataFromCamera(
-          Stream.GetSensorType(),
-          StreamId,
-          Transform,
-          W, H,
-          Fov,
-          BufferView,
-          &Sensor);
-      });
+      auto CapturedSensorType = Stream.GetSensorType();
+
+      // Extract all sensor attributes on the calling thread to avoid
+      // accessing UE5 UObject from the worker thread.
+      int W = -1, H = -1;
+      float Fov = -1.0f;
+      auto WidthOpt = Sensor.GetAttribute("image_size_x");
+      if (WidthOpt.has_value())
+        W = FCString::Atoi(*WidthOpt->Value);
+      auto HeightOpt = Sensor.GetAttribute("image_size_y");
+      if (HeightOpt.has_value())
+        H = FCString::Atoi(*HeightOpt->Value);
+      auto FovOpt = Sensor.GetAttribute("fov");
+      if (FovOpt.has_value())
+        Fov = FCString::Atof(*FovOpt->Value);
+      auto ParentActor = Sensor.GetAttachParentActor();
+      carla::geom::Transform Transform;
+      if (ParentActor)
+        Transform = Sensor.GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
+      else
+        Transform = Stream.GetSensorTransform();
+
+      // Capture actor pointer as opaque key for publisher lookup (NOT dereferenced as UObject)
+      void* ActorPtr = &Sensor;
+
+      // Enqueue to camera worker thread, dropping stale frames to prevent delay buildup
+      ROS2->GetCameraPublishQueue().EnqueueLatest(
+        [ROS2, CapturedSensorType, StreamId, Transform, W, H, Fov, BufferView, ActorPtr]() {
+          ROS2->ProcessDataFromCamera(CapturedSensorType, StreamId, Transform, W, H, Fov, BufferView, ActorPtr);
+        });
     }
 #endif
 
