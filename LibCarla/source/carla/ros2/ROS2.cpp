@@ -95,6 +95,9 @@ void ROS2::Enable(bool enable) {
     return config;
   }();
   _clock_publisher->Init(topic_config);
+  // Start the async publish queue
+  _publish_queue = std::make_unique<ROS2PublishQueue>();
+  _publish_queue->Start();
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher = std::make_shared<BasicPublisher>("basic_publisher", "");
   _basic_publisher->Init(_domain_id);
@@ -150,8 +153,18 @@ void ROS2::SetFrame(uint64_t frame) {
 
 void ROS2::SetTimestamp(double timestamp) {
   std::tie(_seconds, _nanoseconds) = Carla2RosTime(timestamp);
-  _clock_publisher->SetData(_seconds, _nanoseconds);
-  _clock_publisher->Publish();
+  if (_publish_queue && _publish_queue->IsRunning()) {
+    auto seconds = _seconds;
+    auto nanoseconds = _nanoseconds;
+    auto clock_pub = _clock_publisher;
+    _publish_queue->Enqueue([clock_pub, seconds, nanoseconds]() {
+      clock_pub->SetData(seconds, nanoseconds);
+      clock_pub->Publish();
+    });
+  } else {
+    _clock_publisher->SetData(_seconds, _nanoseconds);
+    _clock_publisher->Publish();
+  }
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher->SetData("Hello from Carla!");
   _basic_publisher->Publish();
@@ -1199,6 +1212,11 @@ void ROS2::ProcessDataFromStatusSensor(
 }
 
 void ROS2::Shutdown() {
+  // Stop the async publish queue
+  if (_publish_queue) {
+    _publish_queue->Shutdown();
+    _publish_queue.reset();
+  }
   for (auto& element : _publishers) {
     element.second.reset();
   }

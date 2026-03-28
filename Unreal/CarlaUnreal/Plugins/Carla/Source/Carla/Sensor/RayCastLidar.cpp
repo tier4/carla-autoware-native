@@ -68,25 +68,39 @@ void ARayCastLidar::PostPhysTick(UWorld *World, ELevelTick TickType, float Delta
     TRACE_CPUPROFILER_EVENT_SCOPE_STR("Send Stream");
     DataStream.SerializeAndSend(*this, LidarData, DataStream.PopBufferFromPool());
   }
-  // ROS2
+  // ROS2 (async via publish queue)
   #if defined(WITH_ROS2)
   auto ROS2 = carla::ros2::ROS2::GetInstance();
   if (ROS2->IsEnabled())
   {
-    TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Send");
+    TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Enqueue LiDAR");
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
+    auto SensorType = DataStream.GetSensorType();
+    auto ChannelCount = Description.Channels;
+    auto UpperFov = Description.UpperFovLimit;
+    auto LowerFov = Description.LowerFovLimit;
+    void* ActorPtr = this;
+
+    // Copy LiDAR data — the member LidarData is overwritten next tick
+    auto LidarDataCopy = std::make_shared<carla::sensor::data::LidarData>(LidarData);
+
+    carla::geom::Transform Transform;
     AActor* ParentActor = GetAttachParentActor();
     if (ParentActor)
     {
       FTransform LocalTransformRelativeToParent = GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-      ROS2->ProcessDataFromLidar(DataStream.GetSensorType(), StreamId, LocalTransformRelativeToParent,
-                                 Description.Channels, Description.UpperFovLimit, Description.LowerFovLimit, LidarData, this);
+      Transform = LocalTransformRelativeToParent;
     }
     else
     {
-      ROS2->ProcessDataFromLidar(DataStream.GetSensorType(), StreamId, SensorTransform,
-                                 Description.Channels, Description.UpperFovLimit, Description.LowerFovLimit, LidarData, this);
+      Transform = SensorTransform;
     }
+
+    ROS2->GetPublishQueue().Enqueue(
+      [ROS2, SensorType, StreamId, Transform, ChannelCount, UpperFov, LowerFov, LidarDataCopy, ActorPtr]() {
+        ROS2->ProcessDataFromLidar(SensorType, StreamId, Transform,
+                                   ChannelCount, UpperFov, LowerFov, *LidarDataCopy, ActorPtr);
+      });
   }
   #endif
 

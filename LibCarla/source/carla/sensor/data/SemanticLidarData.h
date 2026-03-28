@@ -101,6 +101,9 @@ namespace data {
 
     SemanticLidarData &operator=(SemanticLidarData &&) = default;
 
+    SemanticLidarData(const SemanticLidarData &) = default;
+    SemanticLidarData &operator=(const SemanticLidarData &) = default;
+
     virtual ~SemanticLidarData() {}
 
     float GetHorizontalAngle() const {

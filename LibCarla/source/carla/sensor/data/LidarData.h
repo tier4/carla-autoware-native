@@ -82,6 +82,9 @@ namespace data {
 
     LidarData &operator=(LidarData &&) = default;
 
+    LidarData(const LidarData &) = default;
+    LidarData &operator=(const LidarData &) = default;
+
     ~LidarData() = default;
 
     virtual void ResetMemory(std::vector<uint32_t> points_per_channel) {

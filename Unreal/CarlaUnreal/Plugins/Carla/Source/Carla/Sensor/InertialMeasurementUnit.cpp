@@ -205,23 +205,35 @@ void AInertialMeasurementUnit::PostPhysTick(UWorld *World, ELevelTick TickType, 
 
   auto DataStream = GetDataStream(*this);
 
-  // ROS2
+  // ROS2 (async via publish queue)
   #if defined(WITH_ROS2)
   auto ROS2 = carla::ros2::ROS2::GetInstance();
   if (ROS2->IsEnabled())
   {
-    TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Send");
+    TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Enqueue IMU");
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
+    auto SensorType = DataStream.GetSensorType();
+    auto Accel = AccelerometerValue;
+    auto Gyro = GyroscopeValue;
+    auto Compass = CompassValue;
+    void* ActorPtr = this;
+
+    carla::geom::Transform Transform;
     AActor* ParentActor = GetAttachParentActor();
     if (ParentActor)
     {
       FTransform LocalTransformRelativeToParent = GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-      ROS2->ProcessDataFromIMU(DataStream.GetSensorType(), StreamId, LocalTransformRelativeToParent, AccelerometerValue, GyroscopeValue, CompassValue, this);
+      Transform = LocalTransformRelativeToParent;
     }
     else
     {
-      ROS2->ProcessDataFromIMU(DataStream.GetSensorType(), StreamId, DataStream.GetSensorTransform(), AccelerometerValue, GyroscopeValue, CompassValue, this);
+      Transform = DataStream.GetSensorTransform();
     }
+
+    ROS2->GetPublishQueue().Enqueue(
+      [ROS2, SensorType, StreamId, Transform, Accel, Gyro, Compass, ActorPtr]() {
+        ROS2->ProcessDataFromIMU(SensorType, StreamId, Transform, Accel, Gyro, Compass, ActorPtr);
+      });
   }
   #endif
 

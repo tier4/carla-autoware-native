@@ -151,14 +151,15 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   if (auto ROS2 = carla::ros2::ROS2::GetInstance(); ROS2->IsEnabled())
   {
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
-    ROS2->ProcessDataFromStatusSensor(
-      0,
-      StreamId,
-      GetActorTransform(),
-      Msg,
-      Vehicle,
-      this
-  );
+    auto Transform = GetActorTransform();
+    auto MsgCopy = Msg;
+    void* VehiclePtr = Vehicle;
+    void* ActorPtr = this;
+
+    ROS2->GetPublishQueue().Enqueue(
+      [ROS2, StreamId, Transform, MsgCopy, VehiclePtr, ActorPtr]() {
+        ROS2->ProcessDataFromStatusSensor(0, StreamId, Transform, MsgCopy, VehiclePtr, ActorPtr);
+      });
   }
 #endif
 }
