@@ -56,6 +56,18 @@ public:
     _cv.notify_one();
   }
 
+  /// Enqueue a task, discarding any pending (not yet started) tasks.
+  /// Use for sensors where only the latest data matters (e.g., camera).
+  void EnqueueLatest(std::function<void()> task) {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      while (!_queue.empty())
+        _queue.pop();
+      _queue.push(std::move(task));
+    }
+    _cv.notify_one();
+  }
+
   /// Returns true if the worker thread is running.
   bool IsRunning() const { return _running.load(); }
 
