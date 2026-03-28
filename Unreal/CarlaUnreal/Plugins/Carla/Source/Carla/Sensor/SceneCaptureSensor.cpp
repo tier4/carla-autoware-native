@@ -15,6 +15,7 @@
 #include "GameFramework/SpectatorPawn.h"
 #include <util/ue-header-guard-end.h>
 
+#include <chrono>
 #include <mutex>
 #include <atomic>
 #include <thread>
@@ -743,7 +744,11 @@ void ASceneCaptureSensor::PostPhysTick(UWorld *World, ELevelTick TickType, float
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(ASceneCaptureSensor::PostPhysTick);
   Super::PostPhysTick(World, TickType, DeltaTime);
+  auto T0 = std::chrono::high_resolution_clock::now();
   EnqueueRenderSceneImmediate();
+  auto T1 = std::chrono::high_resolution_clock::now();
+  auto ms = std::chrono::duration_cast<std::chrono::microseconds>(T1 - T0).count() / 1000.0;
+  fprintf(stderr, "CaptureScene: %.1fms\n", ms);
 }
 
 void ASceneCaptureSensor::EndPlay(const EEndPlayReason::Type EndPlayReason)

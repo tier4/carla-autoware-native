@@ -288,9 +288,15 @@ namespace ImageUtil
         &RenderTarget, Callback = std::move(Callback)
       ](auto& CmdList) mutable
       {
+        auto RT0 = std::chrono::high_resolution_clock::now();
         ReadImageDataContext Context = { };
         ReadImageDataBegin(Context, RenderTarget, std::move(Callback));
+        auto RT1 = std::chrono::high_resolution_clock::now();
         ReadImageDataEnd(Context);
+        auto RT2 = std::chrono::high_resolution_clock::now();
+        auto msBegin = std::chrono::duration_cast<std::chrono::microseconds>(RT1 - RT0).count() / 1000.0;
+        auto msEnd = std::chrono::duration_cast<std::chrono::microseconds>(RT2 - RT1).count() / 1000.0;
+        fprintf(stderr, "RenderThread: ReadImageDataBegin=%.1fms ReadImageDataEnd=%.1fms\n", msBegin, msEnd);
       });
 
     }

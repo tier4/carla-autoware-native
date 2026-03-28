@@ -22,6 +22,8 @@
 #include "GameFramework/Actor.h"
 #include <util/ue-header-guard-end.h>
 
+#include <chrono>
+
 #include "Sensor.generated.h"
 
 struct FActorDescription;
@@ -186,9 +188,11 @@ protected:
     if (!Sensor.AreClientsListening())
         return;
 
+    auto T0 = std::chrono::high_resolution_clock::now();
+
     auto Stream = Sensor.GetDataStream(Sensor);
     Stream.SetFrameNumber(FrameIndex);
-    
+
     auto Buffer = Stream.PopBufferFromPool();
     Buffer.copy_from(
       HeaderOffset,
@@ -202,6 +206,8 @@ protected:
     auto Serialized = SensorRegistry::Serialize(Sensor, std::move(Buffer));
     auto SerializedBuffer = carla::Buffer(std::move(Serialized));
     auto BufferView = carla::BufferView::CreateFrom(std::move(SerializedBuffer));
+
+    auto T1 = std::chrono::high_resolution_clock::now();
 
 #if defined(WITH_ROS2)
     auto ROS2 = carla::ros2::ROS2::GetInstance();
@@ -241,8 +247,19 @@ protected:
     }
 #endif
 
+    auto T2 = std::chrono::high_resolution_clock::now();
+
     if (Sensor.AreClientsListening())
       Stream.Send(Sensor, BufferView);
+
+    auto T3 = std::chrono::high_resolution_clock::now();
+
+    auto ms1 = std::chrono::duration_cast<std::chrono::microseconds>(T1 - T0).count() / 1000.0;
+    auto ms2 = std::chrono::duration_cast<std::chrono::microseconds>(T2 - T1).count() / 1000.0;
+    auto ms3 = std::chrono::duration_cast<std::chrono::microseconds>(T3 - T2).count() / 1000.0;
+    auto total = std::chrono::duration_cast<std::chrono::microseconds>(T3 - T0).count() / 1000.0;
+    fprintf(stderr, "SendDataToClient: serialize=%.1fms ros2=%.1fms stream=%.1fms total=%.1fms\n",
+      ms1, ms2, ms3, total);
   }
 
   /// Seed of the pseudo-random engine.
