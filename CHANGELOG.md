@@ -1,5 +1,6 @@
 ## LATEST Changes
 
+* Fixed camera fx calculation in ROS2 CameraInfo, large map actor tagging, pedestrian bounding box using skeletal mesh bounds, and camera frame/timestamp consistency (ported from ue4-dev)
 * Fixed RPC server deadlock on shutdown, overly strict Vector3D assert, OpenDrive lane width for center lanes, busy-wait yield() calls, and strict RELEASE_ASSERTs in road Map (ported from ue4-dev)
 * Fix typos in README.md
 * Added actor description as Actor TAGs
