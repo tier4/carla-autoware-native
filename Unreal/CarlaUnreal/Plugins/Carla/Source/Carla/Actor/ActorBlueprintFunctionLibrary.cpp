@@ -14,6 +14,8 @@
 #include "Carla/Sensor/SceneCaptureSensor.h"
 #include "Carla/Sensor/ShaderBasedSensor.h"
 #include "Carla/Util/ScopedStack.h"
+#include "BlueprintLibary/PostProcessJsonUtils.h"
+#include "Engine/StaticMeshActor.h"
 
 #include <algorithm>
 #include <limits>
@@ -1407,7 +1409,18 @@ void UActorBlueprintFunctionLibrary::MakePropDefinition(
   FillIdAndTags(Definition, TEXT("static"),  TEXT("prop"), Parameters.Name);
   AddRecommendedValuesForActorRoleName(Definition, {TEXT("prop")});
 
-  auto GetSize = [](EPropSize Value) {
+  Definition.Class = AStaticMeshActor::StaticClass();
+  if (Parameters.Mesh != nullptr)
+  {
+    Definition.Variations.Emplace(FActorVariation{
+        TEXT("mesh_path"),
+        EActorAttributeType::String,
+        {Parameters.Mesh->GetPathName()},
+        false});
+  }
+
+  auto GetSize = [](EPropSize Value)
+  {
     switch (Value)
     {
       case EPropSize::Tiny:    return TEXT("tiny");
