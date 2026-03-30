@@ -1,10 +1,101 @@
 import argparse
+import json
 import math
+import os
 import time
 import random
 
 import PyKDL as kdl
 import carla
+
+
+# Autoware post-process profile for traffic light recognition camera.
+# These values were originally hardcoded in ActorBlueprintFunctionLibrary.cpp
+# and are now managed as a JSON profile loaded by UPostProcessJsonUtils.
+AUTOWARE_POSTPROCESS_SETTINGS = {
+    "Settings": {
+        "bOverride_MotionBlurAmount": True, "MotionBlurAmount": 0.5,
+        "bOverride_MotionBlurMax": True, "MotionBlurMax": 5.0,
+        "bOverride_MotionBlurPerObjectSize": True, "MotionBlurPerObjectSize": 0.0,
+        "bOverride_LensFlareIntensity": True, "LensFlareIntensity": 0.2,
+        "bOverride_BloomIntensity": True, "BloomIntensity": 0.0,
+        "bOverride_AutoExposureMethod": True, "AutoExposureMethod": 1,
+        "bOverride_AutoExposureBias": True, "AutoExposureBias": 1.5,
+        "bOverride_LocalExposureHighlightContrastScale": True, "LocalExposureHighlightContrastScale": 0.7,
+        "bOverride_LocalExposureShadowContrastScale": True, "LocalExposureShadowContrastScale": 0.65,
+        "bOverride_CameraShutterSpeed": True, "CameraShutterSpeed": 15.0,
+        "bOverride_CameraISO": True, "CameraISO": 300000.0,
+        "bOverride_DepthOfFieldFstop": True, "DepthOfFieldFstop": 9.8,
+        "bOverride_DepthOfFieldMinFstop": True, "DepthOfFieldMinFstop": 1.2,
+        "bOverride_DepthOfFieldBladeCount": True, "DepthOfFieldBladeCount": 5,
+        "bOverride_AutoExposureMinBrightness": True, "AutoExposureMinBrightness": 0.0,
+        "bOverride_AutoExposureMaxBrightness": True, "AutoExposureMaxBrightness": 20.0,
+        "bOverride_AutoExposureSpeedUp": True, "AutoExposureSpeedUp": 3.0,
+        "bOverride_AutoExposureSpeedDown": True, "AutoExposureSpeedDown": 1.0,
+        "bOverride_AutoExposureCalibrationConstant_DEPRECATED": True, "AutoExposureCalibrationConstant_DEPRECATED": 16.0,
+        "bOverride_DepthOfFieldSensorWidth": True, "DepthOfFieldSensorWidth": 24.576,
+        "bOverride_DepthOfFieldFocalDistance": True, "DepthOfFieldFocalDistance": 250.0,
+        "bOverride_DepthOfFieldDepthBlurAmount": True, "DepthOfFieldDepthBlurAmount": 1.0,
+        "bOverride_DepthOfFieldDepthBlurRadius": True, "DepthOfFieldDepthBlurRadius": 0.0,
+        "bOverride_FilmSlope": True, "FilmSlope": 0.88,
+        "bOverride_FilmToe": True, "FilmToe": 0.55,
+        "bOverride_FilmShoulder": True, "FilmShoulder": 0.26,
+        "bOverride_FilmBlackClip": True, "FilmBlackClip": 0.0,
+        "bOverride_FilmWhiteClip": True, "FilmWhiteClip": 0.04,
+        "bOverride_WhiteTemp": True, "WhiteTemp": 7700.0,
+        "bOverride_WhiteTint": True, "WhiteTint": -0.15,
+        "bOverride_SceneFringeIntensity": True, "SceneFringeIntensity": 0.15,
+        "bOverride_ChromaticAberrationStartOffset": True, "ChromaticAberrationStartOffset": 0.0,
+        "bOverride_ColorSaturation": True, "ColorSaturation": {"X": 0.5, "Y": 0.5, "Z": 0.5, "W": 1.0},
+        "bOverride_ColorContrast": True, "ColorContrast": {"X": 1.6, "Y": 1.6, "Z": 1.6, "W": 1.0},
+        "bOverride_ColorGamma": True, "ColorGamma": {"X": 1.2, "Y": 1.2, "Z": 1.2, "W": 1.0},
+        "bOverride_ColorGammaHighlights": True, "ColorGammaHighlights": {"X": 0.5, "Y": 0.5, "Z": 0.5, "W": 1.0},
+        "bOverride_ToneCurveAmount": True, "ToneCurveAmount": 1.0,
+        "bOverride_SceneColorTint": True, "SceneColorTint": {"R": 0.785339, "G": 0.879092, "B": 0.93125, "A": 1.0},
+        "bOverride_VignetteIntensity": True, "VignetteIntensity": 0.7,
+    }
+}
+
+
+def deploy_postprocess_profile(profile_name, settings):
+    """Deploy a PostProcess JSON profile to the Content directory.
+
+    The file is placed at Content/Carla/Config/PostProcess/{profile_name}.json,
+    which is the path UPostProcessJsonUtils::GetPostProcessConfigPath() resolves to.
+
+    Deploys to both:
+    - Source tree: {workspace}/Unreal/CarlaUnreal/Content/Carla/Config/PostProcess/
+    - Package builds found under: {workspace}/Build/Package/*/Linux/CarlaUnreal/Content/Carla/Config/PostProcess/
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    workspace_path = os.path.abspath(os.path.join(script_dir, "..", ".."))
+
+    # Collect all target directories
+    target_dirs = []
+
+    # Source tree
+    source_config = os.path.join(
+        workspace_path, "Unreal", "CarlaUnreal", "Content",
+        "Carla", "Config", "PostProcess"
+    )
+    target_dirs.append(source_config)
+
+    # Package builds
+    package_base = os.path.join(workspace_path, "Build", "Package")
+    if os.path.isdir(package_base):
+        import glob
+        for pkg_content in glob.glob(os.path.join(
+            package_base, "*", "Linux", "CarlaUnreal", "Content",
+            "Carla", "Config", "PostProcess"
+        )):
+            target_dirs.append(pkg_content)
+
+    for config_dir in target_dirs:
+        os.makedirs(config_dir, exist_ok=True)
+        profile_path = os.path.join(config_dir, f"{profile_name}.json")
+        with open(profile_path, 'w') as f:
+            json.dump(settings, f, indent=2)
+        log_info(f"Deployed PostProcess profile: {profile_path}")
 
 
 def log_info(text):
@@ -138,6 +229,7 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
     blueprint.set_attribute("image_size_x", "1920")
     blueprint.set_attribute("image_size_y", "1080")
     blueprint.set_attribute("sensor_tick", "0.1")
+    blueprint.set_attribute("post_process_profile", "autoware_demo")
 
     # ROS settings
     blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_optical_link")  # frame_id
@@ -541,6 +633,9 @@ def main():
         '--list_maps', action='store_true',
         help='Lists only available maps and exit. Omit applying world setting and ego spawn.')
     args = argparser.parse_args()
+
+    # Deploy PostProcess profiles before connecting to server
+    deploy_postprocess_profile("autoware_demo", AUTOWARE_POSTPROCESS_SETTINGS)
 
     # Get Client info
     client = carla.Client(args.host, args.port)
