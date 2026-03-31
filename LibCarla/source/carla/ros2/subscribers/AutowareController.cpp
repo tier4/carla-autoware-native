@@ -14,6 +14,7 @@
 #include "carla/ros2/types/EngagePubSubTypes.h"
 
 #include "carla/ros2/subscribers/AutowareSubscriber.h"
+#include "carla/ros2/AutowareSteeringCompensation.h"
 
 #include <algorithm>
 #include <cmath>
@@ -190,15 +191,16 @@ VehicleAccelerationControl AutowareController::GetControl() {
   }
 
   // Longitudinal: use ONLY acceleration from /control/command/control_cmd to drive the vehicle.
-  // Velocity and jerk from the message are intentionally ignored.
+  // Velocity and jerk from the message are intentionally ignored to keep pure acceleration control.
   control_out.acceleration = control_in.longitudinal().acceleration();
 
   /// @note Set lateral negative, because Carla treats positive as right and Autoware expects positive to represent left (all when moving forward)
   const auto raw_steering = -control_in.lateral().steering_tire_angle();
 
-  // Autoware publishes steering_tire_angle [rad] (front wheel angle).
-  // We reuse the same convention as Ackermann: pass tire angle as steering.
-  control_out.steer = raw_steering;
+  // Apply steering compensation lookup table (measured on Lincoln MKZ).
+  // This reduces understeer / outward drift by mapping Autoware's target tire angle to a vehicle input that
+  // better matches the requested actual tire angle.
+  control_out.steer = autoware_steering_compensation::GetSteeringInput(raw_steering);
   control_out.steer_speed = 0.0f;
   if (control_in.lateral().is_defined_steering_tire_rotation_rate()) {
     control_out.steer_speed = -control_in.lateral().steering_tire_rotation_rate();
