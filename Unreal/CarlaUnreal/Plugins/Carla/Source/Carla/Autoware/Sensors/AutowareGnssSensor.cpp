@@ -75,11 +75,13 @@ void AAutowareGnssSensor::PostPhysTick(UWorld* World, ELevelTick TickType, float
 		auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
 		AActor* ParentActor = GetAttachParentActor();
 		const FTransform sensor_world_transform = GetActorTransform();
-		double mgrs_offset_position[3] = {
-			static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.X),
-			static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.Y),
-			static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.Z),
-		};
+		double mgrs_offset_position[3] = {0.0, 0.0, 0.0};
+		if (MgrsDataAsset)
+		{
+			mgrs_offset_position[0] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.X);
+			mgrs_offset_position[1] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.Y);
+			mgrs_offset_position[2] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.Z);
+		}
 		
 		if (ParentActor)
 		{
