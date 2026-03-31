@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -52,6 +52,9 @@ public:
 
   virtual void InitializeSign(const carla::road::Map &Map) override;
 
+  UPROPERTY(Category = "Traffic Light", BlueprintAssignable)
+  FLightChangeDispatcher LightChangeDispatcher;
+
 protected:
 
   UFUNCTION(BlueprintCallable)
@@ -80,9 +83,6 @@ private:
 
   UPROPERTY(Category = "Traffic Light", EditAnywhere)
   ETrafficLightState LightState;
-
-  UPROPERTY(Category = "Traffic Light", BlueprintAssignable)
-  FLightChangeDispatcher LightChangeDispatcher;
 
   // UPROPERTY(Category = "Traffic Light", VisibleAnywhere)
   // ATrafficLightGroup *TrafficLightGroup = nullptr;

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -14,6 +14,8 @@
 #include "Carla/Sensor/SceneCaptureSensor.h"
 #include "Carla/Sensor/ShaderBasedSensor.h"
 #include "Carla/Util/ScopedStack.h"
+#include "BlueprintLibary/PostProcessJsonUtils.h"
+#include "Engine/StaticMeshActor.h"
 
 #include <algorithm>
 #include <limits>
@@ -405,351 +407,27 @@ void UActorBlueprintFunctionLibrary::MakeCameraDefinition(
 
   if (bEnableModifyingPostProcessEffects)
   {
+    // Enable/Disable post process effects
     FActorVariation PostProccess;
     PostProccess.Id = TEXT("enable_postprocess_effects");
     PostProccess.Type = EActorAttributeType::Bool;
     PostProccess.RecommendedValues = { TEXT("true") };
     PostProccess.bRestrictToRecommended = false;
 
-    // Gamma
-    FActorVariation Gamma;
-    Gamma.Id = TEXT("gamma");
-    Gamma.Type = EActorAttributeType::Float;
-    Gamma.RecommendedValues = { TEXT("1.2") };
-    Gamma.bRestrictToRecommended = false;
+    // post_process_profile
+    FActorVariation post_process_profile;
+    post_process_profile.Id = TEXT("post_process_profile");
+    post_process_profile.Type = EActorAttributeType::String;
+    post_process_profile.RecommendedValues = {TEXT("default")};
+    post_process_profile.bRestrictToRecommended = false;
 
-    // Motion Blur
-    FActorVariation MBIntesity;
-    MBIntesity.Id = TEXT("motion_blur_intensity");
-    MBIntesity.Type = EActorAttributeType::Float;
-    MBIntesity.RecommendedValues = { TEXT("0.5") };
-    MBIntesity.bRestrictToRecommended = false;
+    Definition.Variations.Append({PostProccess, post_process_profile});
 
-    FActorVariation MBMaxDistortion;
-    MBMaxDistortion.Id = TEXT("motion_blur_max_distortion");
-    MBMaxDistortion.Type = EActorAttributeType::Float;
-    MBMaxDistortion.RecommendedValues = { TEXT("5.0") };
-    MBMaxDistortion.bRestrictToRecommended = false;
-
-    FActorVariation MBMinObjectScreenSize;
-    MBMinObjectScreenSize.Id = TEXT("motion_blur_min_object_screen_size");
-    MBMinObjectScreenSize.Type = EActorAttributeType::Float;
-    MBMinObjectScreenSize.RecommendedValues = { TEXT("0.0") };
-    MBMinObjectScreenSize.bRestrictToRecommended = false;
-
-    // Lens Flare
-    FActorVariation LensFlareIntensity;
-    LensFlareIntensity.Id = TEXT("lens_flare_intensity");
-    LensFlareIntensity.Type = EActorAttributeType::Float;
-    LensFlareIntensity.RecommendedValues = { TEXT("0.2") };
-    LensFlareIntensity.bRestrictToRecommended = false;
-
-    // Bloom
-    FActorVariation BloomIntensity;
-    BloomIntensity.Id = TEXT("bloom_intensity");
-    BloomIntensity.Type = EActorAttributeType::Float;
-    BloomIntensity.RecommendedValues = { TEXT("0.0") };
-    BloomIntensity.bRestrictToRecommended = false;
-
-    // More info at:
-    // https://docs.unrealengine.com/en-US/Engine/Rendering/PostProcessEffects/AutomaticExposure/index.html
-    // https://docs.unrealengine.com/en-US/Engine/Rendering/PostProcessEffects/DepthOfField/CinematicDOFMethods/index.html
-    // https://docs.unrealengine.com/en-US/Engine/Rendering/PostProcessEffects/ColorGrading/index.html
-
-    // Exposure
-    FActorVariation ExposureMode;
-    ExposureMode.Id = TEXT("exposure_mode");
-    ExposureMode.Type = EActorAttributeType::String;
-    ExposureMode.RecommendedValues = { TEXT("histogram"), TEXT("manual") };
-    ExposureMode.bRestrictToRecommended = true;
-
-    // Logarithmic adjustment for the exposure. Only used if a tonemapper is
-    // specified.
-    //  0 : no adjustment
-    // -1 : 2x darker
-    // -2 : 4x darker
-    //  1 : 2x brighter
-    //  2 : 4x brighter.
-    FActorVariation ExposureCompensation;
-    ExposureCompensation.Id = TEXT("exposure_compensation");
-    ExposureCompensation.Type = EActorAttributeType::Float;
-    ExposureCompensation.RecommendedValues = { TEXT("1.5") };
-    ExposureCompensation.bRestrictToRecommended = false;
-
-    FActorVariation HighlightContrastScaleVariation;
-    HighlightContrastScaleVariation.Id = TEXT("highlight_contrast_scale");
-    HighlightContrastScaleVariation.Type = EActorAttributeType::Float;
-    HighlightContrastScaleVariation.RecommendedValues = { TEXT("0.7") };
-    HighlightContrastScaleVariation.bRestrictToRecommended = false;
-
-    FActorVariation ShadowContrastScaleVariation;
-    ShadowContrastScaleVariation.Id = TEXT("shadow_constrast_scale");
-    ShadowContrastScaleVariation.Type = EActorAttributeType::Float;
-    ShadowContrastScaleVariation.RecommendedValues = { TEXT("0.65") };
-    ShadowContrastScaleVariation.bRestrictToRecommended = false;
-
-    // - Manual ------------------------------------------------
-
-    // The formula used to compute the camera exposure scale is:
-    // Exposure = 1 / (1.2 * 2^(log2( N²/t * 100/S )))
-
-    // The camera shutter speed in seconds.
-    FActorVariation ShutterSpeed; // (1/t)
-    ShutterSpeed.Id = TEXT("shutter_speed");
-    ShutterSpeed.Type = EActorAttributeType::Float;
-    ShutterSpeed.RecommendedValues = { TEXT("15.0") };
-    ShutterSpeed.bRestrictToRecommended = false;
-
-    // The camera sensor sensitivity.
-    FActorVariation ISO; // S
-    ISO.Id = TEXT("iso");
-    ISO.Type = EActorAttributeType::Float;
-    ISO.RecommendedValues = { TEXT("300000.0") };
-    ISO.bRestrictToRecommended = false;
-
-    // Defines the size of the opening for the camera lens.
-    // Using larger numbers will reduce the DOF effect.
-    FActorVariation Aperture; // N
-    Aperture.Id = TEXT("fstop");
-    Aperture.Type = EActorAttributeType::Float;
-    Aperture.RecommendedValues = { TEXT("9.8") };
-    Aperture.bRestrictToRecommended = false;
-
-    // Defines the opening of the camera lens, Aperture is 1.0/fstop,
-    // typical lens go down to f/1.2 (large opening),
-    // larger numbers reduce the DOF effect
-    FActorVariation MaxAperture;
-    MaxAperture.Id = TEXT("min_fstop");
-    MaxAperture.Type = EActorAttributeType::Float;
-    MaxAperture.RecommendedValues = { TEXT("1.2") };
-    MaxAperture.bRestrictToRecommended = false;
-
-    // Defines the number of blades of the diaphragm within the
-    // lens (between 4 and 16)
-    FActorVariation BladeCount;
-    BladeCount.Id = TEXT("blade_count");
-    BladeCount.Type = EActorAttributeType::Int;
-    BladeCount.RecommendedValues = { TEXT("5") };
-    BladeCount.bRestrictToRecommended = false;
-
-
-    // - Histogram ---------------------------------------------
-
-    // The minimum brightness for auto exposure that limits the lower
-    // brightness the eye can adapt within
-    FActorVariation ExposureMinBright;
-    ExposureMinBright.Id = TEXT("exposure_min_bright");
-    ExposureMinBright.Type = EActorAttributeType::Float;
-    ExposureMinBright.RecommendedValues = { TEXT("0.0") };
-    ExposureMinBright.bRestrictToRecommended = false;
-
-    // The maximum brightness for auto exposure that limits the upper
-    // brightness the eye can adapt within
-    FActorVariation ExposureMaxBright;
-    ExposureMaxBright.Id = TEXT("exposure_max_bright");
-    ExposureMaxBright.Type = EActorAttributeType::Float;
-    ExposureMaxBright.RecommendedValues = { TEXT("20.0") };
-    ExposureMaxBright.bRestrictToRecommended = false;
-
-    // The speed at which the adaptation occurs from a dark environment
-    // to a bright environment.
-    FActorVariation ExposureSpeedUp;
-    ExposureSpeedUp.Id = TEXT("exposure_speed_up");
-    ExposureSpeedUp.Type = EActorAttributeType::Float;
-    ExposureSpeedUp.RecommendedValues = { TEXT("3.0") };
-    ExposureSpeedUp.bRestrictToRecommended = false;
-
-    // The speed at which the adaptation occurs from a bright environment
-    // to a dark environment.
-    FActorVariation ExposureSpeedDown;
-    ExposureSpeedDown.Id = TEXT("exposure_speed_down");
-    ExposureSpeedDown.Type = EActorAttributeType::Float;
-    ExposureSpeedDown.RecommendedValues = { TEXT("1.0") };
-    ExposureSpeedDown.bRestrictToRecommended = false;
-
-    // Calibration constant for 18% Albedo.
-    FActorVariation CalibrationConstant;
-    CalibrationConstant.Id = TEXT("calibration_constant");
-    CalibrationConstant.Type = EActorAttributeType::Float;
-    CalibrationConstant.RecommendedValues = { TEXT("16.0") };
-    CalibrationConstant.bRestrictToRecommended = false;
-
-    // Sensor width to assume in mm
-    FActorVariation SensorWidth;
-    SensorWidth.Id = TEXT("sensor_width");
-    SensorWidth.Type = EActorAttributeType::Float;
-    SensorWidth.RecommendedValues = { TEXT("24.576000") };
-    SensorWidth.bRestrictToRecommended = false;
-
-    // Distance in which the Depth of Field effect should be sharp,
-    // in unreal units (cm)
-    FActorVariation FocalDistance;
-    FocalDistance.Id = TEXT("focal_distance");
-    FocalDistance.Type = EActorAttributeType::Float;
-    FocalDistance.RecommendedValues = { TEXT("250.0") };
-    FocalDistance.bRestrictToRecommended = false;
-
-    // Depth blur km for 50%
-    FActorVariation DepthBlurAmount;
-    DepthBlurAmount.Id = TEXT("blur_amount");
-    DepthBlurAmount.Type = EActorAttributeType::Float;
-    DepthBlurAmount.RecommendedValues = { TEXT("1.0") };
-    DepthBlurAmount.bRestrictToRecommended = false;
-
-    // Depth blur radius in pixels at 1920x
-    FActorVariation DepthBlurRadius;
-    DepthBlurRadius.Id = TEXT("blur_radius");
-    DepthBlurRadius.Type = EActorAttributeType::Float;
-    DepthBlurRadius.RecommendedValues = { TEXT("0.0") };
-    DepthBlurRadius.bRestrictToRecommended = false;
-
-    // - Tonemapper Settings -----------------------------------
-    // You can adjust these tonemapper controls to emulate other
-    // types of film stock for your project
-    FActorVariation FilmSlope;
-    FilmSlope.Id = TEXT("slope");
-    FilmSlope.Type = EActorAttributeType::Float;
-    FilmSlope.RecommendedValues = { TEXT("0.88") };
-    FilmSlope.bRestrictToRecommended = false;
-
-    FActorVariation FilmToe;
-    FilmToe.Id = TEXT("toe");
-    FilmToe.Type = EActorAttributeType::Float;
-    FilmToe.RecommendedValues = { TEXT("0.55") };
-    FilmToe.bRestrictToRecommended = false;
-
-    FActorVariation FilmShoulder;
-    FilmShoulder.Id = TEXT("shoulder");
-    FilmShoulder.Type = EActorAttributeType::Float;
-    FilmShoulder.RecommendedValues = { TEXT("0.26") };
-    FilmShoulder.bRestrictToRecommended = false;
-
-    FActorVariation FilmBlackClip;
-    FilmBlackClip.Id = TEXT("black_clip");
-    FilmBlackClip.Type = EActorAttributeType::Float;
-    FilmBlackClip.RecommendedValues = { TEXT("0.0") };
-    FilmBlackClip.bRestrictToRecommended = false;
-
-    FActorVariation FilmWhiteClip;
-    FilmWhiteClip.Id = TEXT("white_clip");
-    FilmWhiteClip.Type = EActorAttributeType::Float;
-    FilmWhiteClip.RecommendedValues = { TEXT("0.04") };
-    FilmWhiteClip.bRestrictToRecommended = false;
-
-    // Color
-    FActorVariation Temperature;
-    Temperature.Id = TEXT("temp");
-    Temperature.Type = EActorAttributeType::Float;
-    Temperature.RecommendedValues = { TEXT("7700.0") };
-    Temperature.bRestrictToRecommended = false;
-
-    FActorVariation Tint;
-    Tint.Id = TEXT("tint");
-    Tint.Type = EActorAttributeType::Float;
-    Tint.RecommendedValues = { TEXT("-0.15") };
-    Tint.bRestrictToRecommended = false;
-
-    FActorVariation ChromaticIntensity;
-    ChromaticIntensity.Id = TEXT("chromatic_aberration_intensity");
-    ChromaticIntensity.Type = EActorAttributeType::Float;
-    ChromaticIntensity.RecommendedValues = { TEXT("0.15") };
-    ChromaticIntensity.bRestrictToRecommended = false;
-
-    FActorVariation ChromaticOffset;
-    ChromaticOffset.Id = TEXT("chromatic_aberration_offset");
-    ChromaticOffset.Type = EActorAttributeType::Float;
-    ChromaticOffset.RecommendedValues = { TEXT("0.0") };
-    ChromaticOffset.bRestrictToRecommended = false;
-
-    FActorVariation ColorSaturation;
-    ColorSaturation.Id = TEXT("color_saturation");
-    ColorSaturation.Type = EActorAttributeType::RGBColor;
-    ColorSaturation.RecommendedValues = { ColorToFString(FLinearColor(0.5f, 0.5f, 0.5f, 1.0f).ToFColorSRGB()) };
-    ColorSaturation.bRestrictToRecommended = false;
-
-    FActorVariation ColorContrast;
-    ColorContrast.Id = TEXT("color_contrast");
-    ColorContrast.Type = EActorAttributeType::Vector;
-    ColorContrast.RecommendedValues = { VectorToFString(FVector(1.6f, 1.6f, 1.6f)) };
-    ColorContrast.bRestrictToRecommended = false;
-
-    FActorVariation ColorGamma;
-    ColorGamma.Id = TEXT("color_gamma");
-    ColorGamma.Type = EActorAttributeType::Vector;
-    ColorGamma.RecommendedValues = { VectorToFString(FVector(1.2f, 1.2f, 1.2f)) };
-    ColorGamma.bRestrictToRecommended = false;
-
-    FActorVariation HighlightsGamma;
-    HighlightsGamma.Id = TEXT("highlights_gamma");
-    HighlightsGamma.Type = EActorAttributeType::RGBColor;
-    HighlightsGamma.RecommendedValues = { ColorToFString(FLinearColor(0.5f, 0.5f, 0.5f).ToFColorSRGB()) };
-    HighlightsGamma.bRestrictToRecommended = false;
-
-    FActorVariation ToneCurveAmount;
-    ToneCurveAmount.Id = TEXT("tone_curve_amount");
-    ToneCurveAmount.Type = EActorAttributeType::Float;
-    ToneCurveAmount.RecommendedValues = { TEXT("1.0") };
-    ToneCurveAmount.bRestrictToRecommended = false;
-
-    FActorVariation SceneColorTint;
-    SceneColorTint.Id = TEXT("scene_color_tint");
-    SceneColorTint.Type = EActorAttributeType::RGBColor;
-    SceneColorTint.RecommendedValues = { ColorToFString(FLinearColor(0.785339f, 0.879092f, 0.93125f).ToFColorSRGB()) };
-    SceneColorTint.bRestrictToRecommended = false;
-
-    FActorVariation VignetteIntensity;
-    VignetteIntensity.Id = TEXT("vignette_intensity");
-    VignetteIntensity.Type = EActorAttributeType::Float;
-    VignetteIntensity.RecommendedValues = { TEXT("0.7") };
-    VignetteIntensity.bRestrictToRecommended = false;
-
-
-    Definition.Variations.Append({
-      ExposureMode,
-      ExposureCompensation,
-      ShutterSpeed,
-      ISO,
-      Aperture,
-      PostProccess,
-      Gamma,
-      MBIntesity,
-      MBMaxDistortion,
-      LensFlareIntensity,
-      BloomIntensity,
-      MBMinObjectScreenSize,
-      ExposureMinBright,
-      ExposureMaxBright,
-      ExposureSpeedUp,
-      ExposureSpeedDown,
-      HighlightContrastScaleVariation,
-      ShadowContrastScaleVariation,
-      CalibrationConstant,
-      FocalDistance,
-      SensorWidth,
-      MaxAperture,
-      BladeCount,
-      DepthBlurAmount,
-      DepthBlurRadius,
-      FilmSlope,
-      FilmToe,
-      FilmShoulder,
-      FilmBlackClip,
-      FilmWhiteClip,
-      Temperature,
-      Tint,
-      ChromaticIntensity,
-      ChromaticOffset,
-      ColorSaturation,
-      //ColorContrast,
-      //ColorGamma,
-      HighlightsGamma,
-      ToneCurveAmount,
-      SceneColorTint,
-      VignetteIntensity});
   }
 
   Success = CheckActorDefinition(Definition);
 }
+
 
 FActorDefinition UActorBlueprintFunctionLibrary::MakeNormalsCameraDefinition()
 {
@@ -1407,7 +1085,18 @@ void UActorBlueprintFunctionLibrary::MakePropDefinition(
   FillIdAndTags(Definition, TEXT("static"),  TEXT("prop"), Parameters.Name);
   AddRecommendedValuesForActorRoleName(Definition, {TEXT("prop")});
 
-  auto GetSize = [](EPropSize Value) {
+  Definition.Class = AStaticMeshActor::StaticClass();
+  if (Parameters.Mesh != nullptr)
+  {
+    Definition.Variations.Emplace(FActorVariation{
+        TEXT("mesh_path"),
+        EActorAttributeType::String,
+        {Parameters.Mesh->GetPathName()},
+        false});
+  }
+
+  auto GetSize = [](EPropSize Value)
+  {
     switch (Value)
     {
       case EPropSize::Tiny:    return TEXT("tiny");
@@ -1714,116 +1403,17 @@ void UActorBlueprintFunctionLibrary::SetCamera(
   {
     Camera->EnablePostProcessingEffects(
         ActorAttributeToBool(
-        Description.Variations["enable_postprocess_effects"],
-        true));
-    Camera->SetTargetGamma(
-        RetrieveActorAttributeToFloat("gamma", Description.Variations, 1.0f));
-    Camera->SetMotionBlurIntensity(
-        RetrieveActorAttributeToFloat("motion_blur_intensity", Description.Variations, 0.5f));
-    Camera->SetMotionBlurMaxDistortion(
-        RetrieveActorAttributeToFloat("motion_blur_max_distortion", Description.Variations, 5.0f));
-    Camera->SetMotionBlurMinObjectScreenSize(
-        RetrieveActorAttributeToFloat("motion_blur_min_object_screen_size", Description.Variations, 0.0f));
-    Camera->SetLensFlareIntensity(
-        RetrieveActorAttributeToFloat("lens_flare_intensity", Description.Variations, 0.2f));
-    Camera->SetBloomIntensity(
-        RetrieveActorAttributeToFloat("bloom_intensity", Description.Variations, 0.0f));
-    // Exposure, histogram mode by default
-    if (RetrieveActorAttributeToString("exposure_mode", Description.Variations, "histogram") != "histogram")
-    {
-      Camera->SetExposureMethod(EAutoExposureMethod::AEM_Manual);
-    }
-    else
-    {
-      Camera->SetExposureMethod(EAutoExposureMethod::AEM_Histogram);
-    }
-    Camera->SetExposureCompensation(
-        RetrieveActorAttributeToFloat("exposure_compensation", Description.Variations, 1.5f));
-    Camera->SetShutterSpeed(
-        RetrieveActorAttributeToFloat("shutter_speed", Description.Variations, 15.0f));
-    Camera->SetISO(
-        RetrieveActorAttributeToFloat("iso", Description.Variations, 300000.0f));
-    Camera->SetAperture(
-        RetrieveActorAttributeToFloat("fstop", Description.Variations, 9.8f));
+            Description.Variations["enable_postprocess_effects"],
+            true));
 
-    Camera->SetExposureMinBrightness(
-        RetrieveActorAttributeToFloat("exposure_min_bright", Description.Variations, 0.0f));
-    Camera->SetExposureMaxBrightness(
-        RetrieveActorAttributeToFloat("exposure_max_bright", Description.Variations, 20.0f));
-    Camera->SetExposureSpeedUp(
-        RetrieveActorAttributeToFloat("exposure_speed_up", Description.Variations, 3.0f));
-    Camera->SetExposureSpeedDown(
-        RetrieveActorAttributeToFloat("exposure_speed_down", Description.Variations, 1.0f));
-    Camera->SetHighlightContrastScale(
-        RetrieveActorAttributeToFloat("highlight_contrast_scale", Description.Variations, 0.7f));
-    Camera->SetShadowContrastScale(
-        RetrieveActorAttributeToFloat("shadow_constrast_scale", Description.Variations, 0.65f));
-    // This is deprecated:
-    Camera->SetExposureCalibrationConstant(
-        RetrieveActorAttributeToFloat("calibration_constant", Description.Variations, 16.0f));
-
-    Camera->SetSensorWidth(
-        RetrieveActorAttributeToFloat("sensor_width", Description.Variations, 24.576f));
-    Camera->SetFocalDistance(
-        RetrieveActorAttributeToFloat("focal_distance", Description.Variations, 250.0f));
-    Camera->SetDepthBlurAmount(
-        RetrieveActorAttributeToFloat("blur_amount", Description.Variations, 1.0f));
-    Camera->SetDepthBlurRadius(
-        RetrieveActorAttributeToFloat("blur_radius", Description.Variations, 0.0f));
-    Camera->SetDepthOfFieldMinFstop(
-        RetrieveActorAttributeToFloat("min_fstop", Description.Variations, 1.2f));
-    Camera->SetBladeCount(
-        RetrieveActorAttributeToInt("blade_count", Description.Variations, 5));
-
-    Camera->SetFilmSlope(
-        RetrieveActorAttributeToFloat("slope", Description.Variations, 0.88f));
-    Camera->SetFilmToe(
-        RetrieveActorAttributeToFloat("toe", Description.Variations, 0.55f));
-    Camera->SetFilmShoulder(
-        RetrieveActorAttributeToFloat("shoulder", Description.Variations, 0.26f));
-    Camera->SetFilmBlackClip(
-        RetrieveActorAttributeToFloat("black_clip", Description.Variations, 0.0f));
-    Camera->SetFilmWhiteClip(
-        RetrieveActorAttributeToFloat("white_clip", Description.Variations, 0.04f));
-
-    Camera->SetWhiteTemp(
-        RetrieveActorAttributeToFloat("temp", Description.Variations, 7700.0f));
-    Camera->SetWhiteTint(
-        RetrieveActorAttributeToFloat("tint", Description.Variations, -0.15f));
-
-    Camera->SetChromAberrIntensity(
-        RetrieveActorAttributeToFloat("chromatic_aberration_intensity", Description.Variations, 0.15f));
-    Camera->SetChromAberrOffset(
-        RetrieveActorAttributeToFloat("chromatic_aberration_offset", Description.Variations, 0.0f));
-
-    auto ColorSaturation = FLinearColor(RetrieveActorAttributeToColor("color_saturation", Description.Variations, FLinearColor(0.5f, 0.5f, 0.5f).ToFColorSRGB()));
-    Camera->SetColorSaturation(
-        FVector4(ColorSaturation.R, ColorSaturation.G, ColorSaturation.B, ColorSaturation.A));
-
-    // Temporal comments until FVector is implemented in clientside
-    FVector ColorContrast = FVector(RetrieveActorAttributeToVector("color_contrast", Description.Variations, FVector(1.6f, 1.6f, 1.6f)));
-    Camera->SetColorContrast(
-        FVector4(ColorContrast.X, ColorContrast.Y, ColorContrast.Z, 1.0f));
-
-    // Temporal comments until FVector is implemented in clientside
-    FVector ColorGamma = FVector(RetrieveActorAttributeToVector("color_gamma", Description.Variations, FVector( 1.2f, 1.2f, 1.2f )));
-    Camera->SetColorGamma(
-        FVector4(ColorGamma.X, ColorGamma.Y, ColorGamma.Z, 1.0f));
-
-    auto HighlightsGamma = FLinearColor(RetrieveActorAttributeToColor("highlights_gamma", Description.Variations, FLinearColor(0.5f, 0.5, 0.5f).ToFColorSRGB()));
-    Camera->SetHighlightsGamma(
-        FVector4(HighlightsGamma.R, HighlightsGamma.G, HighlightsGamma.B, HighlightsGamma.A));
-
-    Camera->SetToneCurveAmount(
-        RetrieveActorAttributeToFloat("tone_curve_amount", Description.Variations, 1.0f));
-
-    Camera->SetSceneColorTint(
-        RetrieveActorAttributeToColor("scene_color_tint", Description.Variations, FLinearColor(0.785339f, 0.879092f, 0.93125f).ToFColorSRGB()));
-
-    Camera->SetVignetteIntensity(
-        RetrieveActorAttributeToFloat("vignette_intensity", Description.Variations, 0.7f));
+    FString PostProcessDefaultName = RetrieveActorAttributeToString("post_process_profile",
+        Description.Variations, TEXT("default"));
+    UPostProcessJsonUtils::LoadAllPostProcessFromJsonToSceneCapture(
+        Camera->GetCaptureComponent(),
+        PostProcessDefaultName);
   }
 }
+
 
 void UActorBlueprintFunctionLibrary::SetCamera(
     const FActorDescription &Description,

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -142,6 +142,11 @@ public:
 
   void SetImageSize(uint32 Width, uint32 Height);
 
+  USceneCaptureComponent2D_CARLA *GetCaptureComponent() const
+  {
+    return CaptureComponent2D;
+  }
+  
   uint32 GetImageWidth() const
   {
     return ImageWidth;
