@@ -3,8 +3,8 @@
 #include <string>
 
 #include "carla/ros2/types/PointCloud2PubSubTypes.h"
-#include "carla/ros2/listeners/CarlaListener.h"
-#include "carla/ros2/util/conversions.hpp"
+#include "carla/ros2/dds/fastdds/FastDDSListener.h"
+#include "carla/ros2/dds/fastdds/FastDDSConversions.hpp"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 #include <fastdds/dds/publisher/Publisher.hpp>

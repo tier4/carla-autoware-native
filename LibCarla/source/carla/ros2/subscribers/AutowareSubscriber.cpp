@@ -17,7 +17,7 @@
 #include <fastdds/dds/subscriber/qos/DataReaderQos.hpp>
 #include <fastdds/dds/subscriber/DataReaderListener.hpp>
 
-#include "carla/ros2/util/conversions.hpp"
+#include "carla/ros2/dds/fastdds/FastDDSConversions.hpp"
 
 namespace carla {
 namespace ros2 {

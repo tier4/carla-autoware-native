@@ -6,7 +6,7 @@
 
 #include <string>
 
-#include "carla/ros2/listeners/CarlaListener.h"
+#include "carla/ros2/dds/fastdds/FastDDSListener.h"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 #include <fastdds/dds/publisher/Publisher.hpp>
@@ -25,7 +25,7 @@
 #include <fastdds/dds/publisher/DataWriterListener.hpp>
 
 #include "CarlaPublisher.h"
-#include "carla/ros2/util/conversions.hpp"
+#include "carla/ros2/dds/fastdds/FastDDSConversions.hpp"
 
 /**
  * @brief For internal use only, do not include this in any header that is not internal!!!

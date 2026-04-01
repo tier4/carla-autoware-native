@@ -4,7 +4,7 @@
 
 #include "carla/ros2/types/ImagePubSubTypes.h"
 #include "carla/ros2/types/CameraInfoPubSubTypes.h"
-#include "carla/ros2/listeners/CarlaListener.h"
+#include "carla/ros2/dds/fastdds/FastDDSListener.h"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 #include <fastdds/dds/publisher/Publisher.hpp>

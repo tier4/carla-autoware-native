@@ -17,7 +17,7 @@ file (
   LIBCARLA_ROS2_SOURCES
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.cpp
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.cpp
-  ${LIBCARLA_SOURCE_PATH}/carla/ros2/listeners/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.cpp
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.cpp
 )
 
@@ -26,7 +26,7 @@ file (
   LIBCARLA_ROS2_HEADERS
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.h
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.h
-  ${LIBCARLA_SOURCE_PATH}/carla/ros2/listeners/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.h
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.h
 )
 

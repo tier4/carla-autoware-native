@@ -2,7 +2,7 @@
 
 #include "carla/ros2/types/String.h"
 #include "carla/ros2/types/StringPubSubTypes.h"
-#include "carla/ros2/listeners/BasicListener.h"
+#include "carla/ros2/dds/fastdds/FastDDSBasicListener.h"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 #include <fastdds/dds/subscriber/Subscriber.hpp>

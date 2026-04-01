@@ -2,7 +2,7 @@
 
 #include "carla/ros2/types/CarlaEgoVehicleControl.h"
 #include "carla/ros2/types/CarlaEgoVehicleControlPubSubTypes.h"
-#include "carla/ros2/listeners/CarlaSubscriberListener.h"
+#include "carla/ros2/dds/fastdds/FastDDSSubscriberListener.h"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 #include <fastdds/dds/subscriber/Subscriber.hpp>
