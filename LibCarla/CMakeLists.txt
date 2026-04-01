@@ -112,6 +112,11 @@ if (BUILD_CARLA_SERVER)
   )
 
   if (ENABLE_ROS2)
+    # Validate DDS vendor
+    if (NOT CARLA_DDS_VENDOR STREQUAL "FastDDS" AND NOT CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
+      message(FATAL_ERROR "Unknown CARLA_DDS_VENDOR: ${CARLA_DDS_VENDOR}. Use FastDDS or CycloneDDS.")
+    endif()
+
     file (
       GLOB
       LIBCARLA_SERVER_SOURCES_ROS2
@@ -378,4 +383,37 @@ if (BUILD_CARLA_CLIENT)
     ${CARLA_RTTI_DEFINITIONS}
   )
 
+endif ()
+
+if (BUILD_LIBCARLA_TESTS AND ENABLE_ROS2)
+  file (
+    GLOB
+    LIBCARLA_ROS2_TEST_SOURCES
+    ${LIBCARLA_SOURCE_PATH}/../test/ros2/*.cpp
+  )
+
+  add_executable (
+    carla-ros2-tests
+    ${LIBCARLA_ROS2_TEST_SOURCES}
+  )
+
+  target_include_directories (
+    carla-ros2-tests PRIVATE
+    ${LIBCARLA_SOURCE_PATH}
+    ${LIBCARLA_SOURCE_PATH}/../test
+  )
+
+  target_link_libraries (
+    carla-ros2-tests PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+  )
+
+  target_compile_definitions (
+    carla-ros2-tests PRIVATE
+    WITH_ROS2
+  )
+
+  include (GoogleTest)
+  gtest_discover_tests (carla-ros2-tests)
 endif ()
