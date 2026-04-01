@@ -1,31 +1,45 @@
 #include "CarlaPoseStampedPublisher.h"
 
-#include "PoseStampedPubSubTypes.h"
-#include "carla/ros2/publishers/AutowarePublisherBase.hpp"
+#include <string>
+
+#include "carla/ros2/dds/DDSPublisherImpl.h"
+#include "PoseStamped.h"
 
 namespace carla {
 namespace ros2 {
 
-namespace efd = eprosima::fastdds::dds;
-using erc = eprosima::fastrtps::types::ReturnCode_t;
-
 class CarlaPoseStampedPublisher::Implementation
-: public AutowarePublisherBase<geometry_msgs::msg::PoseStamped, geometry_msgs::msg::PoseStampedPubSubType>
 {
 public:
-  Implementation(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "")
-  : AutowarePublisherBase(ros_name, parent, ros_topic_name) {}
+  Implementation() = default;
 
-  const char * type() const override { return "pose stamped"; }
+  std::unique_ptr<DDSPublisherImpl> _dds;
+  geometry_msgs::msg::PoseStamped _msg {};
 };
 
-
 bool CarlaPoseStampedPublisher::Init(const TopicConfig& config) {
-  return _impl->Init(config);
+  _impl->_dds = CreateDDSPublisher("geometry_msgs::msg::PoseStamped");
+  if (!_impl->_dds) return false;
+
+  const std::string base { "rt/carla/" };
+  std::string topic_name = base;
+  if (!_parent.empty())
+    topic_name += _parent + "/";
+  topic_name += _name;
+  topic_name += config.suffix;
+  if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
+    topic_name = custom_topic_name.value();
+  }
+
+  if (!_impl->_dds->Init(config, _name, topic_name, /*use_preallocated_realloc=*/false)) {
+    return false;
+  }
+  _frame_id = _name;
+  return true;
 }
 
 bool CarlaPoseStampedPublisher::Publish() {
-  return _impl->Publish();
+  return _impl->_dds->Write(&_impl->_msg);
 }
 
 void CarlaPoseStampedPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const double* position_data, const double* orientation_data) {
@@ -35,7 +49,7 @@ void CarlaPoseStampedPublisher::SetData(int32_t seconds, uint32_t nanoseconds, c
 
   std_msgs::msg::Header header;
   header.stamp(std::move(time));
-  header.frame_id(_impl->frame_id());
+  header.frame_id(_frame_id);
 
   geometry_msgs::msg::Pose pose;
   // TODO: Verify whether this layout is correct
@@ -48,51 +62,20 @@ void CarlaPoseStampedPublisher::SetData(int32_t seconds, uint32_t nanoseconds, c
   pose.orientation().z(*orientation_data++);
   pose.orientation().w(*orientation_data++);
 
-  geometry_msgs::msg::PoseStamped msg;
-  msg.header(std::move(header));
-  msg.pose(std::move(pose));
-
-  _impl->SetData(msg);
+  _impl->_msg.header(std::move(header));
+  _impl->_msg.pose(std::move(pose));
 }
 
 CarlaPoseStampedPublisher::CarlaPoseStampedPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
-_impl(std::make_shared<Implementation>(ros_name, parent, ros_topic_name)) {
+_impl(std::make_shared<Implementation>()) {
   _name = ros_name;
   _parent = parent;
   _topic_name = ros_topic_name;
 }
 
-
-CarlaPoseStampedPublisher::CarlaPoseStampedPublisher(const CarlaPoseStampedPublisher& other) {
-  _frame_id = other._frame_id;
-  _name = other._name;
-  _parent = other._parent;
-  _impl = other._impl;
-}
-
-CarlaPoseStampedPublisher& CarlaPoseStampedPublisher::operator=(const CarlaPoseStampedPublisher& other) {
-  _frame_id = other._frame_id;
-  _name = other._name;
-  _parent = other._parent;
-  _impl = other._impl;
-
-  return *this;
-}
-
-CarlaPoseStampedPublisher::CarlaPoseStampedPublisher(CarlaPoseStampedPublisher&& other) {
-  _frame_id = std::move(other._frame_id);
-  _name = std::move(other._name);
-  _parent = std::move(other._parent);
-  _impl = std::move(other._impl);
-}
-
-CarlaPoseStampedPublisher& CarlaPoseStampedPublisher::operator=(CarlaPoseStampedPublisher&& other) {
-  _frame_id = std::move(other._frame_id);
-  _name = std::move(other._name);
-  _parent = std::move(other._parent);
-  _impl = std::move(other._impl);
-
-  return *this;
-}
-}  // namespace carla
+CarlaPoseStampedPublisher::CarlaPoseStampedPublisher(const CarlaPoseStampedPublisher&) = default;
+CarlaPoseStampedPublisher& CarlaPoseStampedPublisher::operator=(const CarlaPoseStampedPublisher&) = default;
+CarlaPoseStampedPublisher::CarlaPoseStampedPublisher(CarlaPoseStampedPublisher&&) = default;
+CarlaPoseStampedPublisher& CarlaPoseStampedPublisher::operator=(CarlaPoseStampedPublisher&&) = default;
 }  // namespace ros2
+}  // namespace carla

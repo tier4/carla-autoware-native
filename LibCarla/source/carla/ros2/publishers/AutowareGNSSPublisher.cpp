@@ -1,55 +1,77 @@
 #include "AutowareGNSSPublisher.h"
 
-#include "PosePubSubTypes.h"
-#include "PoseWithCovarianceStampedPubSubTypes.h"
-#include "carla/ros2/publishers/AutowarePublisherBase.hpp"
+#include <string>
+#include <cmath>
+
+#include "carla/ros2/dds/DDSPublisherImpl.h"
+#include "Pose.h"
+#include "PoseWithCovarianceStamped.h"
 
 namespace carla {
 namespace ros2 {
 
-namespace efd = eprosima::fastdds::dds;
-using erc = eprosima::fastrtps::types::ReturnCode_t;
-
-class PosePublisher
-: public AutowarePublisherBase<geometry_msgs::msg::Pose, geometry_msgs::msg::PosePubSubType>
-{
-public:
-  PosePublisher(const char* ros_name, const char* parent, const char* ros_topic_name)
-  : AutowarePublisherBase(ros_name, parent, ros_topic_name) {}
-
-  const char * type() const override { return "pose"; }
-};
-
-class PoseWithCovarianceStampedPublisher
-: public AutowarePublisherBase<geometry_msgs::msg::PoseWithCovarianceStamped, geometry_msgs::msg::PoseWithCovarianceStampedPubSubType>
-{
-public:
-  PoseWithCovarianceStampedPublisher(const char* ros_name, const char* parent, const char* ros_topic_name)
-  : AutowarePublisherBase(ros_name, parent, ros_topic_name) {}
-
-  const char * type() const override { return "pose with covariance stamped"; }
-};
-
 class AutowareGNSSPublisher::Implementation
 {
 public:
-  Implementation() = delete;
-  Implementation(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "")
-  : _pose_publisher(ros_name, parent, ros_topic_name)
-  , _pose_with_covariance_publisher(ros_name, parent, ros_topic_name) {}
+  Implementation() = default;
 
-  PosePublisher _pose_publisher;
-  PoseWithCovarianceStampedPublisher _pose_with_covariance_publisher;
+  std::unique_ptr<DDSPublisherImpl> _pose_dds;
+  geometry_msgs::msg::Pose _pose {};
+  std::string _pose_frame_id;
+
+  std::unique_ptr<DDSPublisherImpl> _pose_with_covariance_dds;
+  geometry_msgs::msg::PoseWithCovarianceStamped _pose_with_covariance {};
+  std::string _pose_with_covariance_frame_id;
 };
 
 bool AutowareGNSSPublisher::Init(const TopicConfig& pose_config, const TopicConfig& pose_config_with_covariance_stamped) {
-  return _impl->_pose_publisher.Init(pose_config) &&
-    _impl->_pose_with_covariance_publisher.Init(pose_config_with_covariance_stamped);
+  // Init pose publisher
+  _impl->_pose_dds = CreateDDSPublisher("geometry_msgs::msg::Pose");
+  if (!_impl->_pose_dds) return false;
+
+  {
+    const std::string base { "rt/carla/" };
+    std::string topic_name = base;
+    if (!_parent.empty())
+      topic_name += _parent + "/";
+    topic_name += _name;
+    topic_name += pose_config.suffix;
+    if (const auto custom_topic_name = ValidTopicName(pose_config.suffix)) {
+      topic_name = custom_topic_name.value();
+    }
+    if (!_impl->_pose_dds->Init(pose_config, _name, topic_name, /*use_preallocated_realloc=*/false)) {
+      return false;
+    }
+    _impl->_pose_frame_id = _name;
+  }
+
+  // Init pose with covariance publisher
+  _impl->_pose_with_covariance_dds = CreateDDSPublisher("geometry_msgs::msg::PoseWithCovarianceStamped");
+  if (!_impl->_pose_with_covariance_dds) return false;
+
+  {
+    const std::string base { "rt/carla/" };
+    std::string topic_name = base;
+    if (!_parent.empty())
+      topic_name += _parent + "/";
+    topic_name += _name;
+    topic_name += pose_config_with_covariance_stamped.suffix;
+    if (const auto custom_topic_name = ValidTopicName(pose_config_with_covariance_stamped.suffix)) {
+      topic_name = custom_topic_name.value();
+    }
+    if (!_impl->_pose_with_covariance_dds->Init(pose_config_with_covariance_stamped, _name, topic_name, /*use_preallocated_realloc=*/false)) {
+      return false;
+    }
+    _impl->_pose_with_covariance_frame_id = _name;
+  }
+
+  _frame_id = _name;
+  return true;
 }
 
 bool AutowareGNSSPublisher::Publish() {
-  return _impl->_pose_publisher.Publish() &&
-    _impl->_pose_with_covariance_publisher.Publish();
+  return _impl->_pose_dds->Write(&_impl->_pose) &&
+    _impl->_pose_with_covariance_dds->Write(&_impl->_pose_with_covariance);
 }
 
 void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation, const double* mgrs_offset_position)
@@ -87,7 +109,7 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
   pose.orientation().y(cr * sp * cy + sr * cp * sy);
   pose.orientation().z(cr * cp * sy - sr * sp * cy);
 
-  _impl->_pose_publisher.SetData(pose);
+  _impl->_pose = pose;
 
   geometry_msgs::msg::PoseWithCovarianceStamped pose_with_covariance;
 
@@ -97,7 +119,7 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
 
   std_msgs::msg::Header header;
   header.stamp(std::move(time));
-  header.frame_id(_impl->_pose_with_covariance_publisher.frame_id());
+  header.frame_id(_impl->_pose_with_covariance_frame_id);
 
   std::array<double, 36> covariance{};  // TODO: Add some covariance matrix
 
@@ -105,7 +127,7 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
   pose_with_covariance.pose().pose(std::move(pose));
   pose_with_covariance.pose().covariance(std::move(covariance));
 
-  _impl->_pose_with_covariance_publisher.SetData(pose_with_covariance);
+  _impl->_pose_with_covariance = std::move(pose_with_covariance);
 }
 
 void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation)
@@ -115,42 +137,15 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
 }
 
 AutowareGNSSPublisher::AutowareGNSSPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
-_impl(std::make_shared<Implementation>(ros_name, parent, ros_topic_name)) {
+_impl(std::make_shared<Implementation>()) {
   _name = ros_name;
   _parent = parent;
   _topic_name = ros_topic_name;
 }
 
-AutowareGNSSPublisher::AutowareGNSSPublisher(const AutowareGNSSPublisher& other) {
-  _frame_id = other._frame_id;
-  _name = other._name;
-  _parent = other._parent;
-  _impl = other._impl;
-}
-
-AutowareGNSSPublisher& AutowareGNSSPublisher::operator=(const AutowareGNSSPublisher& other) {
-  _frame_id = other._frame_id;
-  _name = other._name;
-  _parent = other._parent;
-  _impl = other._impl;
-
-  return *this;
-}
-
-AutowareGNSSPublisher::AutowareGNSSPublisher(AutowareGNSSPublisher&& other) {
-  _frame_id = std::move(other._frame_id);
-  _name = std::move(other._name);
-  _parent = std::move(other._parent);
-  _impl = std::move(other._impl);
-}
-
-AutowareGNSSPublisher& AutowareGNSSPublisher::operator=(AutowareGNSSPublisher&& other) {
-  _frame_id = std::move(other._frame_id);
-  _name = std::move(other._name);
-  _parent = std::move(other._parent);
-  _impl = std::move(other._impl);
-
-  return *this;
-}
-}  // namespace carla
+AutowareGNSSPublisher::AutowareGNSSPublisher(const AutowareGNSSPublisher&) = default;
+AutowareGNSSPublisher& AutowareGNSSPublisher::operator=(const AutowareGNSSPublisher&) = default;
+AutowareGNSSPublisher::AutowareGNSSPublisher(AutowareGNSSPublisher&&) = default;
+AutowareGNSSPublisher& AutowareGNSSPublisher::operator=(AutowareGNSSPublisher&&) = default;
 }  // namespace ros2
+}  // namespace carla
