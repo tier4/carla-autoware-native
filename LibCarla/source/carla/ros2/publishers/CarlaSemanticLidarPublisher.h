@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "CarlaPublisher.h"
+#include "carla/ros2/data_types.h"
 
 namespace carla {
 namespace ros2 {
@@ -23,7 +24,7 @@ namespace ros2 {
       CarlaSemanticLidarPublisher(CarlaSemanticLidarPublisher&&);
       CarlaSemanticLidarPublisher& operator=(CarlaSemanticLidarPublisher&&);
 
-      bool Init(const DomainId domain_id = 0U);
+      bool Init(const TopicConfig& config = {});
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, size_t elements, size_t height, size_t width, float* data);
       const char* type() const override { return "semantic lidar"; }

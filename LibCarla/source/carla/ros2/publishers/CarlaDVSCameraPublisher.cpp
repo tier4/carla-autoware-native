@@ -4,103 +4,46 @@
 
 #include "carla/sensor/data/DVSEvent.h"
 
-#include "ImagePubSubTypes.h"
-#include "CameraInfoPubSubTypes.h"
-#include "PointCloud2PubSubTypes.h"
-#include "carla/ros2/dds/fastdds/FastDDSListener.h"
-
-#include <fastdds/dds/domain/DomainParticipant.hpp>
-#include <fastdds/dds/publisher/Publisher.hpp>
-#include <fastdds/dds/topic/Topic.hpp>
-#include <fastdds/dds/publisher/DataWriter.hpp>
-#include <fastdds/dds/topic/TypeSupport.hpp>
-
-#include <fastdds/dds/domain/qos/DomainParticipantQos.hpp>
-#include <fastdds/dds/domain/DomainParticipantFactory.hpp>
-#include <fastdds/dds/publisher/qos/PublisherQos.hpp>
-#include <fastdds/dds/topic/qos/TopicQos.hpp>
-
-#include <fastrtps/attributes/ParticipantAttributes.h>
-#include <fastrtps/qos/QosPolicies.h>
-#include <fastdds/dds/publisher/qos/DataWriterQos.hpp>
-#include <fastdds/dds/publisher/DataWriterListener.hpp>
-
+#include "carla/ros2/dds/DDSPublisherImpl.h"
+#include "Image.h"
+#include "CameraInfo.h"
+#include "RegionOfInterest.h"
+#include "PointCloud2.h"
+#include "PointField.h"
+#include "Header.h"
+#include "Time.h"
 
 namespace carla {
 namespace ros2 {
 
-  namespace efd = eprosima::fastdds::dds;
-  using erc = eprosima::fastrtps::types::ReturnCode_t;
-
   struct CarlaDVSCameraPublisherImpl {
-    efd::DomainParticipant* _participant { nullptr };
-    efd::Publisher* _publisher { nullptr };
-    efd::Topic* _topic { nullptr };
-    efd::DataWriter* _datawriter { nullptr };
-    efd::TypeSupport _type { new sensor_msgs::msg::ImagePubSubType() };
-    CarlaListener _listener {};
+    std::unique_ptr<DDSPublisherImpl> _dds_image;
+    std::unique_ptr<DDSPublisherImpl> _dds_info;
+    std::unique_ptr<DDSPublisherImpl> _dds_pointcloud;
     sensor_msgs::msg::Image _image {};
-  };
-
-  struct CarlaCameraInfoPublisherImpl {
-    efd::DomainParticipant* _participant { nullptr };
-    efd::Publisher* _publisher { nullptr };
-    efd::Topic* _topic { nullptr };
-    efd::DataWriter* _datawriter { nullptr };
-    efd::TypeSupport _type { new sensor_msgs::msg::CameraInfoPubSubType() };
-    CarlaListener _listener {};
-    bool _init {false};
     sensor_msgs::msg::CameraInfo _ci {};
-  };
-
-  struct CarlaPointCloudPublisherImpl {
-    efd::DomainParticipant* _participant { nullptr };
-    efd::Publisher* _publisher { nullptr };
-    efd::Topic* _topic { nullptr };
-    efd::DataWriter* _datawriter { nullptr };
-    efd::TypeSupport _type { new sensor_msgs::msg::PointCloud2PubSubType() };
-    CarlaListener _listener {};
     sensor_msgs::msg::PointCloud2 _pc {};
+    bool _info_init {false};
   };
 
   bool CarlaDVSCameraPublisher::HasBeenInitialized() const {
-    return _info->_init;
+    return _impl->_info_init;
   }
 
   void CarlaDVSCameraPublisher::InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify) {
-    _info->_ci = std::move(sensor_msgs::msg::CameraInfo(height, width, fov));
+    _impl->_ci = std::move(sensor_msgs::msg::CameraInfo(height, width, fov));
     SetInfoRegionOfInterest(x_offset, y_offset, height, width, do_rectify);
-    _info->_init = true;
+    _impl->_info_init = true;
   }
 
-  bool CarlaDVSCameraPublisher::Init(const DomainId domain_id) {
-    return InitImage(domain_id) && InitInfo(domain_id) && InitPointCloud(domain_id);
+  bool CarlaDVSCameraPublisher::Init(const TopicConfig& config) {
+    return InitImage(config) && InitInfo(config) && InitPointCloud(config);
   }
 
-  bool CarlaDVSCameraPublisher::InitImage(const DomainId domain_id) {
-    if (_impl->_type == nullptr) {
-        std::cerr << "Invalid TypeSupport" << std::endl;
-        return false;
-    }
+  bool CarlaDVSCameraPublisher::InitImage(const TopicConfig& config) {
+    _impl->_dds_image = CreateDDSPublisher("sensor_msgs::msg::Image");
+    if (!_impl->_dds_image) return false;
 
-    efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
-    pqos.name(_name);
-    auto factory = efd::DomainParticipantFactory::get_instance();
-    _impl->_participant = factory->create_participant(domain_id, pqos);
-    if (_impl->_participant == nullptr) {
-        std::cerr << "Failed to create DomainParticipant" << std::endl;
-        return false;
-    }
-    _impl->_type.register_type(_impl->_participant);
-
-    efd::PublisherQos pubqos = efd::PUBLISHER_QOS_DEFAULT;
-    _impl->_publisher = _impl->_participant->create_publisher(pubqos, nullptr);
-    if (_impl->_publisher == nullptr) {
-      std::cerr << "Failed to create Publisher" << std::endl;
-      return false;
-    }
-
-    efd::TopicQos tqos = efd::TOPIC_QOS_DEFAULT;
     const std::string publisher_type {"/image"};
     const std::string base { "rt/carla/" };
     std::string topic_name = base;
@@ -111,48 +54,18 @@ namespace ros2 {
     if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
       topic_name = custom_topic_name.value();
     }
-    _impl->_topic = _impl->_participant->create_topic(topic_name, _impl->_type->getName(), tqos);
-    if (_impl->_topic == nullptr) {
-        std::cerr << "Failed to create Topic" << std::endl;
-        return false;
-    }
 
-    efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
-    wqos.endpoint().history_memory_policy = eprosima::fastrtps::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
-    efd::DataWriterListener* listener = (efd::DataWriterListener*)_impl->_listener._impl.get();
-    _impl->_datawriter = _impl->_publisher->create_datawriter(_impl->_topic, wqos, listener);
-    if (_impl->_datawriter == nullptr) {
-        std::cerr << "Failed to create DataWriter" << std::endl;
-        return false;
+    if (!_impl->_dds_image->Init(config, _name, topic_name, /*use_preallocated_realloc=*/true)) {
+      return false;
     }
     _frame_id = _name;
     return true;
   }
 
-  bool CarlaDVSCameraPublisher::InitInfo(const DomainId domain_id) {
-    if (_info->_type == nullptr) {
-        std::cerr << "Invalid TypeSupport" << std::endl;
-        return false;
-    }
+  bool CarlaDVSCameraPublisher::InitInfo(const TopicConfig& config) {
+    _impl->_dds_info = CreateDDSPublisher("sensor_msgs::msg::CameraInfo");
+    if (!_impl->_dds_info) return false;
 
-    efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
-    pqos.name(_name);
-    auto factory = efd::DomainParticipantFactory::get_instance();
-    _info->_participant = factory->create_participant(domain_id, pqos);
-    if (_info->_participant == nullptr) {
-        std::cerr << "Failed to create DomainParticipant" << std::endl;
-        return false;
-    }
-    _info->_type.register_type(_info->_participant);
-
-    efd::PublisherQos pubqos = efd::PUBLISHER_QOS_DEFAULT;
-    _info->_publisher = _info->_participant->create_publisher(pubqos, nullptr);
-    if (_info->_publisher == nullptr) {
-      std::cerr << "Failed to create Publisher" << std::endl;
-      return false;
-    }
-
-    efd::TopicQos tqos = efd::TOPIC_QOS_DEFAULT;
     const std::string publisher_type {"/camera_info"};
     const std::string base { "rt/carla/" };
     std::string topic_name = base;
@@ -163,47 +76,18 @@ namespace ros2 {
     if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
       topic_name = custom_topic_name.value();
     }
-    _info->_topic = _info->_participant->create_topic(topic_name, _info->_type->getName(), tqos);
-    if (_info->_topic == nullptr) {
-        std::cerr << "Failed to create Topic" << std::endl;
-        return false;
-    }
-    efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
-    efd::DataWriterListener* listener = (efd::DataWriterListener*)_info->_listener._impl.get();
-    _info->_datawriter = _info->_publisher->create_datawriter(_info->_topic, wqos, listener);
-    if (_info->_datawriter == nullptr) {
-        std::cerr << "Failed to create DataWriter" << std::endl;
-        return false;
-    }
 
+    if (!_impl->_dds_info->Init(config, _name, topic_name, /*use_preallocated_realloc=*/false)) {
+      return false;
+    }
     _frame_id = _name;
     return true;
   }
 
-  bool CarlaDVSCameraPublisher::InitPointCloud(const DomainId domain_id) {
-    if (_point_cloud->_type == nullptr) {
-        std::cerr << "Invalid TypeSupport" << std::endl;
-        return false;
-    }
+  bool CarlaDVSCameraPublisher::InitPointCloud(const TopicConfig& config) {
+    _impl->_dds_pointcloud = CreateDDSPublisher("sensor_msgs::msg::PointCloud2");
+    if (!_impl->_dds_pointcloud) return false;
 
-    efd::DomainParticipantQos pqos = efd::PARTICIPANT_QOS_DEFAULT;
-    pqos.name(_name);
-    auto factory = efd::DomainParticipantFactory::get_instance();
-    _point_cloud->_participant = factory->create_participant(domain_id, pqos);
-    if (_point_cloud->_participant == nullptr) {
-        std::cerr << "Failed to create DomainParticipant" << std::endl;
-        return false;
-    }
-    _point_cloud->_type.register_type(_point_cloud->_participant);
-
-    efd::PublisherQos pubqos = efd::PUBLISHER_QOS_DEFAULT;
-    _point_cloud->_publisher = _point_cloud->_participant->create_publisher(pubqos, nullptr);
-    if (_point_cloud->_publisher == nullptr) {
-      std::cerr << "Failed to create Publisher" << std::endl;
-      return false;
-    }
-
-    efd::TopicQos tqos = efd::TOPIC_QOS_DEFAULT;
     const std::string publisher_type {"/point_cloud"};
     const std::string base { "rt/carla/" };
     std::string topic_name = base;
@@ -214,19 +98,9 @@ namespace ros2 {
     if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
       topic_name = custom_topic_name.value();
     }
-    _point_cloud->_topic = _point_cloud->_participant->create_topic(topic_name, _point_cloud->_type->getName(), tqos);
-    if (_point_cloud->_topic == nullptr) {
-        std::cerr << "Failed to create Topic" << std::endl;
-        return false;
-    }
 
-    efd::DataWriterQos wqos = efd::DATAWRITER_QOS_DEFAULT;
-    wqos.endpoint().history_memory_policy = eprosima::fastrtps::rtps::PREALLOCATED_WITH_REALLOC_MEMORY_MODE;
-    efd::DataWriterListener* listener = (efd::DataWriterListener*)_point_cloud->_listener._impl.get();
-    _point_cloud->_datawriter = _point_cloud->_publisher->create_datawriter(_point_cloud->_topic, wqos, listener);
-    if (_point_cloud->_datawriter == nullptr) {
-        std::cerr << "Failed to create DataWriter" << std::endl;
-        return false;
+    if (!_impl->_dds_pointcloud->Init(config, _name, topic_name, /*use_preallocated_realloc=*/true)) {
+      return false;
     }
     _frame_id = _name;
     return true;
@@ -237,189 +111,15 @@ namespace ros2 {
   }
 
   bool CarlaDVSCameraPublisher::PublishImage() {
-    eprosima::fastrtps::rtps::InstanceHandle_t instance_handle;
-    eprosima::fastrtps::types::ReturnCode_t rcode = _impl->_datawriter->write(& _impl->_image, instance_handle);
-    if (rcode == erc::ReturnCodeValue::RETCODE_OK) {
-        return true;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ERROR) {
-        std::cerr << "RETCODE_ERROR" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_UNSUPPORTED) {
-        std::cerr << "RETCODE_UNSUPPORTED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_BAD_PARAMETER) {
-        std::cerr << "RETCODE_BAD_PARAMETER" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_PRECONDITION_NOT_MET) {
-        std::cerr << "RETCODE_PRECONDITION_NOT_MET" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_OUT_OF_RESOURCES) {
-        std::cerr << "RETCODE_OUT_OF_RESOURCES" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NOT_ENABLED) {
-        std::cerr << "RETCODE_NOT_ENABLED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_IMMUTABLE_POLICY) {
-        std::cerr << "RETCODE_IMMUTABLE_POLICY" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_INCONSISTENT_POLICY) {
-        std::cerr << "RETCODE_INCONSISTENT_POLICY" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ALREADY_DELETED) {
-        std::cerr << "RETCODE_ALREADY_DELETED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_TIMEOUT) {
-        std::cerr << "RETCODE_TIMEOUT" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NO_DATA) {
-        std::cerr << "RETCODE_NO_DATA" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ILLEGAL_OPERATION) {
-        std::cerr << "RETCODE_ILLEGAL_OPERATION" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NOT_ALLOWED_BY_SECURITY) {
-        std::cerr << "RETCODE_NOT_ALLOWED_BY_SECURITY" << std::endl;
-        return false;
-    }
-    std::cerr << "UNKNOWN" << std::endl;
-    return false;
+    return _impl->_dds_image->Write(&_impl->_image);
   }
 
   bool CarlaDVSCameraPublisher::PublishInfo() {
-    eprosima::fastrtps::rtps::InstanceHandle_t instance_handle;
-    eprosima::fastrtps::types::ReturnCode_t rcode = _info->_datawriter->write(& _info->_ci, instance_handle);
-    if (rcode == erc::ReturnCodeValue::RETCODE_OK) {
-        return true;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ERROR) {
-        std::cerr << "RETCODE_ERROR" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_UNSUPPORTED) {
-        std::cerr << "RETCODE_UNSUPPORTED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_BAD_PARAMETER) {
-        std::cerr << "RETCODE_BAD_PARAMETER" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_PRECONDITION_NOT_MET) {
-        std::cerr << "RETCODE_PRECONDITION_NOT_MET" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_OUT_OF_RESOURCES) {
-        std::cerr << "RETCODE_OUT_OF_RESOURCES" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NOT_ENABLED) {
-        std::cerr << "RETCODE_NOT_ENABLED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_IMMUTABLE_POLICY) {
-        std::cerr << "RETCODE_IMMUTABLE_POLICY" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_INCONSISTENT_POLICY) {
-        std::cerr << "RETCODE_INCONSISTENT_POLICY" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ALREADY_DELETED) {
-        std::cerr << "RETCODE_ALREADY_DELETED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_TIMEOUT) {
-        std::cerr << "RETCODE_TIMEOUT" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NO_DATA) {
-        std::cerr << "RETCODE_NO_DATA" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ILLEGAL_OPERATION) {
-        std::cerr << "RETCODE_ILLEGAL_OPERATION" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NOT_ALLOWED_BY_SECURITY) {
-        std::cerr << "RETCODE_NOT_ALLOWED_BY_SECURITY" << std::endl;
-        return false;
-    }
-    std::cerr << "UNKNOWN" << std::endl;
-    return false;
+    return _impl->_dds_info->Write(&_impl->_ci);
   }
 
   bool CarlaDVSCameraPublisher::PublishPointCloud() {
-    eprosima::fastrtps::rtps::InstanceHandle_t instance_handle;
-    eprosima::fastrtps::types::ReturnCode_t rcode = _point_cloud->_datawriter->write(&_point_cloud->_pc, instance_handle);
-    if (rcode == erc::ReturnCodeValue::RETCODE_OK) {
-        return true;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ERROR) {
-        std::cerr << "RETCODE_ERROR" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_UNSUPPORTED) {
-        std::cerr << "RETCODE_UNSUPPORTED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_BAD_PARAMETER) {
-        std::cerr << "RETCODE_BAD_PARAMETER" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_PRECONDITION_NOT_MET) {
-        std::cerr << "RETCODE_PRECONDITION_NOT_MET" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_OUT_OF_RESOURCES) {
-        std::cerr << "RETCODE_OUT_OF_RESOURCES" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NOT_ENABLED) {
-        std::cerr << "RETCODE_NOT_ENABLED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_IMMUTABLE_POLICY) {
-        std::cerr << "RETCODE_IMMUTABLE_POLICY" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_INCONSISTENT_POLICY) {
-        std::cerr << "RETCODE_INCONSISTENT_POLICY" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ALREADY_DELETED) {
-        std::cerr << "RETCODE_ALREADY_DELETED" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_TIMEOUT) {
-        std::cerr << "RETCODE_TIMEOUT" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NO_DATA) {
-        std::cerr << "RETCODE_NO_DATA" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_ILLEGAL_OPERATION) {
-        std::cerr << "RETCODE_ILLEGAL_OPERATION" << std::endl;
-        return false;
-    }
-    if (rcode == erc::ReturnCodeValue::RETCODE_NOT_ALLOWED_BY_SECURITY) {
-        std::cerr << "RETCODE_NOT_ALLOWED_BY_SECURITY" << std::endl;
-        return false;
-    }
-    std::cerr << "UNKNOWN" << std::endl;
-    return false;
+    return _impl->_dds_pointcloud->Write(&_impl->_pc);
   }
 
   void CarlaDVSCameraPublisher::SetImageData(int32_t seconds, uint32_t nanoseconds, size_t elements, size_t height, size_t width, const uint8_t* data) {
@@ -444,15 +144,15 @@ namespace ros2 {
     header.stamp(std::move(time));
     header.frame_id(_frame_id);
     _impl->_image.header(header);
-    _info->_ci.header(header);
-    _point_cloud->_pc.header(header);
+    _impl->_ci.header(header);
+    _impl->_pc.header(header);
 
     _impl->_image.width(width);
     _impl->_image.height(height);
-    _impl->_image.encoding("bgr8"); //taken from the list of strings in include/sensor_msgs/image_encodings.h
+    _impl->_image.encoding("bgr8");
     _impl->_image.is_bigendian(0);
     _impl->_image.step(_impl->_image.width() * sizeof(uint8_t) * 3);
-    _impl->_image.data(std::move(data)); //https://github.com/eProsima/Fast-DDS/issues/2330
+    _impl->_image.data(std::move(data));
   }
 
   void CarlaDVSCameraPublisher::SetCameraInfoData(int32_t seconds, uint32_t nanoseconds) {
@@ -465,14 +165,14 @@ namespace ros2 {
     header.frame_id(_frame_id);
   }
 
-  void CarlaDVSCameraPublisher::SetInfoRegionOfInterest( uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify) {
+  void CarlaDVSCameraPublisher::SetInfoRegionOfInterest(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify) {
     sensor_msgs::msg::RegionOfInterest roi;
     roi.x_offset(x_offset);
     roi.y_offset(y_offset);
     roi.height(height);
     roi.width(width);
     roi.do_rectify(do_rectify);
-    _info->_ci.roi(roi);
+    _impl->_ci.roi(roi);
   }
 
   void CarlaDVSCameraPublisher::SetPointCloudData(size_t height, size_t width, size_t elements, const uint8_t* data) {
@@ -498,116 +198,33 @@ namespace ros2 {
     descriptor3.datatype(sensor_msgs::msg::PointField__FLOAT64);
     descriptor3.count(1);
     sensor_msgs::msg::PointField descriptor4;
-    descriptor3.name("pol");
-    descriptor3.offset(12);
-    descriptor3.datatype(sensor_msgs::msg::PointField__INT8);
-    descriptor3.count(1);
+    descriptor4.name("pol");
+    descriptor4.offset(12);
+    descriptor4.datatype(sensor_msgs::msg::PointField__INT8);
+    descriptor4.count(1);
 
     const size_t point_size = sizeof(carla::sensor::data::DVSEvent);
-    _point_cloud->_pc.width(width);
-    _point_cloud->_pc.height(height);
-    _point_cloud->_pc.is_bigendian(false);
-    _point_cloud->_pc.fields({descriptor1, descriptor2, descriptor3, descriptor4});
-    _point_cloud->_pc.point_step(point_size);
-    _point_cloud->_pc.row_step(width * point_size);
-    _point_cloud->_pc.is_dense(false); //True if there are not invalid points
-    _point_cloud->_pc.data(std::move(vector_data));
+    _impl->_pc.width(width);
+    _impl->_pc.height(height);
+    _impl->_pc.is_bigendian(false);
+    _impl->_pc.fields({descriptor1, descriptor2, descriptor3, descriptor4});
+    _impl->_pc.point_step(point_size);
+    _impl->_pc.row_step(width * point_size);
+    _impl->_pc.is_dense(false);
+    _impl->_pc.data(std::move(vector_data));
   }
 
   CarlaDVSCameraPublisher::CarlaDVSCameraPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
-  _impl(std::make_shared<CarlaDVSCameraPublisherImpl>()),
-  _info(std::make_shared<CarlaCameraInfoPublisherImpl>()),
-  _point_cloud(std::make_shared<CarlaPointCloudPublisherImpl>()) {
+  _impl(std::make_shared<CarlaDVSCameraPublisherImpl>()) {
     _name = ros_name;
     _parent = parent;
     _topic_name = ros_topic_name;
   }
 
-  CarlaDVSCameraPublisher::~CarlaDVSCameraPublisher() {
-      if (!_impl)
-          return;
-
-      if (_impl->_datawriter)
-          _impl->_publisher->delete_datawriter(_impl->_datawriter);
-
-      if (_impl->_publisher)
-          _impl->_participant->delete_publisher(_impl->_publisher);
-
-      if (_impl->_topic)
-          _impl->_participant->delete_topic(_impl->_topic);
-
-      if (_impl->_participant)
-          efd::DomainParticipantFactory::get_instance()->delete_participant(_impl->_participant);
-
-      if (!_info)
-          return;
-
-      if (_info->_datawriter)
-          _info->_publisher->delete_datawriter(_info->_datawriter);
-
-      if (_info->_publisher)
-          _info->_participant->delete_publisher(_info->_publisher);
-
-      if (_info->_topic)
-          _info->_participant->delete_topic(_info->_topic);
-
-      if (_info->_participant)
-          efd::DomainParticipantFactory::get_instance()->delete_participant(_info->_participant);
-
-      if (!_point_cloud)
-          return;
-
-      if (_point_cloud->_datawriter)
-          _point_cloud->_publisher->delete_datawriter(_point_cloud->_datawriter);
-
-      if (_point_cloud->_publisher)
-          _point_cloud->_participant->delete_publisher(_point_cloud->_publisher);
-
-      if (_point_cloud->_topic)
-          _point_cloud->_participant->delete_topic(_point_cloud->_topic);
-
-      if (_point_cloud->_participant)
-          efd::DomainParticipantFactory::get_instance()->delete_participant(_point_cloud->_participant);
-  }
-
-  CarlaDVSCameraPublisher::CarlaDVSCameraPublisher(const CarlaDVSCameraPublisher& other) {
-    _frame_id = other._frame_id;
-    _name = other._name;
-    _parent = other._parent;
-    _impl = other._impl;
-    _info = other._info;
-    _point_cloud = other._point_cloud;
-  }
-
-  CarlaDVSCameraPublisher& CarlaDVSCameraPublisher::operator=(const CarlaDVSCameraPublisher& other) {
-    _frame_id = other._frame_id;
-    _name = other._name;
-    _parent = other._parent;
-    _impl = other._impl;
-    _info = other._info;
-    _point_cloud = other._point_cloud;
-
-    return *this;
-  }
-
-  CarlaDVSCameraPublisher::CarlaDVSCameraPublisher(CarlaDVSCameraPublisher&& other) {
-    _frame_id = std::move(other._frame_id);
-    _name = std::move(other._name);
-    _parent = std::move(other._parent);
-    _impl = std::move(other._impl);
-    _info = std::move(other._info);
-    _point_cloud = std::move(other._point_cloud);
-  }
-
-  CarlaDVSCameraPublisher& CarlaDVSCameraPublisher::operator=(CarlaDVSCameraPublisher&& other) {
-    _frame_id = std::move(other._frame_id);
-    _name = std::move(other._name);
-    _parent = std::move(other._parent);
-    _impl = std::move(other._impl);
-    _info = std::move(other._info);
-    _point_cloud = std::move(other._point_cloud);
-
-    return *this;
-  }
+  CarlaDVSCameraPublisher::~CarlaDVSCameraPublisher() = default;
+  CarlaDVSCameraPublisher::CarlaDVSCameraPublisher(const CarlaDVSCameraPublisher&) = default;
+  CarlaDVSCameraPublisher& CarlaDVSCameraPublisher::operator=(const CarlaDVSCameraPublisher&) = default;
+  CarlaDVSCameraPublisher::CarlaDVSCameraPublisher(CarlaDVSCameraPublisher&&) = default;
+  CarlaDVSCameraPublisher& CarlaDVSCameraPublisher::operator=(CarlaDVSCameraPublisher&&) = default;
 }
 }

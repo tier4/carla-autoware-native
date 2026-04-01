@@ -14,7 +14,6 @@ namespace carla {
 namespace ros2 {
 
   struct CarlaRGBCameraPublisherImpl;
-  struct CarlaCameraInfoPublisherImpl;
 
   class CarlaRGBCameraPublisher : public CarlaPublisher {
     public:
@@ -45,7 +44,6 @@ namespace ros2 {
 
     private:
       std::shared_ptr<CarlaRGBCameraPublisherImpl> _impl;
-      std::shared_ptr<CarlaCameraInfoPublisherImpl> _impl_info;
   };
 }
 }
