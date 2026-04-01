@@ -7,6 +7,7 @@
 #include "carla/ros2/dds/DDSPublisherImpl.h"
 #include "carla/ros2/dds/DDSSubscriberImpl.h"
 #include "FastDDSPublisherImpl.h"
+#include "FastDDSSubscriberImpl.h"
 #include "FastDDSTypeRegistry.h"
 
 namespace carla {
@@ -17,9 +18,9 @@ std::unique_ptr<DDSPublisherImpl> CreateDDSPublisher(const std::string& type_nam
     return std::make_unique<FastDDSPublisherImpl>(std::move(type_support));
 }
 
-// Subscriber factory placeholder - will be added in Task 8
 std::unique_ptr<DDSSubscriberImpl> CreateDDSSubscriber(const std::string& type_name) {
-    return nullptr; // TODO: Task 8
+    auto type_support = FastDDSTypeRegistry::Create(type_name);
+    return std::make_unique<FastDDSSubscriberImpl>(std::move(type_support));
 }
 
 } // namespace ros2
