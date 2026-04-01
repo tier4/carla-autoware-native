@@ -1,7 +1,7 @@
 #include "AutowareGNSSPublisher.h"
 
-#include "carla/ros2/types/PosePubSubTypes.h"
-#include "carla/ros2/types/PoseWithCovarianceStampedPubSubTypes.h"
+#include "PosePubSubTypes.h"
+#include "PoseWithCovarianceStampedPubSubTypes.h"
 #include "carla/ros2/publishers/AutowarePublisherBase.hpp"
 
 namespace carla {

@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "carla/ros2/types/PointCloud2PubSubTypes.h"
+#include "PointCloud2PubSubTypes.h"
 #include "carla/ros2/dds/fastdds/FastDDSListener.h"
 #include "carla/ros2/dds/fastdds/FastDDSConversions.hpp"
 

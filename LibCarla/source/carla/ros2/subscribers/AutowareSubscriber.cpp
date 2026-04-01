@@ -143,18 +143,18 @@ bool AutowareSubscriber<Message, MessagePubSubType>::Init(const TopicConfig& con
 }  // namespace carla
 
 // Instantiate all types
-#include "carla/ros2/types/Control.h"
-#include "carla/ros2/types/ControlPubSubTypes.h"
-#include "carla/ros2/types/GearCommand.h"
-#include "carla/ros2/types/GearCommandPubSubTypes.h"
-#include "carla/ros2/types/TurnIndicatorsCommand.h"
-#include "carla/ros2/types/TurnIndicatorsCommandPubSubTypes.h"
-#include "carla/ros2/types/HazardLightsCommand.h"
-#include "carla/ros2/types/HazardLightsCommandPubSubTypes.h"
-#include "carla/ros2/types/VehicleEmergencyStamped.h"
-#include "carla/ros2/types/VehicleEmergencyStampedPubSubTypes.h"
-#include "carla/ros2/types/Engage.h"
-#include "carla/ros2/types/EngagePubSubTypes.h"
+#include "Control.h"
+#include "ControlPubSubTypes.h"
+#include "GearCommand.h"
+#include "GearCommandPubSubTypes.h"
+#include "TurnIndicatorsCommand.h"
+#include "TurnIndicatorsCommandPubSubTypes.h"
+#include "HazardLightsCommand.h"
+#include "HazardLightsCommandPubSubTypes.h"
+#include "VehicleEmergencyStamped.h"
+#include "VehicleEmergencyStampedPubSubTypes.h"
+#include "Engage.h"
+#include "EngagePubSubTypes.h"
 
 namespace carla {
 namespace ros2 {

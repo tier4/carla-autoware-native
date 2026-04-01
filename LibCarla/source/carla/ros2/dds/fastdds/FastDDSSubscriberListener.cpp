@@ -5,7 +5,7 @@
 #include <fastdds/dds/subscriber/DataReaderListener.hpp>
 #include <fastdds/dds/core/status/SubscriptionMatchedStatus.hpp>
 #include <fastdds/dds/subscriber/SampleInfo.hpp>
-#include "carla/ros2/types/CarlaEgoVehicleControl.h"
+#include "CarlaEgoVehicleControl.h"
 #include "carla/ros2/subscribers/CarlaEgoVehicleControlSubscriber.h"
 #include "carla/ros2/ROS2CallbackData.h"
 

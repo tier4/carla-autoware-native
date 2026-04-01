@@ -4,9 +4,9 @@
 
 #include "carla/sensor/data/DVSEvent.h"
 
-#include "carla/ros2/types/ImagePubSubTypes.h"
-#include "carla/ros2/types/CameraInfoPubSubTypes.h"
-#include "carla/ros2/types/PointCloud2PubSubTypes.h"
+#include "ImagePubSubTypes.h"
+#include "CameraInfoPubSubTypes.h"
+#include "PointCloud2PubSubTypes.h"
 #include "carla/ros2/dds/fastdds/FastDDSListener.h"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>

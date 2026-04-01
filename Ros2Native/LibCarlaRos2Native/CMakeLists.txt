@@ -18,7 +18,7 @@ file (
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.cpp
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.cpp
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.cpp
-  ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.cpp
 )
 
 file (
@@ -27,7 +27,8 @@ file (
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.h
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.h
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.h
-  ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.hpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.h
 )
 
 add_library (
@@ -41,6 +42,7 @@ target_include_directories (
   carla-ros2-native
   SYSTEM PRIVATE
   ${LIBCARLA_SOURCE_PATH}
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types
   ${CMAKE_INSTALL_PREFIX}/include
 )
 

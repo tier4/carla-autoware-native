@@ -1,6 +1,6 @@
 #include "CarlaPoseStampedPublisher.h"
 
-#include "carla/ros2/types/PoseStampedPubSubTypes.h"
+#include "PoseStampedPubSubTypes.h"
 #include "carla/ros2/publishers/AutowarePublisherBase.hpp"
 
 namespace carla {

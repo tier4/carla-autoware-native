@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "carla/ros2/types/ClockPubSubTypes.h"
+#include "ClockPubSubTypes.h"
 #include "carla/ros2/dds/fastdds/FastDDSListener.h"
 #include "carla/ros2/dds/fastdds/FastDDSConversions.hpp"
 

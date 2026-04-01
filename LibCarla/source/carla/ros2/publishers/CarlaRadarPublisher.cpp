@@ -3,7 +3,7 @@
 #include <string>
 
 #include "carla/sensor/data/RadarData.h"
-#include "carla/ros2/types/PointCloud2PubSubTypes.h"
+#include "PointCloud2PubSubTypes.h"
 #include "carla/ros2/dds/fastdds/FastDDSListener.h"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>

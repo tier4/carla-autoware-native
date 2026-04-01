@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "carla/ros2/types/NavSatFixPubSubTypes.h"
+#include "NavSatFixPubSubTypes.h"
 #include "carla/ros2/dds/fastdds/FastDDSListener.h"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>

@@ -2,8 +2,8 @@
 
 #include <string>
 
-#include "carla/ros2/types/ImagePubSubTypes.h"
-#include "carla/ros2/types/CameraInfoPubSubTypes.h"
+#include "ImagePubSubTypes.h"
+#include "CameraInfoPubSubTypes.h"
 #include "carla/ros2/dds/fastdds/FastDDSListener.h"
 
 #include <fastdds/dds/domain/DomainParticipant.hpp>

@@ -108,12 +108,12 @@ void SubscriberListenerBase<Message>::SetOwnerData(Data* data) {
 
 
 // Instantiate all types
-#include "carla/ros2/types/Control.h"
-#include "carla/ros2/types/GearCommand.h"
-#include "carla/ros2/types/TurnIndicatorsCommand.h"
-#include "carla/ros2/types/HazardLightsCommand.h"
-#include "carla/ros2/types/VehicleEmergencyStamped.h"
-#include "carla/ros2/types/Engage.h"
+#include "Control.h"
+#include "GearCommand.h"
+#include "TurnIndicatorsCommand.h"
+#include "HazardLightsCommand.h"
+#include "VehicleEmergencyStamped.h"
+#include "Engage.h"
 
 namespace carla {
 namespace ros2 {
