@@ -105,7 +105,8 @@ void ROS2::Enable(bool enable) {
   _basic_publisher->Init(_domain_id);
 #endif
 #if defined(ENABLE_AGNOCAST)
-  EnableAgnocast(enable);
+  // Agnocast is lazily initialized on first sensor creation (GetOrCreateSensor)
+  _agnocast_enabled = enable;
 #endif
 }
 
@@ -601,10 +602,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           publisher = new_publisher;
         }
 #if defined(ENABLE_AGNOCAST)
-        if (_agnocast_enabled && _shm_writer) {
-          uint64_t capacity = 10ULL * 1024 * 1024;
-          _shm_writer->RegisterSensor(static_cast<uint32_t>(id),
-            agnocast::SensorType::RayCastLidar, capacity);
+        if (_agnocast_enabled) {
+          if (!_shm_writer) { EnableAgnocast(true); }
+          if (_shm_writer) {
+            uint64_t capacity = 10ULL * 1024 * 1024;
+            _shm_writer->RegisterSensor(static_cast<uint32_t>(id),
+              agnocast::SensorType::RayCastLidar, capacity);
+          }
         }
 #endif
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
@@ -649,10 +653,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           publisher = new_publisher;
         }
 #if defined(ENABLE_AGNOCAST)
-        if (_agnocast_enabled && _shm_writer) {
-          uint64_t capacity = 3840ULL * 2160 * 4;
-          _shm_writer->RegisterSensor(static_cast<uint32_t>(id),
-            agnocast::SensorType::RGBCamera, capacity);
+        if (_agnocast_enabled) {
+          if (!_shm_writer) { EnableAgnocast(true); }
+          if (_shm_writer) {
+            uint64_t capacity = 3840ULL * 2160 * 4;
+            _shm_writer->RegisterSensor(static_cast<uint32_t>(id),
+              agnocast::SensorType::RGBCamera, capacity);
+          }
         }
 #endif
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
@@ -831,16 +838,19 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
           publisher->Publish();
 #if defined(ENABLE_AGNOCAST)
-          if (_agnocast_enabled && _shm_writer) {
-            const carla::sensor::s11n::ImageSerializer::ImageHeader *ag_header =
-              reinterpret_cast<const carla::sensor::s11n::ImageSerializer::ImageHeader *>(buffer->data());
-            if (ag_header) {
-              const uint8_t* pixel_data = reinterpret_cast<const uint8_t*>(
-                buffer->data() + carla::sensor::s11n::ImageSerializer::header_offset);
-              size_t data_size = static_cast<size_t>(ag_header->height) * ag_header->width * 4;
-              _shm_writer->WriteImageData(static_cast<uint32_t>(stream_id),
-                _seconds, _nanoseconds, ag_header->height, ag_header->width,
-                "bgra8", pixel_data, data_size);
+          if (_agnocast_enabled) {
+            if (!_shm_writer) { EnableAgnocast(true); }
+            if (_shm_writer) {
+              const carla::sensor::s11n::ImageSerializer::ImageHeader *ag_header =
+                reinterpret_cast<const carla::sensor::s11n::ImageSerializer::ImageHeader *>(buffer->data());
+              if (ag_header) {
+                const uint8_t* pixel_data = reinterpret_cast<const uint8_t*>(
+                  buffer->data() + carla::sensor::s11n::ImageSerializer::header_offset);
+                size_t data_size = static_cast<size_t>(ag_header->height) * ag_header->width * 4;
+                _shm_writer->WriteImageData(static_cast<uint32_t>(stream_id),
+                  _seconds, _nanoseconds, ag_header->height, ag_header->width,
+                  "bgra8", pixel_data, data_size);
+              }
             }
           }
 #endif
