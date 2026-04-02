@@ -1,0 +1,16 @@
+// autoware_control_msgs/msg/Lateral.idl
+// Canonical IDL definition for autoware_control_msgs::msg::Lateral
+
+#include "builtin_interfaces/msg/Time.idl"
+
+module autoware_control_msgs {
+  module msg {
+    struct Lateral {
+      builtin_interfaces::msg::Time stamp;
+      builtin_interfaces::msg::Time control_time;
+      float steering_tire_angle;
+      float steering_tire_rotation_rate;
+      boolean is_defined_steering_tire_rotation_rate;
+    };
+  };
+};

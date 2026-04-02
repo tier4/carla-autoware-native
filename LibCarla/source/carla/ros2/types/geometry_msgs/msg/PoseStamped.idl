@@ -1,0 +1,14 @@
+// geometry_msgs/msg/PoseStamped.idl
+// Canonical IDL definition for geometry_msgs::msg::PoseStamped
+
+#include "std_msgs/msg/Header.idl"
+#include "geometry_msgs/msg/Pose.idl"
+
+module geometry_msgs {
+  module msg {
+    struct PoseStamped {
+      std_msgs::msg::Header header;
+      geometry_msgs::msg::Pose pose;
+    };
+  };
+};

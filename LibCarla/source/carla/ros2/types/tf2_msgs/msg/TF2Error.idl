@@ -1,0 +1,11 @@
+// tf2_msgs/msg/TF2Error.idl
+// Canonical IDL definition for tf2_msgs::msg::TF2Error
+
+module tf2_msgs {
+  module msg {
+    struct TF2Error {
+      octet error;
+      string error_string;
+    };
+  };
+};

@@ -1,0 +1,14 @@
+// geometry_msgs/msg/Transform.idl
+// Canonical IDL definition for geometry_msgs::msg::Transform
+
+#include "geometry_msgs/msg/Vector3.idl"
+#include "geometry_msgs/msg/Quaternion.idl"
+
+module geometry_msgs {
+  module msg {
+    struct Transform {
+      geometry_msgs::msg::Vector3 translation;
+      geometry_msgs::msg::Quaternion rotation;
+    };
+  };
+};

@@ -1,0 +1,17 @@
+// nav_msgs/msg/Odometry.idl
+// Canonical IDL definition for nav_msgs::msg::Odometry
+
+#include "std_msgs/msg/Header.idl"
+#include "geometry_msgs/msg/PoseWithCovariance.idl"
+#include "geometry_msgs/msg/TwistWithCovariance.idl"
+
+module nav_msgs {
+  module msg {
+    struct Odometry {
+      std_msgs::msg::Header header;
+      string child_frame_id;
+      geometry_msgs::msg::PoseWithCovariance pose;
+      geometry_msgs::msg::TwistWithCovariance twist;
+    };
+  };
+};

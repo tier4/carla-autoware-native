@@ -1,0 +1,15 @@
+// carla_msgs/msg/CarlaCollisionEvent.idl
+// Canonical IDL definition for carla_msgs::msg::CarlaCollisionEvent
+
+#include "std_msgs/msg/Header.idl"
+#include "geometry_msgs/msg/Vector3.idl"
+
+module carla_msgs {
+  module msg {
+    struct CarlaCollisionEvent {
+      std_msgs::msg::Header header;
+      unsigned long other_actor_id;
+      geometry_msgs::msg::Vector3 normal_impulse;
+    };
+  };
+};

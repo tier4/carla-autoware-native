@@ -1,0 +1,13 @@
+// autoware_vehicle_msgs/msg/TurnIndicatorsReport.idl
+// Canonical IDL definition for autoware_vehicle_msgs::msg::TurnIndicatorsReport
+
+#include "builtin_interfaces/msg/Time.idl"
+
+module autoware_vehicle_msgs {
+  module msg {
+    struct TurnIndicatorsReport {
+      builtin_interfaces::msg::Time stamp;
+      octet report;
+    };
+  };
+};

@@ -1,0 +1,13 @@
+// geometry_msgs/msg/TwistWithCovariance.idl
+// Canonical IDL definition for geometry_msgs::msg::TwistWithCovariance
+
+#include "geometry_msgs/msg/Twist.idl"
+
+module geometry_msgs {
+  module msg {
+    struct TwistWithCovariance {
+      geometry_msgs::msg::Twist twist;
+      double covariance[36];
+    };
+  };
+};

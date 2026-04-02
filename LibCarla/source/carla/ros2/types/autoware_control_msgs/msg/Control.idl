@@ -1,0 +1,17 @@
+// autoware_control_msgs/msg/Control.idl
+// Canonical IDL definition for autoware_control_msgs::msg::Control
+
+#include "builtin_interfaces/msg/Time.idl"
+#include "autoware_control_msgs/msg/Lateral.idl"
+#include "autoware_control_msgs/msg/Longitudinal.idl"
+
+module autoware_control_msgs {
+  module msg {
+    struct Control {
+      builtin_interfaces::msg::Time stamp;
+      builtin_interfaces::msg::Time control_time;
+      autoware_control_msgs::msg::Lateral lateral;
+      autoware_control_msgs::msg::Longitudinal longitudinal;
+    };
+  };
+};

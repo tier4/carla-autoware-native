@@ -1,0 +1,12 @@
+// geometry_msgs/msg/Vector3.idl
+// Canonical IDL definition for geometry_msgs::msg::Vector3
+
+module geometry_msgs {
+  module msg {
+    struct Vector3 {
+      double x;
+      double y;
+      double z;
+    };
+  };
+};
