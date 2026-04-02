@@ -104,6 +104,9 @@ void ROS2::Enable(bool enable) {
   _basic_publisher = std::make_shared<BasicPublisher>("basic_publisher", "");
   _basic_publisher->Init(_domain_id);
 #endif
+#if defined(ENABLE_AGNOCAST)
+  EnableAgnocast(enable);
+#endif
 }
 
 #if defined(ENABLE_AGNOCAST)
