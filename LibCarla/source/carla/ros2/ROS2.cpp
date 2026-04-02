@@ -48,6 +48,11 @@
   #include "subscribers/BasicSubscriber.h"
 #endif
 
+#if defined(ENABLE_AGNOCAST)
+#include "agnocast/ShmWriter.h"
+#include "agnocast/ShmProtocol.h"
+#endif
+
 #include <vector>
 #include "ROS2.h"
 
@@ -100,6 +105,27 @@ void ROS2::Enable(bool enable) {
   _basic_publisher->Init(_domain_id);
 #endif
 }
+
+#if defined(ENABLE_AGNOCAST)
+void ROS2::EnableAgnocast(bool enable) {
+  _agnocast_enabled = enable;
+  if (enable && !_shm_writer) {
+    _shm_writer = std::make_unique<carla::ros2::agnocast::ShmWriter>();
+    if (!_shm_writer->Init()) {
+      log_warning("Failed to initialize Agnocast ShmWriter");
+      _agnocast_enabled = false;
+      _shm_writer.reset();
+    } else {
+      log_info("Agnocast ShmWriter initialized");
+    }
+  } else if (!enable && _shm_writer) {
+    _shm_writer->Shutdown();
+    _shm_writer.reset();
+  }
+}
+
+bool ROS2::IsAgnocastEnabled() const { return _agnocast_enabled; }
+#endif
 
 void ROS2::SetFrame(uint64_t frame) {
   _frame = frame;
@@ -571,6 +597,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
+#if defined(ENABLE_AGNOCAST)
+        if (_agnocast_enabled && _shm_writer) {
+          uint64_t capacity = 10ULL * 1024 * 1024;
+          _shm_writer->RegisterSensor(static_cast<uint32_t>(id),
+            agnocast::SensorType::RayCastLidar, capacity);
+        }
+#endif
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
@@ -612,6 +645,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           _publishers.insert({actor, new_publisher});
           publisher = new_publisher;
         }
+#if defined(ENABLE_AGNOCAST)
+        if (_agnocast_enabled && _shm_writer) {
+          uint64_t capacity = 3840ULL * 2160 * 4;
+          _shm_writer->RegisterSensor(static_cast<uint32_t>(id),
+            agnocast::SensorType::RGBCamera, capacity);
+        }
+#endif
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
           _transforms.insert({actor, new_transform});
@@ -787,6 +827,20 @@ void ROS2::ProcessDataFromCamera(
           publisher->SetImageData(_seconds, _nanoseconds, header->height, header->width, (const uint8_t*) (buffer->data() + carla::sensor::s11n::ImageSerializer::header_offset));
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
           publisher->Publish();
+#if defined(ENABLE_AGNOCAST)
+          if (_agnocast_enabled && _shm_writer) {
+            const carla::sensor::s11n::ImageSerializer::ImageHeader *ag_header =
+              reinterpret_cast<const carla::sensor::s11n::ImageSerializer::ImageHeader *>(buffer->data());
+            if (ag_header) {
+              const uint8_t* pixel_data = reinterpret_cast<const uint8_t*>(
+                buffer->data() + carla::sensor::s11n::ImageSerializer::header_offset);
+              size_t data_size = static_cast<size_t>(ag_header->height) * ag_header->width * 4;
+              _shm_writer->WriteImageData(static_cast<uint32_t>(stream_id),
+                _seconds, _nanoseconds, ag_header->height, ag_header->width,
+                "bgra8", pixel_data, data_size);
+            }
+          }
+#endif
         }
         if (sensors.second && _publish_tf) {
           std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
@@ -986,6 +1040,15 @@ void ROS2::ProcessDataFromLidar(
     publisher->SetDataEx(_seconds, _nanoseconds, height, width, (float*)data._points.data(),
       data._header.size() - carla::sensor::data::LidarData::Index::SIZE, data._header.data() + carla::sensor::data::LidarData::Index::SIZE, vertical_angles);
     publisher->Publish();
+#if defined(ENABLE_AGNOCAST)
+    if (_agnocast_enabled && _shm_writer) {
+      size_t data_size = data._points.size() * sizeof(float);
+      _shm_writer->WriteLidarData(static_cast<uint32_t>(stream_id),
+        _seconds, _nanoseconds,
+        reinterpret_cast<const uint8_t*>(data._points.data()), data_size,
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height), "xyzi_f32");
+    }
+#endif
   }
   if (sensors.second && _publish_tf) {
     std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
