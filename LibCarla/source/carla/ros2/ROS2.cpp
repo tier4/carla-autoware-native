@@ -360,9 +360,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaDepthCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          if (new_publisher->Init(config)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
@@ -378,9 +382,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaNormalsCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          if (new_publisher->Init(config)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
@@ -396,9 +404,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaDVSCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          if (new_publisher->Init(config)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
@@ -505,9 +517,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaOpticalFlowCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          if (new_publisher->Init(config)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
@@ -523,9 +539,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaRadarPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          if (new_publisher->Init(config)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
@@ -541,9 +561,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaSemanticLidarPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          if (new_publisher->Init(config)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
@@ -626,9 +650,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaSSCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          if (new_publisher->Init(config)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
@@ -644,9 +672,13 @@ std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublish
           UpdateActorRosName(actor, ros_name);
         }
         auto new_publisher = std::make_shared<CarlaISCameraPublisher>(ros_name.c_str(), parent_ros_name.c_str(), ros_topic_name.c_str());
-        if (new_publisher->Init(_domain_id)) {
-          _publishers.insert({actor, new_publisher});
-          publisher = new_publisher;
+        {
+          TopicConfig config;
+          config.domain_id = _domain_id;
+          if (new_publisher->Init(config)) {
+            _publishers.insert({actor, new_publisher});
+            publisher = new_publisher;
+          }
         }
         auto new_transform = std::make_shared<CarlaTransformPublisher>(ros_name.c_str(), parent_ros_name.c_str());
         if (new_transform->Init(_domain_id)) {
