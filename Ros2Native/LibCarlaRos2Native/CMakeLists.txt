@@ -30,6 +30,11 @@ file (
   ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.h
 )
 
+if (ENABLE_AGNOCAST)
+  file (GLOB agnocast_sources "${LIBCARLA_SOURCE_PATH}/carla/ros2/agnocast/*.cpp")
+  list (APPEND LIBCARLA_ROS2_SOURCES ${agnocast_sources})
+endif ()
+
 add_library (
   carla-ros2-native
   SHARED
@@ -54,6 +59,11 @@ target_link_libraries (
   carla-ros2-native PUBLIC
   ${CMAKE_INSTALL_PREFIX}/lib/libfastrtps.so
 )
+
+if (ENABLE_AGNOCAST)
+  target_link_libraries (carla-ros2-native PRIVATE rt)
+  target_compile_definitions (carla-ros2-native PRIVATE ENABLE_AGNOCAST)
+endif ()
 
 install (
   TARGETS

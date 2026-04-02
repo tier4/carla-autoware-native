@@ -63,6 +63,12 @@ carla_option (
 )
 
 carla_option (
+  ENABLE_AGNOCAST
+  "Enable Agnocast zero-copy IPC for Autoware."
+  OFF
+)
+
+carla_option (
   ENABLE_OSM2ODR
   "Enable OSM2ODR."
   OFF

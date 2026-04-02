@@ -96,6 +96,10 @@ if (ENABLE_ROS2)
   add_subdirectory (Ros2Native)
 endif()
 
+if (ENABLE_AGNOCAST AND NOT ENABLE_ROS2)
+  message(FATAL_ERROR "ENABLE_AGNOCAST requires ENABLE_ROS2=ON")
+endif()
+
 if (BUILD_PYTHON_API)
   add_subdirectory (PythonAPI)
 endif ()
