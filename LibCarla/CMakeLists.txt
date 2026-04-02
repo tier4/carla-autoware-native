@@ -270,15 +270,18 @@ if (BUILD_CARLA_SERVER)
   )
 
   if (ENABLE_ROS2)
+    set (ROS2_NATIVE_INSTALL_PATH ${CMAKE_BINARY_DIR}/Ros2Native/install)
     if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
       target_include_directories (
         carla-server PRIVATE
         ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types
+        ${ROS2_NATIVE_INSTALL_PATH}/include
       )
     elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
       target_include_directories (
         carla-server PRIVATE
         ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types
+        ${ROS2_NATIVE_INSTALL_PATH}/include
       )
     endif()
   endif()
