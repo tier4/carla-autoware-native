@@ -452,7 +452,7 @@ if (BUILD_LIBCARLA_TESTS AND ENABLE_ROS2)
   file (
     GLOB
     LIBCARLA_ROS2_TEST_SOURCES
-    ${LIBCARLA_SOURCE_PATH}/../test/ros2/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/test/ros2/*.cpp
   )
 
   add_executable (
@@ -463,7 +463,7 @@ if (BUILD_LIBCARLA_TESTS AND ENABLE_ROS2)
   target_include_directories (
     carla-ros2-tests PRIVATE
     ${LIBCARLA_SOURCE_PATH}
-    ${LIBCARLA_SOURCE_PATH}/../test
+    ${LIBCARLA_SOURCE_PATH}/test
   )
 
   target_link_libraries (
