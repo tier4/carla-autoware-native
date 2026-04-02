@@ -1,9 +1,11 @@
 // std_msgs/msg/String.idl
 // Canonical IDL definition for std_msgs::msg::String
+// Note: "String" is an IDL keyword, so we use "String_" as the struct name.
+// The generated C type will be std_msgs_msg_String_.
 
 module std_msgs {
   module msg {
-    struct String {
+    struct String_ {
       string data;
     };
   };

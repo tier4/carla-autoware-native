@@ -46,7 +46,7 @@ find "$IDL_DIR" -name "*.idl" | sort | while read -r idl_file; do
     rel_path="${idl_file#$IDL_DIR/}"
     echo "  Processing: $rel_path"
 
-    if idlc -l c "$idl_file" -o "$OUTPUT_DIR" -I "$IDL_DIR"; then
+    if idlc -f case-sensitive -l c "$idl_file" -o "$OUTPUT_DIR" -I "$IDL_DIR"; then
         IDL_COUNT=$((IDL_COUNT + 1))
     else
         echo "    WARNING: Failed to process $rel_path" >&2
