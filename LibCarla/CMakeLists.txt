@@ -138,6 +138,7 @@ if (BUILD_CARLA_SERVER)
         GLOB
         LIBCARLA_SERVER_SOURCES_ROS2_DDS
         ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.cpp
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.c
         ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.cpp
       )
     endif()

@@ -45,12 +45,14 @@ elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
     GLOB
     LIBCARLA_ROS2_DDS_SOURCES
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.c
   )
   file (
     GLOB
     LIBCARLA_ROS2_DDS_HEADERS
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.h
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.hpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.h
   )
 endif()
 
@@ -86,6 +88,7 @@ elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
     carla-ros2-native
     SYSTEM PRIVATE
     ${LIBCARLA_SOURCE_PATH}
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types
     ${CMAKE_INSTALL_PREFIX}/include
     ${CMAKE_INSTALL_PREFIX}/include/ddsc
   )
