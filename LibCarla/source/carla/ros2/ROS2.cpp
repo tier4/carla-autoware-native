@@ -112,15 +112,18 @@ void ROS2::Enable(bool enable) {
 
 #if defined(ENABLE_AGNOCAST)
 void ROS2::EnableAgnocast(bool enable) {
+  fprintf(stderr, "[agnocast] EnableAgnocast(%d) called\n", enable); fflush(stderr);
   _agnocast_enabled = enable;
   if (enable && !_shm_writer) {
+    fprintf(stderr, "[agnocast] Creating ShmWriter...\n"); fflush(stderr);
     _shm_writer = std::make_unique<carla::ros2::agnocast::ShmWriter>();
+    fprintf(stderr, "[agnocast] ShmWriter created, Init()...\n"); fflush(stderr);
     if (!_shm_writer->Init()) {
-      log_warning("Failed to initialize Agnocast ShmWriter");
+      fprintf(stderr, "[agnocast] ShmWriter Init FAILED\n"); fflush(stderr);
       _agnocast_enabled = false;
       _shm_writer.reset();
     } else {
-      log_info("Agnocast ShmWriter initialized");
+      fprintf(stderr, "[agnocast] ShmWriter Init OK\n"); fflush(stderr);
     }
   } else if (!enable && _shm_writer) {
     _shm_writer->Shutdown();
@@ -836,6 +839,9 @@ void ROS2::ProcessDataFromCamera(
             publisher->InitInfoData(0, 0, H, W, Fov, true);
           publisher->SetImageData(_seconds, _nanoseconds, header->height, header->width, (const uint8_t*) (buffer->data() + carla::sensor::s11n::ImageSerializer::header_offset));
           publisher->SetCameraInfoData(_seconds, _nanoseconds);
+#if defined(ENABLE_AGNOCAST)
+          if (!_agnocast_enabled)
+#endif
           publisher->Publish();
 #if defined(ENABLE_AGNOCAST)
           if (_agnocast_enabled) {
@@ -1052,6 +1058,9 @@ void ROS2::ProcessDataFromLidar(
     size_t height = 1;
     publisher->SetDataEx(_seconds, _nanoseconds, height, width, (float*)data._points.data(),
       data._header.size() - carla::sensor::data::LidarData::Index::SIZE, data._header.data() + carla::sensor::data::LidarData::Index::SIZE, vertical_angles);
+#if defined(ENABLE_AGNOCAST)
+    if (!_agnocast_enabled)
+#endif
     publisher->Publish();
 #if defined(ENABLE_AGNOCAST)
     if (_agnocast_enabled && _shm_writer) {
