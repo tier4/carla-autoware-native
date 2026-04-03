@@ -213,6 +213,9 @@ class ROS2
 
   bool _enabled { false };
   bool _publish_tf { true };
+#if defined(ENABLE_AGNOCAST)
+  bool _agnocast_enabled { false };
+#endif
   uint64_t _frame { 0 };
   int32_t _seconds { 0 };
   uint32_t _nanoseconds { 0 };
@@ -227,11 +230,10 @@ class ROS2
   std::unordered_map<void *, std::shared_ptr<CarlaPublisher>> _publishers;
   std::unordered_map<void *, std::shared_ptr<CarlaTransformPublisher>> _transforms;
   std::unordered_set<carla::streaming::detail::stream_id_type> _publish_stream;
+  std::unordered_map<void *, ActorCallback> _actor_callbacks;
 #if defined(ENABLE_AGNOCAST)
   std::unique_ptr<carla::ros2::agnocast::ShmWriter> _shm_writer;
-  bool _agnocast_enabled { false };
 #endif
-  std::unordered_map<void *, ActorCallback> _actor_callbacks;
 #if defined(WITH_ROS2_DEMO)
   std::shared_ptr<BasicSubscriber> _basic_subscriber;
   std::shared_ptr<BasicPublisher> _basic_publisher;
