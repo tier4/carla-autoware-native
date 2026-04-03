@@ -1,0 +1,18 @@
+// autoware_control_msgs/msg/Longitudinal.idl
+// Canonical IDL definition for autoware_control_msgs::msg::Longitudinal
+
+#include "builtin_interfaces/msg/Time.idl"
+
+module autoware_control_msgs {
+  module msg {
+    struct Longitudinal {
+      builtin_interfaces::msg::Time stamp;
+      builtin_interfaces::msg::Time control_time;
+      float velocity;
+      float acceleration;
+      float jerk;
+      boolean is_defined_acceleration;
+      boolean is_defined_jerk;
+    };
+  };
+};

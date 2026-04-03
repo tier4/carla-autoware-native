@@ -112,15 +112,42 @@ if (BUILD_CARLA_SERVER)
   )
 
   if (ENABLE_ROS2)
+    if (NOT CARLA_DDS_VENDOR STREQUAL "FastDDS" AND NOT CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
+      message(FATAL_ERROR "Unknown CARLA_DDS_VENDOR: ${CARLA_DDS_VENDOR}. Use FastDDS or CycloneDDS.")
+    endif()
+
+    # Common ROS2 sources (DDS-independent)
     file (
       GLOB
       LIBCARLA_SERVER_SOURCES_ROS2
       ${LIBCARLA_SOURCE_PATH}/carla/ros2/*.cpp
+      ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.cpp
+      ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.cpp
     )
+
+    # DDS vendor-specific sources
+    if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
+      file (
+        GLOB
+        LIBCARLA_SERVER_SOURCES_ROS2_DDS
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.cpp
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.cpp
+      )
+    elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
+      file (
+        GLOB
+        LIBCARLA_SERVER_SOURCES_ROS2_DDS
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.cpp
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.c
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.cpp
+      )
+    endif()
+
     list (
       APPEND
       LIBCARLA_SERVER_SOURCES
       ${LIBCARLA_SERVER_SOURCES_ROS2}
+      ${LIBCARLA_SERVER_SOURCES_ROS2_DDS}
     )
   endif ()
 
@@ -165,13 +192,41 @@ if (BUILD_CARLA_SERVER)
       GLOB
       LIBCARLA_SERVER_HEADERS_ROS2
       ${LIBCARLA_SOURCE_PATH}/carla/ros2/*.h
+      ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.h
+      ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.h
     )
+
+    if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
+      file (
+        GLOB
+        LIBCARLA_SERVER_HEADERS_ROS2_DDS
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.h
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.hpp
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.h
+      )
+    elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
+      file (
+        GLOB
+        LIBCARLA_SERVER_HEADERS_ROS2_DDS
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.h
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.hpp
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.h
+      )
+    endif()
+
     list (
       APPEND
       LIBCARLA_SERVER_HEADERS
       ${LIBCARLA_SERVER_HEADERS_ROS2}
+      ${LIBCARLA_SERVER_HEADERS_ROS2_DDS}
     )
+
     set (CARLA_ROS2_DEFINITIONS WITH_ROS2)
+    if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
+      list (APPEND CARLA_ROS2_DEFINITIONS CARLA_USE_FASTDDS)
+    elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
+      list (APPEND CARLA_ROS2_DEFINITIONS CARLA_USE_CYCLONEDDS)
+    endif()
   endif ()
 
   if (ENABLE_ROS2_DEMO)
@@ -214,6 +269,23 @@ if (BUILD_CARLA_SERVER)
     carla-server PUBLIC
     ${LIBCARLA_SOURCE_PATH}
   )
+
+  if (ENABLE_ROS2)
+    set (ROS2_NATIVE_INSTALL_PATH ${CMAKE_BINARY_DIR}/Ros2Native/install)
+    if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
+      target_include_directories (
+        carla-server PRIVATE
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types
+        ${ROS2_NATIVE_INSTALL_PATH}/include
+      )
+    elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
+      target_include_directories (
+        carla-server PRIVATE
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types
+        ${ROS2_NATIVE_INSTALL_PATH}/include
+      )
+    endif()
+  endif()
 
   target_compile_definitions (
     carla-server PUBLIC
@@ -378,4 +450,37 @@ if (BUILD_CARLA_CLIENT)
     ${CARLA_RTTI_DEFINITIONS}
   )
 
+endif ()
+
+if (BUILD_LIBCARLA_TESTS AND ENABLE_ROS2)
+  file (
+    GLOB
+    LIBCARLA_ROS2_TEST_SOURCES
+    ${LIBCARLA_SOURCE_PATH}/test/ros2/*.cpp
+  )
+
+  add_executable (
+    carla-ros2-tests
+    ${LIBCARLA_ROS2_TEST_SOURCES}
+  )
+
+  target_include_directories (
+    carla-ros2-tests PRIVATE
+    ${LIBCARLA_SOURCE_PATH}
+    ${LIBCARLA_SOURCE_PATH}/test
+  )
+
+  target_link_libraries (
+    carla-ros2-tests PRIVATE
+    GTest::gtest
+    GTest::gtest_main
+  )
+
+  target_compile_definitions (
+    carla-ros2-tests PRIVATE
+    WITH_ROS2
+  )
+
+  include (GoogleTest)
+  gtest_discover_tests (carla-ros2-tests)
 endif ()

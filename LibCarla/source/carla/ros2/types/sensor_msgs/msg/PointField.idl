@@ -1,0 +1,13 @@
+// sensor_msgs/msg/PointField.idl
+// Canonical IDL definition for sensor_msgs::msg::PointField
+
+module sensor_msgs {
+  module msg {
+    struct PointField {
+      string name;
+      unsigned long offset;
+      octet datatype;
+      unsigned long count;
+    };
+  };
+};

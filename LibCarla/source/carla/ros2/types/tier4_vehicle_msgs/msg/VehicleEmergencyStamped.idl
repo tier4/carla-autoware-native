@@ -1,0 +1,13 @@
+// tier4_vehicle_msgs/msg/VehicleEmergencyStamped.idl
+// Canonical IDL definition for tier4_vehicle_msgs::msg::VehicleEmergencyStamped
+
+#include "builtin_interfaces/msg/Time.idl"
+
+module tier4_vehicle_msgs {
+  module msg {
+    struct VehicleEmergencyStamped {
+      builtin_interfaces::msg::Time stamp;
+      boolean emergency;
+    };
+  };
+};

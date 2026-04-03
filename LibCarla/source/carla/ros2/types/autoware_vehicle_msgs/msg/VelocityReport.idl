@@ -1,0 +1,15 @@
+// autoware_vehicle_msgs/msg/VelocityReport.idl
+// Canonical IDL definition for autoware_vehicle_msgs::msg::VelocityReport
+
+#include "std_msgs/msg/Header.idl"
+
+module autoware_vehicle_msgs {
+  module msg {
+    struct VelocityReport {
+      std_msgs::msg::Header header;
+      float longitudinal_velocity;
+      float lateral_velocity;
+      float heading_rate;
+    };
+  };
+};

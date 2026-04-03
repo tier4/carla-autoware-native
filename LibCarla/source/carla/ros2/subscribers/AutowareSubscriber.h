@@ -9,7 +9,6 @@
 #include <memory>
 #include <mutex>
 #include "CarlaSubscriber.h"
-#include "carla/ros2/listeners/SubscriberListenerBase.h"
 #include "carla/ros2/data_types.h"
 
 namespace carla {

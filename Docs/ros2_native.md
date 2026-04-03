@@ -8,6 +8,29 @@ The CARLA simulator supports ROS2 natively from the server. To use ROS2 with CAR
 ./CarlaUnreal.sh --ros2
 ```
 
+## DDS Vendor Selection
+
+CARLA supports two DDS implementations for ROS2 communication:
+
+### FastDDS (default)
+
+```bash
+cmake -G Ninja -S . -B Build \
+  -DENABLE_ROS2=ON \
+  -DCARLA_DDS_VENDOR=FastDDS  # default, can be omitted
+```
+
+### CycloneDDS
+
+```bash
+cmake -G Ninja -S . -B Build \
+  -DENABLE_ROS2=ON \
+  -DCARLA_DDS_VENDOR=CycloneDDS
+```
+
+Both vendors implement the DDS/RTPS standard and are interoperable.
+CycloneDDS is the default middleware for ROS2 Humble and later.
+
 ## Sensor data
 
 The CARLA server will broadcast sensor data for any spawned sensors for which ROS is enabled. To enable a sensor for ROS use the `enable_for_ros()` method of the sensor class:

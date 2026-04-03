@@ -8,12 +8,12 @@
 #include <vector>
 
 #include "CarlaPublisher.h"
+#include "carla/ros2/data_types.h"
 
 namespace carla {
 namespace ros2 {
 
   struct CarlaISCameraPublisherImpl;
-  struct CarlaCameraInfoPublisherImpl;
 
   class CarlaISCameraPublisher : public CarlaPublisher {
     public:
@@ -24,7 +24,7 @@ namespace ros2 {
       CarlaISCameraPublisher(CarlaISCameraPublisher&&);
       CarlaISCameraPublisher& operator=(CarlaISCameraPublisher&&);
 
-      bool Init(const DomainId domain_id = 0U);
+      bool Init(const TopicConfig& config = {});
       void InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify);
       bool Publish();
 
@@ -34,17 +34,16 @@ namespace ros2 {
       const char* type() const override { return "instance segmentation"; }
 
     private:
-      bool InitImage(const DomainId domain_id);
-      bool InitInfo(const DomainId domain_id);
+      bool InitImage(const TopicConfig& config);
+      bool InitInfo(const TopicConfig& config);
       bool PublishImage();
       bool PublishInfo();
 
-      void SetInfoRegionOfInterest( uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify);
+      void SetInfoRegionOfInterest(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify);
       void SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, std::vector<uint8_t>&& data);
 
     private:
       std::shared_ptr<CarlaISCameraPublisherImpl> _impl;
-      std::shared_ptr<CarlaCameraInfoPublisherImpl> _impl_info;
   };
 }
 }

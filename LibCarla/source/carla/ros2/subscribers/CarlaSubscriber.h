@@ -25,7 +25,7 @@ namespace ros2 {
 
       virtual const char* type() const = 0;
 
-      /// @return user specified valid FastDDS topic name
+      /// @return user specified valid DDS topic name
       std::optional<std::string> ValidTopicName(const std::string& suffix = "") const {
         if (_topic_name.empty()) {
           return std::nullopt;

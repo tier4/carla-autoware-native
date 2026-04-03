@@ -62,6 +62,15 @@ carla_option (
   OFF
 )
 
+set (CARLA_DDS_VENDOR "FastDDS" CACHE STRING
+  "DDS vendor to use when ROS2 is enabled: FastDDS or CycloneDDS.")
+
+set (CARLA_CYCLONEDDS_VERSION "0.10.5" CACHE STRING
+  "Target CycloneDDS version.")
+
+set (CARLA_CYCLONEDDS_TAG "${CARLA_CYCLONEDDS_VERSION}" CACHE STRING
+  "Target CycloneDDS git tag.")
+
 carla_option (
   ENABLE_OSM2ODR
   "Enable OSM2ODR."

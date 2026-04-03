@@ -1,0 +1,19 @@
+// sensor_msgs/msg/NavSatFix.idl
+// Canonical IDL definition for sensor_msgs::msg::NavSatFix
+
+#include "std_msgs/msg/Header.idl"
+#include "sensor_msgs/msg/NavSatStatus.idl"
+
+module sensor_msgs {
+  module msg {
+    struct NavSatFix {
+      std_msgs::msg::Header header;
+      sensor_msgs::msg::NavSatStatus status;
+      double latitude;
+      double longitude;
+      double altitude;
+      double position_covariance[9];
+      octet position_covariance_type;
+    };
+  };
+};

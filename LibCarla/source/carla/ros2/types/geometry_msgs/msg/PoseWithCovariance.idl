@@ -1,0 +1,13 @@
+// geometry_msgs/msg/PoseWithCovariance.idl
+// Canonical IDL definition for geometry_msgs::msg::PoseWithCovariance
+
+#include "geometry_msgs/msg/Pose.idl"
+
+module geometry_msgs {
+  module msg {
+    struct PoseWithCovariance {
+      geometry_msgs::msg::Pose pose;
+      double covariance[36];
+    };
+  };
+};
