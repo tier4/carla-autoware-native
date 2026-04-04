@@ -15,6 +15,7 @@ namespace ros2 {
   struct CarlaCollisionPublisherImpl {
     std::unique_ptr<DDSPublisherImpl> _dds;
     carla_msgs_msg_CarlaCollisionEvent _event {};
+    std::string _frame_id_store;
   };
 
   bool CarlaCollisionPublisher::Init(const DomainId domain_id) {
@@ -55,7 +56,8 @@ namespace ros2 {
 
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    _impl->_frame_id_store = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
     geometry_msgs_msg_Vector3 impulse;
     impulse.x = data[0];
