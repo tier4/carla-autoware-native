@@ -24,7 +24,7 @@ namespace ros2 {
   };
 
   bool CarlaLidarPublisher::Init(const TopicConfig& config) {
-    _impl->_dds = CreateDDSPublisher("sensor_msgs_msg_PointCloud2");
+    _impl->_dds = CreateDDSPublisher("sensor_msgs::msg::PointCloud2");
     if (!_impl->_dds) return false;
 
     const std::string base { "rt/carla/" };

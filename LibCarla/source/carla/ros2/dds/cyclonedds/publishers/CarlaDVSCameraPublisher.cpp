@@ -51,7 +51,7 @@ namespace ros2 {
   }
 
   bool CarlaDVSCameraPublisher::InitImage(const TopicConfig& config) {
-    _impl->_dds_image = CreateDDSPublisher("sensor_msgs_msg_Image");
+    _impl->_dds_image = CreateDDSPublisher("sensor_msgs::msg::Image");
     if (!_impl->_dds_image) return false;
 
     const std::string publisher_type {"/image"};
@@ -73,7 +73,7 @@ namespace ros2 {
   }
 
   bool CarlaDVSCameraPublisher::InitInfo(const TopicConfig& config) {
-    _impl->_dds_info = CreateDDSPublisher("sensor_msgs_msg_CameraInfo");
+    _impl->_dds_info = CreateDDSPublisher("sensor_msgs::msg::CameraInfo");
     if (!_impl->_dds_info) return false;
 
     const std::string publisher_type {"/camera_info"};
@@ -95,7 +95,7 @@ namespace ros2 {
   }
 
   bool CarlaDVSCameraPublisher::InitPointCloud(const TopicConfig& config) {
-    _impl->_dds_pointcloud = CreateDDSPublisher("sensor_msgs_msg_PointCloud2");
+    _impl->_dds_pointcloud = CreateDDSPublisher("sensor_msgs::msg::PointCloud2");
     if (!_impl->_dds_pointcloud) return false;
 
     const std::string publisher_type {"/point_cloud"};

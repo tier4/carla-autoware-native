@@ -16,7 +16,7 @@ namespace ros2 {
   };
 
   bool CarlaIMUPublisher::Init(const TopicConfig& config) {
-    _impl->_dds = CreateDDSPublisher("sensor_msgs_msg_Imu");
+    _impl->_dds = CreateDDSPublisher("sensor_msgs::msg::Imu");
     if (!_impl->_dds) return false;
 
     const std::string base { "rt/carla/" };

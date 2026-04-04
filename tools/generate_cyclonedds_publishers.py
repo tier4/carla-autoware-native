@@ -151,21 +151,32 @@ SKIP_METHODS = {
 # ---------------------------------------------------------------------------
 
 def apply_type_mapping(line: str) -> str:
-    """A. Replace C++ namespace types with CycloneDDS C typedef names."""
-    for cpp_type, c_type in TYPE_MAP:
-        line = line.replace(cpp_type, c_type)
+    """A. Replace C++ namespace types with CycloneDDS C typedef names.
 
-    # Fallback: catch any remaining pkg::msg::Type patterns
-    def _fallback_replace(m):
-        pkg = m.group(1)
-        typ = m.group(2)
-        # Special case: rosgraph -> rosgraph_msgs
-        if pkg == "rosgraph":
-            pkg = "rosgraph_msgs"
-        return f"{pkg}_msg_{typ}"
+    String literals (quoted text) are excluded from replacement so that
+    type-registry keys like CreateDDSPublisher("sensor_msgs::msg::Image")
+    keep their ROS2-format names.
+    """
+    # Split line into segments: outside-quotes and inside-quotes
+    # We only apply type mapping to outside-quotes segments.
+    parts = re.split(r'("(?:[^"\\]|\\.)*")', line)
+    for i, part in enumerate(parts):
+        if i % 2 == 0:  # outside quotes
+            for cpp_type, c_type in TYPE_MAP:
+                part = part.replace(cpp_type, c_type)
 
-    line = re.sub(r'(\w+)::msg::(\w+)', _fallback_replace, line)
-    return line
+            # Fallback: catch any remaining pkg::msg::Type patterns
+            def _fallback_replace(m):
+                pkg = m.group(1)
+                typ = m.group(2)
+                # Special case: rosgraph -> rosgraph_msgs
+                if pkg == "rosgraph":
+                    pkg = "rosgraph_msgs"
+                return f"{pkg}_msg_{typ}"
+
+            part = re.sub(r'(\w+)::msg::(\w+)', _fallback_replace, part)
+            parts[i] = part
+    return ''.join(parts)
 
 
 def remove_pubsubtypes_include(line: str) -> bool:

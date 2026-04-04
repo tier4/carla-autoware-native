@@ -43,7 +43,7 @@ namespace ros2 {
   }
 
   bool CarlaRGBCameraPublisher::InitImage(const TopicConfig& config) {
-    _impl->_dds_image = CreateDDSPublisher("sensor_msgs_msg_Image");
+    _impl->_dds_image = CreateDDSPublisher("sensor_msgs::msg::Image");
     if (!_impl->_dds_image) return false;
 
     const std::string base { "rt/carla/" };
@@ -64,7 +64,7 @@ namespace ros2 {
   }
 
   bool CarlaRGBCameraPublisher::InitInfo(const TopicConfig& config) {
-    _impl->_dds_info = CreateDDSPublisher("sensor_msgs_msg_CameraInfo");
+    _impl->_dds_info = CreateDDSPublisher("sensor_msgs::msg::CameraInfo");
     if (!_impl->_dds_info) return false;
 
     const std::string base { "rt/carla/" };

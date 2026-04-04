@@ -19,7 +19,7 @@ public:
 };
 
 bool CarlaPoseStampedPublisher::Init(const TopicConfig& config) {
-  _impl->_dds = CreateDDSPublisher("geometry_msgs_msg_PoseStamped");
+  _impl->_dds = CreateDDSPublisher("geometry_msgs::msg::PoseStamped");
   if (!_impl->_dds) return false;
 
   const std::string base { "rt/carla/" };
