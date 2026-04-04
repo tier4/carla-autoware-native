@@ -61,6 +61,11 @@ echo ""
 echo "Post-processing: flattening include paths..."
 sed -i 's|#include "\([a-z_]*/msg/\)\([A-Za-z0-9_]*\.h\)"|#include "\2"|g' "$OUTPUT_DIR"/*.h 2>/dev/null || true
 
+# Post-process: convert m_typename to ROS2 DDS wire format
+# idlc generates .m_typename = "pkg::msg::Type" but ROS2 expects "pkg::msg::dds_::Type_"
+echo "Post-processing: converting m_typename to ROS2 DDS wire format..."
+sed -i 's|\.m_typename = "\([^"]*\)::msg::\([^"]*\)"|.m_typename = "\1::msg::dds_::\2_"|g' "$OUTPUT_DIR"/*.c 2>/dev/null || true
+
 echo "Done. Generated types in: $OUTPUT_DIR"
 
 if [ "$FAIL_COUNT" -gt 0 ]; then
