@@ -9,7 +9,7 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_TWISTWITHCOVARIANCE_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_TWISTWITHCOVARIANCE_H
 
-#include "geometry_msgs/msg/Twist.h"
+#include "Twist.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

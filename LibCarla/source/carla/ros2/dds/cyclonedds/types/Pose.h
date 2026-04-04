@@ -9,9 +9,9 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_POSE_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_POSE_H
 
-#include "geometry_msgs/msg/Point.h"
+#include "Point.h"
 
-#include "geometry_msgs/msg/Quaternion.h"
+#include "Quaternion.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

@@ -9,9 +9,9 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_CAMERAINFO_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_CAMERAINFO_H
 
-#include "std_msgs/msg/Header.h"
+#include "Header.h"
 
-#include "sensor_msgs/msg/RegionOfInterest.h"
+#include "RegionOfInterest.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

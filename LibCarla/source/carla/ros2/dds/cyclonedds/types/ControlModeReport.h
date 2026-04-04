@@ -9,7 +9,7 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_CONTROLMODEREPORT_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_CONTROLMODEREPORT_H
 
-#include "builtin_interfaces/msg/Time.h"
+#include "Time.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

@@ -9,9 +9,9 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_NAVSATFIX_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_NAVSATFIX_H
 
-#include "std_msgs/msg/Header.h"
+#include "Header.h"
 
-#include "sensor_msgs/msg/NavSatStatus.h"
+#include "NavSatStatus.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 
