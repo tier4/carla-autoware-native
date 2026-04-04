@@ -1,10 +1,7 @@
-// *** AUTO-GENERATED from FastDDS source -- DO NOT EDIT without reviewing ***
-// Lines marked MANUAL_FIX need hand-editing for CycloneDDS compatibility.
-// See tools/generate_cyclonedds_publishers.py for conversion rules.
-
 #include "CarlaRadarPublisher.h"
 
 #include <string>
+#include <vector>
 
 #include "carla/sensor/data/RadarData.h"
 #include "carla/ros2/dds/DDSPublisherImpl.h"
@@ -19,6 +16,9 @@ namespace ros2 {
   struct CarlaRadarPublisherImpl {
     std::unique_ptr<DDSPublisherImpl> _dds;
     sensor_msgs_msg_PointCloud2 _radar {};
+    std::string _frame_id_store;
+    std::vector<uint8_t> _data_store;
+    std::vector<sensor_msgs_msg_PointField> _fields_store;
   };
 
   struct RadarDetectionWithPosition {
@@ -74,42 +74,43 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
     sensor_msgs_msg_PointField descriptor1;
-    descriptor1.name = "x";
+    descriptor1.name = const_cast<char*>("x");
     descriptor1.offset = 0;
     descriptor1.datatype = 7;
     descriptor1.count = 1;
     sensor_msgs_msg_PointField descriptor2;
-    descriptor2.name = "y";
+    descriptor2.name = const_cast<char*>("y");
     descriptor2.offset = 4;
     descriptor2.datatype = 7;
     descriptor2.count = 1;
     sensor_msgs_msg_PointField descriptor3;
-    descriptor3.name = "z";
+    descriptor3.name = const_cast<char*>("z");
     descriptor3.offset = 8;
     descriptor3.datatype = 7;
     descriptor3.count = 1;
     sensor_msgs_msg_PointField descriptor4;
-    descriptor4.name = "velocity";
+    descriptor4.name = const_cast<char*>("velocity");
     descriptor4.offset = 12;
     descriptor4.datatype = 7;
     descriptor4.count = 1;
     sensor_msgs_msg_PointField descriptor5;
-    descriptor5.name = "azimuth";
+    descriptor5.name = const_cast<char*>("azimuth");
     descriptor5.offset = 16;
     descriptor5.datatype = 7;
     descriptor5.count = 1;
     sensor_msgs_msg_PointField descriptor6;
-    descriptor6.name = "altitude";
+    descriptor6.name = const_cast<char*>("altitude");
     descriptor6.offset = 20;
     descriptor6.datatype = 7;
     descriptor6.count = 1;
     sensor_msgs_msg_PointField descriptor7;
-    descriptor7.name = "depth";
+    descriptor7.name = const_cast<char*>("depth");
     descriptor7.offset = 24;
     descriptor7.datatype = 7;
     descriptor7.count = 1;
@@ -119,11 +120,19 @@ namespace ros2 {
     _impl->_radar.width = elements;
     _impl->_radar.height = height;
     _impl->_radar.is_bigendian = false;
-    _impl->_radar.fields({descriptor1, descriptor2, descriptor3, descriptor4, descriptor5, descriptor6, descriptor7});  // MANUAL_FIX: sequence initializer list
+    _impl->_fields_store = {descriptor1, descriptor2, descriptor3, descriptor4, descriptor5, descriptor6, descriptor7};
+    _impl->_radar.fields._buffer = _impl->_fields_store.data();
+    _impl->_radar.fields._length = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_radar.fields._maximum = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_radar.fields._release = false;
     _impl->_radar.point_step = point_size;
     _impl->_radar.row_step = elements * point_size;
     _impl->_radar.is_dense = false;
-    _impl->_radar.data = data;
+    _impl->_data_store = std::move(data);
+    _impl->_radar.data._buffer = _impl->_data_store.data();
+    _impl->_radar.data._length = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_radar.data._maximum = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_radar.data._release = false;
   }
 
   CarlaRadarPublisher::CarlaRadarPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :

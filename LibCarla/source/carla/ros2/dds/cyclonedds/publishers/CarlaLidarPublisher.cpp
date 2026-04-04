@@ -1,7 +1,3 @@
-// *** AUTO-GENERATED from FastDDS source -- DO NOT EDIT without reviewing ***
-// Lines marked MANUAL_FIX need hand-editing for CycloneDDS compatibility.
-// See tools/generate_cyclonedds_publishers.py for conversion rules.
-
 #include "CarlaLidarPublisher.h"
 
 #include <string>
@@ -22,6 +18,9 @@ namespace ros2 {
   struct CarlaLidarPublisherImpl {
     std::unique_ptr<DDSPublisherImpl> _dds;
     sensor_msgs_msg_PointCloud2 _lidar {};
+    std::string _frame_id_store;
+    std::vector<uint8_t> _data_store;
+    std::vector<sensor_msgs_msg_PointField> _fields_store;
   };
 
   bool CarlaLidarPublisher::Init(const TopicConfig& config) {
@@ -72,27 +71,28 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
     sensor_msgs_msg_PointField descriptor1;
-    descriptor1.name = "x";
+    descriptor1.name = const_cast<char*>("x");
     descriptor1.offset = 0;
     descriptor1.datatype = 7;
     descriptor1.count = 1;
     sensor_msgs_msg_PointField descriptor2;
-    descriptor2.name = "y";
+    descriptor2.name = const_cast<char*>("y");
     descriptor2.offset = 4;
     descriptor2.datatype = 7;
     descriptor2.count = 1;
     sensor_msgs_msg_PointField descriptor3;
-    descriptor3.name = "z";
+    descriptor3.name = const_cast<char*>("z");
     descriptor3.offset = 8;
     descriptor3.datatype = 7;
     descriptor3.count = 1;
     sensor_msgs_msg_PointField descriptor4;
-    descriptor4.name = "intensity";
+    descriptor4.name = const_cast<char*>("intensity");
     descriptor4.offset = 12;
     descriptor4.datatype = 7;
     descriptor4.count = 1;
@@ -102,11 +102,19 @@ namespace ros2 {
     _impl->_lidar.width = width / 4;
     _impl->_lidar.height = height;
     _impl->_lidar.is_bigendian = false;
-    _impl->_lidar.fields({descriptor1, descriptor2, descriptor3, descriptor4});  // MANUAL_FIX: sequence initializer list
+    _impl->_fields_store = {descriptor1, descriptor2, descriptor3, descriptor4};
+    _impl->_lidar.fields._buffer = _impl->_fields_store.data();
+    _impl->_lidar.fields._length = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_lidar.fields._maximum = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_lidar.fields._release = false;
     _impl->_lidar.point_step = point_size;
     _impl->_lidar.row_step = width * sizeof(float);
     _impl->_lidar.is_dense = false; //True if there are not invalid points
-    _impl->_lidar.data = data;
+    _impl->_data_store = std::move(data);
+    _impl->_lidar.data._buffer = _impl->_data_store.data();
+    _impl->_lidar.data._length = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_lidar.data._maximum = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_lidar.data._release = false;
   }
 
   void CarlaLidarPublisher::SetDataEx(const int32_t seconds, const uint32_t nanoseconds,const size_t height, const size_t width,
@@ -117,69 +125,70 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
     uint32_t offset{0U};
 
     sensor_msgs_msg_PointField descriptor1;
-    descriptor1.name = "x";
+    descriptor1.name = const_cast<char*>("x");
     descriptor1.offset = offset;
     descriptor1.datatype = 7;
     descriptor1.count = 1;
     offset += sizeof(float);
     sensor_msgs_msg_PointField descriptor2;
-    descriptor2.name = "y";
+    descriptor2.name = const_cast<char*>("y");
     descriptor2.offset = offset;
     descriptor2.datatype = 7;
     descriptor2.count = 1;
     offset += sizeof(float);
     sensor_msgs_msg_PointField descriptor3;
-    descriptor3.name = "z";
+    descriptor3.name = const_cast<char*>("z");
     descriptor3.offset = offset;
     descriptor3.datatype = 7;
     descriptor3.count = 1;
     offset += sizeof(float);
     sensor_msgs_msg_PointField descriptor4;
-    descriptor4.name = "intensity";
+    descriptor4.name = const_cast<char*>("intensity");
     descriptor4.offset = offset;
     descriptor4.datatype = 2;
     descriptor4.count = 1;
     offset += sizeof(uint8_t);
     // Dummy data
     sensor_msgs_msg_PointField descriptor5;
-    descriptor5.name = "return_type";
+    descriptor5.name = const_cast<char*>("return_type");
     descriptor5.offset = offset;
     descriptor5.datatype = 2;
     descriptor5.count = 1;
     offset += sizeof(uint8_t);
     sensor_msgs_msg_PointField descriptor6;
-    descriptor6.name = "channel";
+    descriptor6.name = const_cast<char*>("channel");
     descriptor6.offset = offset;
     descriptor6.datatype = 4;
     descriptor6.count = 1;
     offset += sizeof(uint16_t);
     sensor_msgs_msg_PointField descriptor7;
-    descriptor7.name = "azimuth";
+    descriptor7.name = const_cast<char*>("azimuth");
     descriptor7.offset = offset;
     descriptor7.datatype = 7;
     descriptor7.count = 1;
     offset += sizeof(float);
     sensor_msgs_msg_PointField descriptor8;
-    descriptor8.name = "elevation";
+    descriptor8.name = const_cast<char*>("elevation");
     descriptor8.offset = offset;
     descriptor8.datatype = 7;
     descriptor8.count = 1;
     offset += sizeof(float);
     sensor_msgs_msg_PointField descriptor9;
-    descriptor9.name = "distance";
+    descriptor9.name = const_cast<char*>("distance");
     descriptor9.offset = offset;
     descriptor9.datatype = 7;
     descriptor9.count = 1;
     offset += sizeof(float);
     sensor_msgs_msg_PointField descriptor10;
-    descriptor10.name = "time_stamp";
+    descriptor10.name = const_cast<char*>("time_stamp");
     descriptor10.offset = offset;
     descriptor10.datatype = 6;
     descriptor10.count = 1;
@@ -192,7 +201,7 @@ namespace ros2 {
     _impl->_lidar.width = cloud_width;
     _impl->_lidar.height = height;
     _impl->_lidar.is_bigendian = false;
-    _impl->_lidar.fields({
+    _impl->_fields_store = {
       descriptor1,
       descriptor2,
       descriptor3,
@@ -203,7 +212,11 @@ namespace ros2 {
       descriptor8,
       descriptor9,
       descriptor10
-    });  // MANUAL_FIX: sequence initializer list
+    };
+    _impl->_lidar.fields._buffer = _impl->_fields_store.data();
+    _impl->_lidar.fields._length = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_lidar.fields._maximum = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_lidar.fields._release = false;
     _impl->_lidar.point_step = offset;
     _impl->_lidar.row_step = cloud_width * offset; // number of points * size of one point
     _impl->_lidar.is_dense = false; //True if there are not invalid points
@@ -259,12 +272,14 @@ namespace ros2 {
       point.time_stamp = time_stamp;
     }
 
-    std::vector<uint8_t> data_ex_raw;
     const std::size_t data_ex_raw_size = data_ex.size() * sizeof(PointEx);
-    data_ex_raw.resize(data_ex_raw_size);
-    std::memcpy(data_ex_raw.data, data_ex.data, data_ex_raw_size);
+    _impl->_data_store.resize(data_ex_raw_size);
+    std::memcpy(_impl->_data_store.data(), data_ex.data(), data_ex_raw_size);
 
-    _impl->_lidar.data = data_ex_raw;  // MANUAL_FIX: sequence data assignment
+    _impl->_lidar.data._buffer = _impl->_data_store.data();
+    _impl->_lidar.data._length = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_lidar.data._maximum = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_lidar.data._release = false;
   }
 
   CarlaLidarPublisher::CarlaLidarPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :

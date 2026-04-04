@@ -1,10 +1,7 @@
-// *** AUTO-GENERATED from FastDDS source -- DO NOT EDIT without reviewing ***
-// Lines marked MANUAL_FIX need hand-editing for CycloneDDS compatibility.
-// See tools/generate_cyclonedds_publishers.py for conversion rules.
-
 #include "CarlaTransformPublisher.h"
 
 #include <string>
+#include <vector>
 #include <cstring>
 #include <cmath>
 
@@ -22,6 +19,9 @@ namespace ros2 {
     float last_rotation[3] = {0.0f};
     geometry_msgs_msg_Vector3 vec_translation;
     geometry_msgs_msg_Quaternion vec_rotation;
+    std::string _frame_id_store;
+    std::string _child_frame_id_store;
+    std::vector<geometry_msgs_msg_TransformStamped> _transforms_store;
   };
 
   bool CarlaTransformPublisher::Init(const DomainId domain_id) {
@@ -80,19 +80,25 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _parent;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _parent;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
     geometry_msgs_msg_Transform t;
     t.rotation = _impl->vec_rotation;
     t.translation = _impl->vec_translation;
 
+    _impl->_child_frame_id_store = _frame_id;
     geometry_msgs_msg_TransformStamped ts;
     ts.header = header;
     ts.transform = t;
-    ts.child_frame_id = _frame_id;
-    _impl->_transform.transforms({ts});  // MANUAL_FIX: sequence initializer list
+    ts.child_frame_id = const_cast<char*>(_impl->_child_frame_id_store.c_str());
+    _impl->_transforms_store = {ts};
+    _impl->_transform.transforms._buffer = _impl->_transforms_store.data();
+    _impl->_transform.transforms._length = 1;
+    _impl->_transform.transforms._maximum = 1;
+    _impl->_transform.transforms._release = false;
   }
 
   CarlaTransformPublisher::CarlaTransformPublisher(const char* ros_name, const char* parent) :

@@ -1,10 +1,7 @@
-// *** AUTO-GENERATED from FastDDS source -- DO NOT EDIT without reviewing ***
-// Lines marked MANUAL_FIX need hand-editing for CycloneDDS compatibility.
-// See tools/generate_cyclonedds_publishers.py for conversion rules.
-
 #include "CarlaLineInvasionPublisher.h"
 
 #include <string>
+#include <vector>
 
 #include "carla/ros2/dds/DDSPublisherImpl.h"
 #include "CarlaLineInvasion.h"
@@ -14,11 +11,13 @@ namespace ros2 {
 
   struct CarlaLineInvasionPublisherImpl {
     std::unique_ptr<DDSPublisherImpl> _dds;
-    carla_msgs_msg_LaneInvasionEvent _event {};
+    carla_msgs_msg_CarlaLineInvasion _event {};
+    std::string _frame_id_store;
+    std::vector<int32_t> _crossed_lane_markings_store;
   };
 
   bool CarlaLineInvasionPublisher::Init(const DomainId domain_id) {
-    _impl->_dds = CreateDDSPublisher("carla_msgs_msg_LaneInvasionEvent");
+    _impl->_dds = CreateDDSPublisher("carla_msgs_msg_CarlaLineInvasion");
     if (!_impl->_dds) return false;
 
     const std::string base { "rt/carla/" };
@@ -48,12 +47,17 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
     _impl->_event.header = header;
-    _impl->_event.crossed_lane_markings({data[0], data[1], data[2]});  // MANUAL_FIX: sequence initializer list
+    _impl->_crossed_lane_markings_store = {data[0], data[1], data[2]};
+    _impl->_event.crossed_lane_markings._buffer = _impl->_crossed_lane_markings_store.data();
+    _impl->_event.crossed_lane_markings._length = static_cast<uint32_t>(_impl->_crossed_lane_markings_store.size());
+    _impl->_event.crossed_lane_markings._maximum = static_cast<uint32_t>(_impl->_crossed_lane_markings_store.size());
+    _impl->_event.crossed_lane_markings._release = false;
   }
 
   CarlaLineInvasionPublisher::CarlaLineInvasionPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
