@@ -1,0 +1,72 @@
+#include "CarlaGNSSPublisher.h"
+
+#include <string>
+
+#include "carla/ros2/dds/DDSPublisherImpl.h"
+#include "NavSatFix.h"
+
+namespace carla {
+namespace ros2 {
+
+  struct CarlaGNSSPublisherImpl {
+    std::unique_ptr<DDSPublisherImpl> _dds;
+    sensor_msgs_msg_NavSatFix _nav {};
+    std::string _frame_id_store;
+  };
+
+  bool CarlaGNSSPublisher::Init(const DomainId domain_id) {
+    _impl->_dds = CreateDDSPublisher("sensor_msgs_msg_NavSatFix");
+    if (!_impl->_dds) return false;
+
+    const std::string base { "rt/carla/" };
+    std::string topic_name = base;
+    if (!_parent.empty())
+      topic_name += _parent + "/";
+    topic_name += _name;
+    if (const auto custom_topic_name = ValidTopicName()) {
+      topic_name = custom_topic_name.value();
+    }
+
+    TopicConfig config;
+    config.domain_id = domain_id;
+    if (!_impl->_dds->Init(config, _name, topic_name, /*use_preallocated_realloc=*/false)) {
+      return false;
+    }
+    _frame_id = _name;
+    return true;
+  }
+
+  bool CarlaGNSSPublisher::Publish() {
+    return _impl->_dds->Write(&_impl->_nav);
+  }
+
+  void CarlaGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const double* data) {
+    builtin_interfaces_msg_Time time;
+    time.sec = seconds;
+    time.nanosec = nanoseconds;
+
+    _impl->_frame_id_store = _frame_id;
+    std_msgs_msg_Header header;
+    header.stamp = time;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
+
+    _impl->_nav.header = header;
+    _impl->_nav.latitude = *data++;
+    _impl->_nav.longitude = *data++;
+    _impl->_nav.altitude = *data++;
+  }
+
+  CarlaGNSSPublisher::CarlaGNSSPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
+  _impl(std::make_shared<CarlaGNSSPublisherImpl>()) {
+    _name = ros_name;
+    _parent = parent;
+    _topic_name = ros_topic_name;
+  }
+
+  CarlaGNSSPublisher::~CarlaGNSSPublisher() = default;
+  CarlaGNSSPublisher::CarlaGNSSPublisher(const CarlaGNSSPublisher&) = default;
+  CarlaGNSSPublisher& CarlaGNSSPublisher::operator=(const CarlaGNSSPublisher&) = default;
+  CarlaGNSSPublisher::CarlaGNSSPublisher(CarlaGNSSPublisher&&) = default;
+  CarlaGNSSPublisher& CarlaGNSSPublisher::operator=(CarlaGNSSPublisher&&) = default;
+}
+}

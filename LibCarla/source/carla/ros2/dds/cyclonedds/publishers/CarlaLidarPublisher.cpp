@@ -1,0 +1,298 @@
+#include "CarlaLidarPublisher.h"
+
+#include <string>
+#include <cstring>
+#include <sstream>
+#include <vector>
+#include <cmath>
+
+#include "carla/ros2/dds/DDSPublisherImpl.h"
+#include "PointCloud2.h"
+#include "PointField.h"
+#include "Header.h"
+#include "Time.h"
+
+namespace carla {
+namespace ros2 {
+
+  struct CarlaLidarPublisherImpl {
+    std::unique_ptr<DDSPublisherImpl> _dds;
+    sensor_msgs_msg_PointCloud2 _lidar {};
+    std::string _frame_id_store;
+    std::vector<uint8_t> _data_store;
+    std::vector<sensor_msgs_msg_PointField> _fields_store;
+  };
+
+  bool CarlaLidarPublisher::Init(const TopicConfig& config) {
+    _impl->_dds = CreateDDSPublisher("sensor_msgs_msg_PointCloud2");
+    if (!_impl->_dds) return false;
+
+    const std::string base { "rt/carla/" };
+    std::string topic_name = base;
+    if (!_parent.empty())
+      topic_name += _parent + "/";
+    topic_name += _name;
+    topic_name += config.suffix;
+    if (const auto custom_topic_name = ValidTopicName(config.suffix)) {
+      topic_name = custom_topic_name.value();
+    }
+
+    if (!_impl->_dds->Init(config, _name, topic_name, /*use_preallocated_realloc=*/true)) {
+      return false;
+    }
+    _frame_id = _name;
+    return true;
+  }
+
+  bool CarlaLidarPublisher::Publish() {
+    return _impl->_dds->Write(&_impl->_lidar);
+  }
+
+  void CarlaLidarPublisher::ConvertToRosFormat(const size_t height, const size_t width, float * data) {
+    float const * const end = data + height * width;
+    // Invert Y axis
+    for (auto it = data + 1; it < end; it += 4) {
+      *it *= -1.0f;
+    }
+  }
+
+  void CarlaLidarPublisher::SetData(const int32_t seconds, const uint32_t nanoseconds, const size_t height, const size_t width, float * data) {
+    ConvertToRosFormat(height, width, data);
+
+    std::vector<uint8_t> vector_data;
+    const size_t size = height * width * sizeof(float);
+    vector_data.resize(size);
+    std::memcpy(&vector_data[0], &data[0], size);
+    SetData(seconds, nanoseconds, height, width, std::move(vector_data));
+  }
+
+  void CarlaLidarPublisher::SetData(const int32_t seconds, const uint32_t nanoseconds, const size_t height, const size_t width, std::vector<uint8_t>&& data) {
+    builtin_interfaces_msg_Time time;
+    time.sec = seconds;
+    time.nanosec = nanoseconds;
+
+    _impl->_frame_id_store = _frame_id;
+    std_msgs_msg_Header header;
+    header.stamp = time;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
+
+    sensor_msgs_msg_PointField descriptor1;
+    descriptor1.name = const_cast<char*>("x");
+    descriptor1.offset = 0;
+    descriptor1.datatype = 7;
+    descriptor1.count = 1;
+    sensor_msgs_msg_PointField descriptor2;
+    descriptor2.name = const_cast<char*>("y");
+    descriptor2.offset = 4;
+    descriptor2.datatype = 7;
+    descriptor2.count = 1;
+    sensor_msgs_msg_PointField descriptor3;
+    descriptor3.name = const_cast<char*>("z");
+    descriptor3.offset = 8;
+    descriptor3.datatype = 7;
+    descriptor3.count = 1;
+    sensor_msgs_msg_PointField descriptor4;
+    descriptor4.name = const_cast<char*>("intensity");
+    descriptor4.offset = 12;
+    descriptor4.datatype = 7;
+    descriptor4.count = 1;
+
+    const size_t point_size = 4 * sizeof(float);
+    _impl->_lidar.header = header;
+    _impl->_lidar.width = width / 4;
+    _impl->_lidar.height = height;
+    _impl->_lidar.is_bigendian = false;
+    _impl->_fields_store = {descriptor1, descriptor2, descriptor3, descriptor4};
+    _impl->_lidar.fields._buffer = _impl->_fields_store.data();
+    _impl->_lidar.fields._length = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_lidar.fields._maximum = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_lidar.fields._release = false;
+    _impl->_lidar.point_step = point_size;
+    _impl->_lidar.row_step = width * sizeof(float);
+    _impl->_lidar.is_dense = false; //True if there are not invalid points
+    _impl->_data_store = std::move(data);
+    _impl->_lidar.data._buffer = _impl->_data_store.data();
+    _impl->_lidar.data._length = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_lidar.data._maximum = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_lidar.data._release = false;
+  }
+
+  void CarlaLidarPublisher::SetDataEx(const int32_t seconds, const uint32_t nanoseconds,const size_t height, const size_t width,
+                                      float * data, const size_t header_size, uint32_t * header_data, const std::vector<float> & vertical_angles) {
+    ConvertToRosFormat(height, width, data);
+
+    builtin_interfaces_msg_Time time;
+    time.sec = seconds;
+    time.nanosec = nanoseconds;
+
+    _impl->_frame_id_store = _frame_id;
+    std_msgs_msg_Header header;
+    header.stamp = time;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
+
+    uint32_t offset{0U};
+
+    sensor_msgs_msg_PointField descriptor1;
+    descriptor1.name = const_cast<char*>("x");
+    descriptor1.offset = offset;
+    descriptor1.datatype = 7;
+    descriptor1.count = 1;
+    offset += sizeof(float);
+    sensor_msgs_msg_PointField descriptor2;
+    descriptor2.name = const_cast<char*>("y");
+    descriptor2.offset = offset;
+    descriptor2.datatype = 7;
+    descriptor2.count = 1;
+    offset += sizeof(float);
+    sensor_msgs_msg_PointField descriptor3;
+    descriptor3.name = const_cast<char*>("z");
+    descriptor3.offset = offset;
+    descriptor3.datatype = 7;
+    descriptor3.count = 1;
+    offset += sizeof(float);
+    sensor_msgs_msg_PointField descriptor4;
+    descriptor4.name = const_cast<char*>("intensity");
+    descriptor4.offset = offset;
+    descriptor4.datatype = 2;
+    descriptor4.count = 1;
+    offset += sizeof(uint8_t);
+    // Dummy data
+    sensor_msgs_msg_PointField descriptor5;
+    descriptor5.name = const_cast<char*>("return_type");
+    descriptor5.offset = offset;
+    descriptor5.datatype = 2;
+    descriptor5.count = 1;
+    offset += sizeof(uint8_t);
+    sensor_msgs_msg_PointField descriptor6;
+    descriptor6.name = const_cast<char*>("channel");
+    descriptor6.offset = offset;
+    descriptor6.datatype = 4;
+    descriptor6.count = 1;
+    offset += sizeof(uint16_t);
+    sensor_msgs_msg_PointField descriptor7;
+    descriptor7.name = const_cast<char*>("azimuth");
+    descriptor7.offset = offset;
+    descriptor7.datatype = 7;
+    descriptor7.count = 1;
+    offset += sizeof(float);
+    sensor_msgs_msg_PointField descriptor8;
+    descriptor8.name = const_cast<char*>("elevation");
+    descriptor8.offset = offset;
+    descriptor8.datatype = 7;
+    descriptor8.count = 1;
+    offset += sizeof(float);
+    sensor_msgs_msg_PointField descriptor9;
+    descriptor9.name = const_cast<char*>("distance");
+    descriptor9.offset = offset;
+    descriptor9.datatype = 7;
+    descriptor9.count = 1;
+    offset += sizeof(float);
+    sensor_msgs_msg_PointField descriptor10;
+    descriptor10.name = const_cast<char*>("time_stamp");
+    descriptor10.offset = offset;
+    descriptor10.datatype = 6;
+    descriptor10.count = 1;
+    offset += sizeof(uint32_t);
+
+    /// @note Input data is 4 floats per point, input width is number of data elements (number of floats)
+    const size_t cloud_width  = width / 4;
+
+    _impl->_lidar.header = header;
+    _impl->_lidar.width = cloud_width;
+    _impl->_lidar.height = height;
+    _impl->_lidar.is_bigendian = false;
+    _impl->_fields_store = {
+      descriptor1,
+      descriptor2,
+      descriptor3,
+      descriptor4,
+      descriptor5,
+      descriptor6,
+      descriptor7,
+      descriptor8,
+      descriptor9,
+      descriptor10
+    };
+    _impl->_lidar.fields._buffer = _impl->_fields_store.data();
+    _impl->_lidar.fields._length = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_lidar.fields._maximum = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_lidar.fields._release = false;
+    _impl->_lidar.point_step = offset;
+    _impl->_lidar.row_step = cloud_width * offset; // number of points * size of one point
+    _impl->_lidar.is_dense = false; //True if there are not invalid points
+
+    struct PointEx {
+      float x{0.0f};
+      float y{0.0f};
+      float z{0.0f};
+      uint8_t intensity{0U};
+      uint8_t return_type{0U};
+      uint16_t channel{0U};
+      float azimuth{0.0f};
+      float elevation{0.0f};
+      float distance{0.0f};
+      uint32_t time_stamp{0U};
+    };
+
+    // Validate whether sizes match
+    if (sizeof(PointEx) != offset) {
+      throw std::runtime_error([] {
+        std::ostringstream oss;
+        oss << __FILE__ << ":" << __LINE__ << " LiDAR extended data sizes don't match!";
+        return oss.str();
+      }());
+    }
+
+    std::vector<PointEx> data_ex;
+    data_ex.reserve(height * width);
+    for (auto it = data; it < data + height * width; it += 4) {
+      auto & point = data_ex.emplace_back();
+      point.x = *(it);
+      point.y = *(it + 1);
+      point.z = *(it + 2);
+      point.intensity = static_cast<decltype(point.intensity)>(*(it + 3));
+      // Leave the other members empty and use structure size to easy cast
+    }
+
+    // Assign channel
+    size_t accumulated_size = 0;
+    for (size_t header_idx = 0; header_idx < header_size; ++header_idx) {
+      for (size_t point_idx = 0; point_idx < header_data[header_idx]; ++point_idx) {
+        data_ex.at(accumulated_size + point_idx).channel = header_idx;
+        data_ex.at(accumulated_size + point_idx).elevation = vertical_angles.at(header_idx);
+      }
+      accumulated_size += header_data[header_idx];
+    }
+
+    // Compute missing data from Cartesian data
+    const uint32_t time_stamp = seconds * static_cast<uint32_t>(1e+9) + nanoseconds;
+    for (auto & point : data_ex) {
+      point.distance = std::hypot(point.x, point.y, point.z);
+      point.azimuth = std::atan2(point.y, point.x);
+      point.time_stamp = time_stamp;
+    }
+
+    const std::size_t data_ex_raw_size = data_ex.size() * sizeof(PointEx);
+    _impl->_data_store.resize(data_ex_raw_size);
+    std::memcpy(_impl->_data_store.data(), data_ex.data(), data_ex_raw_size);
+
+    _impl->_lidar.data._buffer = _impl->_data_store.data();
+    _impl->_lidar.data._length = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_lidar.data._maximum = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_lidar.data._release = false;
+  }
+
+  CarlaLidarPublisher::CarlaLidarPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
+  _impl(std::make_shared<CarlaLidarPublisherImpl>()) {
+    _name = ros_name;
+    _parent = parent;
+    _topic_name = ros_topic_name;
+  }
+
+  CarlaLidarPublisher::~CarlaLidarPublisher() = default;
+  CarlaLidarPublisher::CarlaLidarPublisher(const CarlaLidarPublisher&) = default;
+  CarlaLidarPublisher& CarlaLidarPublisher::operator=(const CarlaLidarPublisher&) = default;
+  CarlaLidarPublisher::CarlaLidarPublisher(CarlaLidarPublisher&&) = default;
+  CarlaLidarPublisher& CarlaLidarPublisher::operator=(CarlaLidarPublisher&&) = default;
+}
+}
