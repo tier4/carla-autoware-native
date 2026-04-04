@@ -12,11 +12,10 @@ set (
   ${CMAKE_CURRENT_SOURCE_DIR}/../../LibCarla/source
 )
 
-file (
-  GLOB
-  LIBCARLA_ROS2_COMMON_SOURCES
-  ${LIBCARLA_SOURCE_PATH}/carla/ros2/*.cpp
-)
+# No common .cpp sources — all publisher/subscriber implementations are
+# in vendor-specific directories (dds/fastdds/ or dds/cyclonedds/).
+# ROS2.cpp is part of LibCarla, NOT this library.
+set (LIBCARLA_ROS2_COMMON_SOURCES)
 
 file (
   GLOB
