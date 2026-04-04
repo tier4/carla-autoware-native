@@ -55,6 +55,12 @@ find "$IDL_DIR" -name "*.idl" | sort | while read -r idl_file; do
 done
 
 echo ""
+
+# Post-process: flatten package-relative includes
+# idlc generates #include "std_msgs/msg/Header.h" but files are in a flat directory
+echo "Post-processing: flattening include paths..."
+sed -i 's|#include "\([a-z_]*/msg/\)\([A-Za-z0-9_]*\.h\)"|#include "\2"|g' "$OUTPUT_DIR"/*.h 2>/dev/null || true
+
 echo "Done. Generated types in: $OUTPUT_DIR"
 
 if [ "$FAIL_COUNT" -gt 0 ]; then
