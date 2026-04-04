@@ -15,6 +15,7 @@ namespace ros2 {
   struct CarlaMapSensorPublisherImpl {
     std::unique_ptr<DDSPublisherImpl> _dds;
     std_msgs_msg_String_ _string {};
+    std::string _data_store;
   };
 
   bool CarlaMapSensorPublisher::Init(const DomainId domain_id) {
@@ -44,7 +45,8 @@ namespace ros2 {
   }
 
   void CarlaMapSensorPublisher::SetData(const char* data) {
-    _impl->_string.data = data;
+    _impl->_data_store = data;
+    _impl->_string.data = const_cast<char*>(_impl->_data_store.c_str());
   }
 
   CarlaMapSensorPublisher::CarlaMapSensorPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :

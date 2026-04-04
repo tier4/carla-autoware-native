@@ -123,13 +123,11 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
 
   std_msgs_msg_Header header;
   header.stamp = time;
-  header.frame_id = _impl->_pose_with_covariance_frame_id;
-
-  std::array<double, 36> covariance{};  // TODO: Add some covariance matrix
+  header.frame_id = const_cast<char*>(_impl->_pose_with_covariance_frame_id.c_str());
 
   pose_with_covariance.header = header;
   pose_with_covariance.pose.pose = pose;
-  pose_with_covariance.pose.covariance = covariance;
+  std::memset(pose_with_covariance.pose.covariance, 0, sizeof(pose_with_covariance.pose.covariance));  // TODO: Add some covariance matrix
 
   _impl->_pose_with_covariance = std::move(pose_with_covariance);
 }
