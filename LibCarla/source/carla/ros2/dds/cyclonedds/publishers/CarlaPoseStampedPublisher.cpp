@@ -15,6 +15,7 @@ public:
 
   std::unique_ptr<DDSPublisherImpl> _dds;
   geometry_msgs_msg_PoseStamped _msg {};
+  std::string _frame_id_store;
 };
 
 bool CarlaPoseStampedPublisher::Init(const TopicConfig& config) {
@@ -47,9 +48,10 @@ void CarlaPoseStampedPublisher::SetData(int32_t seconds, uint32_t nanoseconds, c
   time.sec = seconds;
   time.nanosec = nanoseconds;
 
+  _impl->_frame_id_store = _frame_id;
   std_msgs_msg_Header header;
   header.stamp = time;
-  header.frame_id = _frame_id;
+  header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
   geometry_msgs_msg_Pose pose;
   // TODO: Verify whether this layout is correct

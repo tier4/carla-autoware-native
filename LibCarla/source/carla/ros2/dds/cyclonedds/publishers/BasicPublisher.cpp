@@ -11,6 +11,7 @@ namespace ros2 {
   struct BasicPublisherImpl {
     std::unique_ptr<DDSPublisherImpl> _dds;
     std_msgs_msg_String_ _message {};
+    std::string _data_store;
   };
 
   bool BasicPublisher::Init(const DomainId domain_id) {
@@ -33,7 +34,8 @@ namespace ros2 {
   }
 
   void BasicPublisher::SetData(const char* msg) {
-    _impl->_message.data = std::string(msg);
+    _impl->_data_store = msg;
+    _impl->_message.data = const_cast<char*>(_impl->_data_store.c_str());
   }
 
   BasicPublisher::BasicPublisher(const char* ros_name, const char* parent) :

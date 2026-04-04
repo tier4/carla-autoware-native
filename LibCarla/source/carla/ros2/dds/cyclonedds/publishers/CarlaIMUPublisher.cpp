@@ -12,6 +12,7 @@ namespace ros2 {
   struct CarlaIMUPublisherImpl {
     std::unique_ptr<DDSPublisherImpl> _dds;
     sensor_msgs_msg_Imu _imu {};
+    std::string _frame_id_store;
   };
 
   bool CarlaIMUPublisher::Init(const TopicConfig& config) {
@@ -59,9 +60,10 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
     geometry_msgs_msg_Quaternion orientation;
 

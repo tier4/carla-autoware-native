@@ -1,6 +1,7 @@
 #include "AutowareGNSSPublisher.h"
 
 #include <string>
+#include <cstring>
 #include <cmath>
 
 #include "carla/ros2/dds/DDSPublisherImpl.h"
@@ -22,6 +23,7 @@ public:
   std::unique_ptr<DDSPublisherImpl> _pose_with_covariance_dds;
   geometry_msgs_msg_PoseWithCovarianceStamped _pose_with_covariance {};
   std::string _pose_with_covariance_frame_id;
+  std::string _frame_id_store;
 };
 
 bool AutowareGNSSPublisher::Init(const TopicConfig& pose_config, const TopicConfig& pose_config_with_covariance_stamped) {
@@ -117,17 +119,16 @@ void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const
   time.sec = seconds;
   time.nanosec = nanoseconds;
 
+  _impl->_frame_id_store = _impl->_pose_with_covariance_frame_id;
   std_msgs_msg_Header header;
   header.stamp = time;
-  header.frame_id = _impl->_pose_with_covariance_frame_id;
-
-  std::array<double, 36> covariance{};  // TODO: Add some covariance matrix
+  header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
   pose_with_covariance.header = header;
   pose_with_covariance.pose.pose = pose;
-  pose_with_covariance.pose.covariance = covariance;
+  std::memset(pose_with_covariance.pose.covariance, 0, sizeof(pose_with_covariance.pose.covariance));  // TODO: Add some covariance matrix
 
-  _impl->_pose_with_covariance = std::move(pose_with_covariance);
+  _impl->_pose_with_covariance = pose_with_covariance;
 }
 
 void AutowareGNSSPublisher::SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation)
