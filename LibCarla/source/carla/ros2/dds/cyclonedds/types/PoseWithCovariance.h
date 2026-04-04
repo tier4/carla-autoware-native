@@ -9,7 +9,7 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_POSEWITHCOVARIANCE_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_POSEWITHCOVARIANCE_H
 
-#include "geometry_msgs/msg/Pose.h"
+#include "Pose.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

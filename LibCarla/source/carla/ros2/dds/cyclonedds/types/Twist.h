@@ -9,7 +9,7 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_TWIST_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_TWIST_H
 
-#include "geometry_msgs/msg/Vector3.h"
+#include "Vector3.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

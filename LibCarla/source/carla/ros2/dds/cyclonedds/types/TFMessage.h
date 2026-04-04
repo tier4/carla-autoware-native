@@ -9,7 +9,7 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_TFMESSAGE_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_TFMESSAGE_H
 
-#include "geometry_msgs/msg/TransformStamped.h"
+#include "TransformStamped.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

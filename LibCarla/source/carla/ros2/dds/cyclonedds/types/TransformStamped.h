@@ -9,9 +9,9 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_TRANSFORMSTAMPED_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_TRANSFORMSTAMPED_H
 
-#include "std_msgs/msg/Header.h"
+#include "Header.h"
 
-#include "geometry_msgs/msg/Transform.h"
+#include "Transform.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

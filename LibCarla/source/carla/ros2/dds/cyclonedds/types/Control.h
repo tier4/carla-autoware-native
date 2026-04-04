@@ -9,11 +9,11 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_CONTROL_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_CONTROL_H
 
-#include "builtin_interfaces/msg/Time.h"
+#include "Time.h"
 
-#include "autoware_control_msgs/msg/Lateral.h"
+#include "Lateral.h"
 
-#include "autoware_control_msgs/msg/Longitudinal.h"
+#include "Longitudinal.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

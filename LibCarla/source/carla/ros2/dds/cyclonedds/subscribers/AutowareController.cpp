@@ -1,5 +1,7 @@
 #include "AutowareController.h"
 
+#include <iostream>
+
 #include "Control.h"
 #include "GearCommand.h"
 #include "TurnIndicatorsCommand.h"

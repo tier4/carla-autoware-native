@@ -9,11 +9,11 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_ODOMETRY_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_ODOMETRY_H
 
-#include "std_msgs/msg/Header.h"
+#include "Header.h"
 
-#include "geometry_msgs/msg/PoseWithCovariance.h"
+#include "PoseWithCovariance.h"
 
-#include "geometry_msgs/msg/TwistWithCovariance.h"
+#include "TwistWithCovariance.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 

@@ -9,11 +9,11 @@
 #ifndef DDSC_DDS_CYCLONEDDS_TYPES_IMU_H
 #define DDSC_DDS_CYCLONEDDS_TYPES_IMU_H
 
-#include "std_msgs/msg/Header.h"
+#include "Header.h"
 
-#include "geometry_msgs/msg/Quaternion.h"
+#include "Quaternion.h"
 
-#include "geometry_msgs/msg/Vector3.h"
+#include "Vector3.h"
 
 #include "dds/ddsc/dds_public_impl.h"
 
