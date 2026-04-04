@@ -16,7 +16,7 @@ namespace ros2 {
   };
 
   bool CarlaEgoVehicleControlSubscriber::Init(const DomainId domain_id) {
-    _impl->_dds = CreateDDSSubscriber("carla_msgs_msg_CarlaEgoVehicleControl");
+    _impl->_dds = CreateDDSSubscriber("carla_msgs::msg::CarlaEgoVehicleControl");
     if (!_impl->_dds) return false;
 
     const std::string base { "rt/carla/" };

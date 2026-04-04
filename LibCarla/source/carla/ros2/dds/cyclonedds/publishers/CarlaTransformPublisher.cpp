@@ -25,7 +25,7 @@ namespace ros2 {
   };
 
   bool CarlaTransformPublisher::Init(const DomainId domain_id) {
-    _impl->_dds = CreateDDSPublisher("tf2_msgs_msg_TFMessage");
+    _impl->_dds = CreateDDSPublisher("tf2_msgs::msg::TFMessage");
     if (!_impl->_dds) return false;
 
     const std::string topic_name { "rt/tf" };

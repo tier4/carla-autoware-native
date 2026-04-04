@@ -14,7 +14,7 @@ namespace ros2 {
   };
 
   bool CarlaClockPublisher::Init(const TopicConfig& config) {
-    _impl->_dds = CreateDDSPublisher("rosgraph_msgs_msg_Clock");
+    _impl->_dds = CreateDDSPublisher("rosgraph_msgs::msg::Clock");
     if (!_impl->_dds) return false;
 
     const std::string topic_name { "rt/clock" };

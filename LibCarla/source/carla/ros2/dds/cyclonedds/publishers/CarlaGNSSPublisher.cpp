@@ -15,7 +15,7 @@ namespace ros2 {
   };
 
   bool CarlaGNSSPublisher::Init(const DomainId domain_id) {
-    _impl->_dds = CreateDDSPublisher("sensor_msgs_msg_NavSatFix");
+    _impl->_dds = CreateDDSPublisher("sensor_msgs::msg::NavSatFix");
     if (!_impl->_dds) return false;
 
     const std::string base { "rt/carla/" };

@@ -15,7 +15,7 @@ namespace ros2 {
   };
 
   bool CarlaCollisionPublisher::Init(const DomainId domain_id) {
-    _impl->_dds = CreateDDSPublisher("carla_msgs_msg_CarlaCollisionEvent");
+    _impl->_dds = CreateDDSPublisher("carla_msgs::msg::CarlaCollisionEvent");
     if (!_impl->_dds) return false;
 
     const std::string base { "rt/carla/" };

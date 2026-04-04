@@ -28,7 +28,7 @@ public:
 
 bool AutowareGNSSPublisher::Init(const TopicConfig& pose_config, const TopicConfig& pose_config_with_covariance_stamped) {
   // Init pose publisher
-  _impl->_pose_dds = CreateDDSPublisher("geometry_msgs_msg_Pose");
+  _impl->_pose_dds = CreateDDSPublisher("geometry_msgs::msg::Pose");
   if (!_impl->_pose_dds) return false;
 
   {
@@ -48,7 +48,7 @@ bool AutowareGNSSPublisher::Init(const TopicConfig& pose_config, const TopicConf
   }
 
   // Init pose with covariance publisher
-  _impl->_pose_with_covariance_dds = CreateDDSPublisher("geometry_msgs_msg_PoseWithCovarianceStamped");
+  _impl->_pose_with_covariance_dds = CreateDDSPublisher("geometry_msgs::msg::PoseWithCovarianceStamped");
   if (!_impl->_pose_with_covariance_dds) return false;
 
   {

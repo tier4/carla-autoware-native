@@ -15,7 +15,7 @@ namespace ros2 {
   };
 
   bool CarlaMapSensorPublisher::Init(const DomainId domain_id) {
-    _impl->_dds = CreateDDSPublisher("std_msgs_msg_String_");
+    _impl->_dds = CreateDDSPublisher("std_msgs::msg::String");
     if (!_impl->_dds) return false;
 
     const std::string base { "rt/carla/" };

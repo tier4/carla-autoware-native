@@ -14,7 +14,7 @@ namespace ros2 {
   };
 
   bool CarlaSpeedometerSensor::Init(const DomainId domain_id) {
-    _impl->_dds = CreateDDSPublisher("std_msgs_msg_Float32");
+    _impl->_dds = CreateDDSPublisher("std_msgs::msg::Float32");
     if (!_impl->_dds) return false;
 
     const std::string base { "rt/carla/" };

@@ -48,7 +48,7 @@ namespace ros2 {
   }
 
   bool CarlaOpticalFlowCameraPublisher::InitImage(const TopicConfig& config) {
-    _impl->_dds_image = CreateDDSPublisher("sensor_msgs_msg_Image");
+    _impl->_dds_image = CreateDDSPublisher("sensor_msgs::msg::Image");
     if (!_impl->_dds_image) return false;
 
     const std::string publisher_type {"/image"};
@@ -70,7 +70,7 @@ namespace ros2 {
   }
 
   bool CarlaOpticalFlowCameraPublisher::InitInfo(const TopicConfig& config) {
-    _impl->_dds_info = CreateDDSPublisher("sensor_msgs_msg_CameraInfo");
+    _impl->_dds_info = CreateDDSPublisher("sensor_msgs::msg::CameraInfo");
     if (!_impl->_dds_info) return false;
 
     const std::string publisher_type {"/camera_info"};
