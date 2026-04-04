@@ -1,0 +1,13 @@
+// carla_msgs/msg/CarlaLineInvasion.idl
+// Canonical IDL definition for carla_msgs::msg::CarlaLineInvasion
+
+#include "std_msgs/msg/Header.idl"
+
+module carla_msgs {
+  module msg {
+    struct CarlaLineInvasion {
+      std_msgs::msg::Header header;
+      sequence<long> crossed_lane_markings;
+    };
+  };
+};

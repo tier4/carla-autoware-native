@@ -1,0 +1,12 @@
+// tf2_msgs/msg/TFMessage.idl
+// Canonical IDL definition for tf2_msgs::msg::TFMessage
+
+#include "geometry_msgs/msg/TransformStamped.idl"
+
+module tf2_msgs {
+  module msg {
+    struct TFMessage {
+      sequence<geometry_msgs::msg::TransformStamped> transforms;
+    };
+  };
+};

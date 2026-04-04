@@ -1,0 +1,21 @@
+// sensor_msgs/msg/PointCloud2.idl
+// Canonical IDL definition for sensor_msgs::msg::PointCloud2
+
+#include "std_msgs/msg/Header.idl"
+#include "sensor_msgs/msg/PointField.idl"
+
+module sensor_msgs {
+  module msg {
+    struct PointCloud2 {
+      std_msgs::msg::Header header;
+      unsigned long height;
+      unsigned long width;
+      sequence<sensor_msgs::msg::PointField> fields;
+      boolean is_bigendian;
+      unsigned long point_step;
+      unsigned long row_step;
+      sequence<octet> data;
+      boolean is_dense;
+    };
+  };
+};

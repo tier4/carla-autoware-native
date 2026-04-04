@@ -1,0 +1,14 @@
+// geometry_msgs/msg/Pose.idl
+// Canonical IDL definition for geometry_msgs::msg::Pose
+
+#include "geometry_msgs/msg/Point.idl"
+#include "geometry_msgs/msg/Quaternion.idl"
+
+module geometry_msgs {
+  module msg {
+    struct Pose {
+      geometry_msgs::msg::Point position;
+      geometry_msgs::msg::Quaternion orientation;
+    };
+  };
+};

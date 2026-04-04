@@ -1,0 +1,18 @@
+// sensor_msgs/msg/Image.idl
+// Canonical IDL definition for sensor_msgs::msg::Image
+
+#include "std_msgs/msg/Header.idl"
+
+module sensor_msgs {
+  module msg {
+    struct Image {
+      std_msgs::msg::Header header;
+      unsigned long height;
+      unsigned long width;
+      string encoding;
+      octet is_bigendian;
+      unsigned long step;
+      sequence<octet> data;
+    };
+  };
+};

@@ -1,0 +1,16 @@
+// builtin_interfaces/msg/Time.idl
+// Canonical IDL definition for builtin_interfaces::msg::Time
+
+#ifndef __BUILTIN_INTERFACES_MSG_TIME_IDL__
+#define __BUILTIN_INTERFACES_MSG_TIME_IDL__
+
+module builtin_interfaces {
+  module msg {
+    struct Time {
+      long sec;
+      unsigned long nanosec;
+    };
+  };
+};
+
+#endif

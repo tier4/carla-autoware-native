@@ -1,0 +1,12 @@
+// geometry_msgs/msg/Point.idl
+// Canonical IDL definition for geometry_msgs::msg::Point
+
+module geometry_msgs {
+  module msg {
+    struct Point {
+      double x;
+      double y;
+      double z;
+    };
+  };
+};

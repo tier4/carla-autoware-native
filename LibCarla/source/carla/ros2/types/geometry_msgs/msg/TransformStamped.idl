@@ -1,0 +1,15 @@
+// geometry_msgs/msg/TransformStamped.idl
+// Canonical IDL definition for geometry_msgs::msg::TransformStamped
+
+#include "std_msgs/msg/Header.idl"
+#include "geometry_msgs/msg/Transform.idl"
+
+module geometry_msgs {
+  module msg {
+    struct TransformStamped {
+      std_msgs::msg::Header header;
+      string child_frame_id;
+      geometry_msgs::msg::Transform transform;
+    };
+  };
+};

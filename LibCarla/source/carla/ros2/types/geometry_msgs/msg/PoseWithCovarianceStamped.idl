@@ -1,0 +1,14 @@
+// geometry_msgs/msg/PoseWithCovarianceStamped.idl
+// Canonical IDL definition for geometry_msgs::msg::PoseWithCovarianceStamped
+
+#include "std_msgs/msg/Header.idl"
+#include "geometry_msgs/msg/PoseWithCovariance.idl"
+
+module geometry_msgs {
+  module msg {
+    struct PoseWithCovarianceStamped {
+      std_msgs::msg::Header header;
+      geometry_msgs::msg::PoseWithCovariance pose;
+    };
+  };
+};
