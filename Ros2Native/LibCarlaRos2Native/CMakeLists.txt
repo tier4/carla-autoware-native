@@ -87,6 +87,9 @@ if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
     carla-ros2-native
     SYSTEM PRIVATE
     ${LIBCARLA_SOURCE_PATH}
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/publishers
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types
     ${CMAKE_INSTALL_PREFIX}/include
   )
@@ -95,6 +98,9 @@ elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
     carla-ros2-native
     SYSTEM PRIVATE
     ${LIBCARLA_SOURCE_PATH}
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types
     ${CMAKE_INSTALL_PREFIX}/include
     ${CMAKE_INSTALL_PREFIX}/include/ddsc
