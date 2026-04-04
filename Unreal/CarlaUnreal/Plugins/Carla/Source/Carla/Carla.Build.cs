@@ -175,13 +175,28 @@ public class Carla :
       string CarlaPluginSourcePath = Path.GetFullPath(ModuleDirectory);
       string CarlaPluginBinariesLinuxPath = Path.Combine(CarlaPluginSourcePath, "..", "..", "Binaries", "Linux");
       AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libcarla-ros2-native.so"));
-      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfoonathan_memory-0.7.4.so"));
-      AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so"));
-      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so.1"));
-      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so.1.1.0"));
-      AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so"));
-      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.11"));
-      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.11.2"));
+
+      // Detect DDS vendor by checking which libraries are present
+      bool hasCycloneDDS = File.Exists(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so"));
+      bool hasFastDDS = File.Exists(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so"));
+
+      if (hasCycloneDDS)
+      {
+        AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so"));
+        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so.0"));
+        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so.0.10.5"));
+      }
+
+      if (hasFastDDS)
+      {
+        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfoonathan_memory-0.7.4.so"));
+        AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so"));
+        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so.1"));
+        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so.1.1.0"));
+        AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so"));
+        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.11"));
+        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.11.2"));
+      }
     }
   }
 }
