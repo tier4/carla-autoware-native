@@ -15,8 +15,7 @@ set (
 file (
   GLOB
   LIBCARLA_ROS2_COMMON_SOURCES
-  ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.cpp
-  ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/*.cpp
 )
 
 file (
@@ -32,6 +31,8 @@ if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
     LIBCARLA_ROS2_DDS_SOURCES
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.cpp
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/publishers/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/subscribers/*.cpp
   )
   file (
     GLOB
@@ -39,6 +40,8 @@ if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.h
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/*.hpp
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.h
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/publishers/*.h
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/publishers/*.hpp
   )
 elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
   file (
@@ -46,6 +49,8 @@ elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
     LIBCARLA_ROS2_DDS_SOURCES
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.cpp
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.c
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/subscribers/*.cpp
   )
   file (
     GLOB
@@ -53,6 +58,8 @@ elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.h
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/*.hpp
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.h
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers/*.h
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers/*.hpp
   )
 endif()
 
