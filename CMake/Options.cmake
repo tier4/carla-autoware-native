@@ -436,6 +436,25 @@ carla_string_option (
   ${CARLA_STREETMAP_VERSION}
 )
 
+# ==== DDS VENDOR SELECTION ====
+
+set (CARLA_DDS_VENDOR "FastDDS" CACHE STRING
+  "DDS vendor to use: FastDDS or CycloneDDS (default: FastDDS)")
+
+# ==== CYCLONEDDS ====
+
+carla_string_option (
+  CARLA_CYCLONEDDS_VERSION
+  "Target CycloneDDS version."
+  0.10.5
+)
+
+carla_string_option (
+  CARLA_CYCLONEDDS_TAG
+  "Target CycloneDDS git tag."
+  ${CARLA_CYCLONEDDS_VERSION}
+)
+
 # ==== FASTDDS ====
 
 carla_string_option (
