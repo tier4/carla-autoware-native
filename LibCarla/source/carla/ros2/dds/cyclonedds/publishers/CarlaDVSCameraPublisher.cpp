@@ -1,10 +1,8 @@
-// *** AUTO-GENERATED from FastDDS source -- DO NOT EDIT without reviewing ***
-// Lines marked MANUAL_FIX need hand-editing for CycloneDDS compatibility.
-// See tools/generate_cyclonedds_publishers.py for conversion rules.
-
 #include "CarlaDVSCameraPublisher.h"
 
 #include <string>
+#include <cstring>
+#include <vector>
 
 #include "carla/sensor/data/DVSEvent.h"
 
@@ -16,6 +14,7 @@
 #include "PointField.h"
 #include "Header.h"
 #include "Time.h"
+#include "CycloneCameraInfoHelper.h"
 
 namespace carla {
 namespace ros2 {
@@ -28,6 +27,13 @@ namespace ros2 {
     sensor_msgs_msg_CameraInfo _ci {};
     sensor_msgs_msg_PointCloud2 _pc {};
     bool _info_init {false};
+    std::string _frame_id_store;
+    std::string _encoding_store;
+    std::vector<uint8_t> _image_data_store;
+    std::vector<uint8_t> _pc_data_store;
+    std::vector<sensor_msgs_msg_PointField> _fields_store;
+    std::vector<double> _d_store;
+    std::string _distortion_model_store;
   };
 
   bool CarlaDVSCameraPublisher::HasBeenInitialized() const {
@@ -35,7 +41,7 @@ namespace ros2 {
   }
 
   void CarlaDVSCameraPublisher::InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify) {
-    _impl->_ci = std::move(sensor_msgs_msg_CameraInfo(height, width, fov));  // MANUAL_FIX: CameraInfo constructor
+    cyclone_helpers::InitCameraInfo(_impl->_ci, height, width, fov, _impl->_d_store, _impl->_distortion_model_store);
     SetInfoRegionOfInterest(x_offset, y_offset, height, width, do_rectify);
     _impl->_info_init = true;
   }
@@ -144,19 +150,25 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
     _impl->_image.header = header;
     _impl->_ci.header = header;
     _impl->_pc.header = header;
 
     _impl->_image.width = width;
     _impl->_image.height = height;
-    _impl->_image.encoding = "bgr8";
+    _impl->_encoding_store = "bgr8";
+    _impl->_image.encoding = const_cast<char*>(_impl->_encoding_store.c_str());
     _impl->_image.is_bigendian = 0;
     _impl->_image.step = _impl->_image.width * sizeof(uint8_t) * 3;
-    _impl->_image.data = data;
+    _impl->_image_data_store = std::move(data);
+    _impl->_image.data._buffer = _impl->_image_data_store.data();
+    _impl->_image.data._length = static_cast<uint32_t>(_impl->_image_data_store.size());
+    _impl->_image.data._maximum = static_cast<uint32_t>(_impl->_image_data_store.size());
+    _impl->_image.data._release = false;
   }
 
   void CarlaDVSCameraPublisher::SetCameraInfoData(int32_t seconds, uint32_t nanoseconds) {
@@ -164,9 +176,11 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
+    _impl->_ci.header = header;
   }
 
   void CarlaDVSCameraPublisher::SetInfoRegionOfInterest(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify) {
@@ -187,22 +201,22 @@ namespace ros2 {
     std::memcpy(&vector_data[0], &data[0], size);
 
     sensor_msgs_msg_PointField descriptor1;
-    descriptor1.name = "x";
+    descriptor1.name = const_cast<char*>("x");
     descriptor1.offset = 0;
     descriptor1.datatype = 4;
     descriptor1.count = 1;
     sensor_msgs_msg_PointField descriptor2;
-    descriptor2.name = "y";
+    descriptor2.name = const_cast<char*>("y");
     descriptor2.offset = 2;
     descriptor2.datatype = 4;
     descriptor2.count = 1;
     sensor_msgs_msg_PointField descriptor3;
-    descriptor3.name = "t";
+    descriptor3.name = const_cast<char*>("t");
     descriptor3.offset = 4;
     descriptor3.datatype = 8;
     descriptor3.count = 1;
     sensor_msgs_msg_PointField descriptor4;
-    descriptor4.name = "pol";
+    descriptor4.name = const_cast<char*>("pol");
     descriptor4.offset = 12;
     descriptor4.datatype = 1;
     descriptor4.count = 1;
@@ -211,11 +225,19 @@ namespace ros2 {
     _impl->_pc.width = width;
     _impl->_pc.height = height;
     _impl->_pc.is_bigendian = false;
-    _impl->_pc.fields({descriptor1, descriptor2, descriptor3, descriptor4});  // MANUAL_FIX: sequence initializer list
+    _impl->_fields_store = {descriptor1, descriptor2, descriptor3, descriptor4};
+    _impl->_pc.fields._buffer = _impl->_fields_store.data();
+    _impl->_pc.fields._length = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_pc.fields._maximum = static_cast<uint32_t>(_impl->_fields_store.size());
+    _impl->_pc.fields._release = false;
     _impl->_pc.point_step = point_size;
     _impl->_pc.row_step = width * point_size;
     _impl->_pc.is_dense = false;
-    _impl->_pc.data = vector_data;  // MANUAL_FIX: sequence data assignment
+    _impl->_pc_data_store = std::move(vector_data);
+    _impl->_pc.data._buffer = _impl->_pc_data_store.data();
+    _impl->_pc.data._length = static_cast<uint32_t>(_impl->_pc_data_store.size());
+    _impl->_pc.data._maximum = static_cast<uint32_t>(_impl->_pc_data_store.size());
+    _impl->_pc.data._release = false;
   }
 
   CarlaDVSCameraPublisher::CarlaDVSCameraPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :

@@ -1,10 +1,8 @@
-// *** AUTO-GENERATED from FastDDS source -- DO NOT EDIT without reviewing ***
-// Lines marked MANUAL_FIX need hand-editing for CycloneDDS compatibility.
-// See tools/generate_cyclonedds_publishers.py for conversion rules.
-
 #include "CarlaDepthCameraPublisher.h"
 
 #include <string>
+#include <cstring>
+#include <vector>
 
 #include "carla/ros2/dds/DDSPublisherImpl.h"
 #include "Image.h"
@@ -12,6 +10,7 @@
 #include "RegionOfInterest.h"
 #include "Header.h"
 #include "Time.h"
+#include "CycloneCameraInfoHelper.h"
 
 namespace carla {
 namespace ros2 {
@@ -22,6 +21,11 @@ namespace ros2 {
     sensor_msgs_msg_Image _image {};
     sensor_msgs_msg_CameraInfo _info {};
     bool _info_init {false};
+    std::string _frame_id_store;
+    std::string _encoding_store;
+    std::vector<uint8_t> _data_store;
+    std::vector<double> _d_store;
+    std::string _distortion_model_store;
   };
 
   bool CarlaDepthCameraPublisher::HasBeenInitialized() const {
@@ -29,7 +33,7 @@ namespace ros2 {
   }
 
   void CarlaDepthCameraPublisher::InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify) {
-    _impl->_info = std::move(sensor_msgs_msg_CameraInfo(height, width, fov));  // MANUAL_FIX: CameraInfo constructor
+    cyclone_helpers::InitCameraInfo(_impl->_info, height, width, fov, _impl->_d_store, _impl->_distortion_model_store);
     SetInfoRegionOfInterest(x_offset, y_offset, height, width, do_rectify);
     _impl->_info_init = true;
   }
@@ -117,17 +121,23 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
 
     _impl->_image.header = header;
     _impl->_image.width = width;
     _impl->_image.height = height;
-    _impl->_image.encoding = "bgra8";
+    _impl->_encoding_store = "bgra8";
+    _impl->_image.encoding = const_cast<char*>(_impl->_encoding_store.c_str());
     _impl->_image.is_bigendian = 0;
     _impl->_image.step = _impl->_image.width * sizeof(uint8_t) * 4;
-    _impl->_image.data = data;
+    _impl->_data_store = std::move(data);
+    _impl->_image.data._buffer = _impl->_data_store.data();
+    _impl->_image.data._length = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_image.data._maximum = static_cast<uint32_t>(_impl->_data_store.size());
+    _impl->_image.data._release = false;
   }
 
   void CarlaDepthCameraPublisher::SetCameraInfoData(int32_t seconds, uint32_t nanoseconds) {
@@ -135,9 +145,10 @@ namespace ros2 {
     time.sec = seconds;
     time.nanosec = nanoseconds;
 
+    _impl->_frame_id_store = _frame_id;
     std_msgs_msg_Header header;
     header.stamp = time;
-    header.frame_id = _frame_id;
+    header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
     _impl->_info.header = header;
   }
 
