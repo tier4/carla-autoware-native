@@ -8,7 +8,7 @@
 #include "carla/sensor/data/DVSEvent.h"
 
 #include "dds/dds.h"
-#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
+#include "carla/ros2/cyclonedds/CycloneDDSTopicHelper.h"
 #include "Image.h"
 #include "CameraInfo.h"
 #include "RegionOfInterest.h"

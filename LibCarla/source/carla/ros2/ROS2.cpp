@@ -8,6 +8,9 @@
 #include "carla/ros2/ROS2.h"
 #include "carla/geom/GeoLocation.h"
 #include "carla/geom/Vector3D.h"
+#include "carla/sensor/data/VehicleStatusEvent.h"
+#include <cstdlib>
+#include <cmath>
 #include "carla/sensor/data/DVSEvent.h"
 #include "carla/sensor/data/LidarData.h"
 #include "carla/sensor/data/SemanticLidarData.h"
@@ -711,6 +714,7 @@ void ROS2::ProcessDataFromGNSS(
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
     const carla::geom::GeoLocation &data,
+    const carla::geom::Transform &/*sensor_world_transform*/,
     void *actor) {
   log_info("Sensor GnssSensor to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "geo.", data.latitude, data.longitude, data.altitude);
   auto sensors = GetOrCreateSensor(ESensors::GnssSensor, stream_id, actor);
@@ -782,6 +786,9 @@ void ROS2::ProcessDataFromLidar(
     uint64_t sensor_type,
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
+    uint32_t /*channel_count*/,
+    float /*upper_fov_limit*/,
+    float /*lower_fov_limit*/,
     carla::sensor::data::LidarData &data,
     void *actor) {
   log_info("Sensor Lidar to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "points.", data._points.size());
@@ -875,6 +882,57 @@ void ROS2::ProcessDataFromCollisionSensor(
     publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
     publisher->Publish();
   }
+}
+
+// Stub implementations for Autoware APIs (used by CycloneDDS ROS2.cpp, not FastDDS)
+void ROS2::SetPublishTF(bool publish_tf) { _publish_tf = publish_tf; }
+
+void ROS2::AddActorRosTopicName(void *actor, std::string ros_topic_name) {
+  _actor_ros_topic_name.insert({actor, ros_topic_name});
+}
+void ROS2::RemoveActorRosTopicName(void *actor) {
+  _actor_ros_topic_name.erase(actor);
+  _publishers.erase(actor);
+  _transforms.erase(actor);
+}
+void ROS2::UpdateActorRosTopicName(void *actor, std::string ros_topic_name) {
+  auto it = _actor_ros_topic_name.find(actor);
+  if (it != _actor_ros_topic_name.end()) { it->second = ros_topic_name; }
+}
+std::string ROS2::GetActorRosTopicName(void *actor) {
+  auto it = _actor_ros_topic_name.find(actor);
+  return (it != _actor_ros_topic_name.end()) ? it->second : std::string("");
+}
+
+void ROS2::ProcessDataFromAutowareGNSS(
+    uint64_t /*sensor_type*/,
+    carla::streaming::detail::stream_id_type /*stream_id*/,
+    const carla::geom::Transform /*sensor_transform*/,
+    const carla::geom::GeoLocation &/*data*/,
+    const carla::geom::Transform &/*sensor_world_transform*/,
+    const double /*mgrs_offset_position*/[3],
+    void */*actor*/) {
+  // Autoware GNSS processing is handled by CycloneDDS ROS2.cpp
+}
+
+void ROS2::ProcessDataFromStatusSensor(
+    uint64_t /*sensor_type*/,
+    carla::streaming::detail::stream_id_type /*stream_id*/,
+    const carla::geom::Transform /*sensor_transform*/,
+    const carla::sensor::s11n::VehicleStatusData /*data*/,
+    void */*vehicle_actor*/,
+    void */*actor*/) {
+  // Vehicle status processing is handled by CycloneDDS ROS2.cpp
+}
+
+bool ROS2::ObtainDomainId() noexcept {
+  const char* env = std::getenv("ROS_DOMAIN_ID");
+  if (!env) return false;
+  char* end = nullptr;
+  long val = std::strtol(env, &end, 10);
+  if (end == env || val < 0) return false;
+  _domain_id = static_cast<uint32_t>(val);
+  return true;
 }
 
 void ROS2::Shutdown() {

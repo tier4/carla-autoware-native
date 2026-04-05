@@ -1,24 +1,23 @@
-#include "CarlaMapSensorPublisher.h"
+#include "CarlaSpeedometerSensor.h"
 
 #include <string>
 #include <iostream>
 
 #include "dds/dds.h"
-#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
-#include "String.h"
+#include "carla/ros2/cyclonedds/CycloneDDSTopicHelper.h"
+#include "Float32.h"
 
 namespace carla {
 namespace ros2 {
 
-  struct CarlaMapSensorPublisherImpl {
+  struct CarlaSpeedometerSensorImpl {
     dds_entity_t _participant { 0 };
     dds_entity_t _topic { 0 };
     dds_entity_t _writer { 0 };
-    std_msgs_msg_String_ _string {};
-    std::string _data_store;
+    std_msgs_msg_Float32 _float {};
   };
 
-  bool CarlaMapSensorPublisher::Init() {
+  bool CarlaSpeedometerSensor::Init() {
     _impl->_participant = dds_create_participant(0, nullptr, nullptr);
     if (_impl->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
@@ -32,7 +31,7 @@ namespace ros2 {
     topic_name += _name;
 
     topic_name = SanitizeTopicName(topic_name);
-    _impl->_topic = dds_create_topic(_impl->_participant, &std_msgs_msg_String__desc, topic_name.c_str(), nullptr, nullptr);
+    _impl->_topic = dds_create_topic(_impl->_participant, &std_msgs_msg_Float32_desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {
         std::cerr << "CycloneDDS: Failed to create Topic in " << type() << ": " << dds_strretcode(-_impl->_topic) << std::endl;
         dds_delete(_impl->_participant);
@@ -50,29 +49,28 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaMapSensorPublisher::Publish() {
-    return dds_write(_impl->_writer, &_impl->_string) >= 0;
+  bool CarlaSpeedometerSensor::Publish() {
+    return dds_write(_impl->_writer, &_impl->_float) >= 0;
   }
 
-  void CarlaMapSensorPublisher::SetData(const char* data) {
-    _impl->_data_store = data;
-    _impl->_string.data = const_cast<char*>(_impl->_data_store.c_str());
+  void CarlaSpeedometerSensor::SetData(float data) {
+    _impl->_float.data = data;
   }
 
-  CarlaMapSensorPublisher::CarlaMapSensorPublisher(const char* ros_name, const char* parent) :
-  _impl(std::make_shared<CarlaMapSensorPublisherImpl>()) {
+  CarlaSpeedometerSensor::CarlaSpeedometerSensor(const char* ros_name, const char* parent) :
+  _impl(std::make_shared<CarlaSpeedometerSensorImpl>()) {
     _name = ros_name;
     _parent = parent;
   }
 
-  CarlaMapSensorPublisher::~CarlaMapSensorPublisher() {
+  CarlaSpeedometerSensor::~CarlaSpeedometerSensor() {
     if (_impl && _impl->_participant > 0)
         dds_delete(_impl->_participant);
   }
 
-  CarlaMapSensorPublisher::CarlaMapSensorPublisher(const CarlaMapSensorPublisher&) = default;
-  CarlaMapSensorPublisher& CarlaMapSensorPublisher::operator=(const CarlaMapSensorPublisher&) = default;
-  CarlaMapSensorPublisher::CarlaMapSensorPublisher(CarlaMapSensorPublisher&&) = default;
-  CarlaMapSensorPublisher& CarlaMapSensorPublisher::operator=(CarlaMapSensorPublisher&&) = default;
+  CarlaSpeedometerSensor::CarlaSpeedometerSensor(const CarlaSpeedometerSensor&) = default;
+  CarlaSpeedometerSensor& CarlaSpeedometerSensor::operator=(const CarlaSpeedometerSensor&) = default;
+  CarlaSpeedometerSensor::CarlaSpeedometerSensor(CarlaSpeedometerSensor&&) = default;
+  CarlaSpeedometerSensor& CarlaSpeedometerSensor::operator=(CarlaSpeedometerSensor&&) = default;
 }
 }

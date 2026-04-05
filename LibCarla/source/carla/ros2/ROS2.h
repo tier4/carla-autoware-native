@@ -30,6 +30,10 @@ namespace carla {
       class LidarData;
       class SemanticLidarData;
       class RadarData;
+      class VehicleStatusEvent;
+    }
+    namespace s11n{
+      struct VehicleStatusData;
     }
   }
 }
@@ -41,6 +45,8 @@ namespace ros2 {
   class CarlaTransformPublisher;
   class CarlaClockPublisher;
   class CarlaEgoVehicleControlSubscriber;
+  class AutowareController;
+  class AutowarePublisher;
   class BasicSubscriber;
   class BasicPublisher;
 
@@ -56,12 +62,27 @@ class ROS2
     return _instance;
   }
 
+  // utility
+  static std::pair<int32_t, uint32_t> Carla2RosTime(double timestamp) {
+    double integral;
+    const double fractional = modf(timestamp, &integral);
+    const double multiplier = 1000000000.0;
+    const auto seconds = static_cast<int32_t>(integral);
+    const auto nanoseconds = static_cast<uint32_t>(fractional * multiplier);
+
+    return std::make_pair(seconds, nanoseconds);
+  }
+
   // general
   void Enable(bool enable);
   void Shutdown();
   bool IsEnabled() { return _enabled; }
   void SetFrame(uint64_t frame);
   void SetTimestamp(double timestamp);
+
+  // TF publishing control
+  void SetPublishTF(bool publish_tf);
+  bool GetPublishTF() const { return _publish_tf; }
 
   // ros_name managing
   void AddActorRosName(void *actor, std::string ros_name);
@@ -70,6 +91,12 @@ class ROS2
   void UpdateActorRosName(void *actor, std::string ros_name);
   std::string GetActorRosName(void *actor);
   std::string GetActorParentRosName(void *actor);
+
+  // ros_topic_name managing
+  void AddActorRosTopicName(void *actor, std::string ros_topic_name);
+  void RemoveActorRosTopicName(void *actor);
+  void UpdateActorRosTopicName(void *actor, std::string ros_name);
+  std::string GetActorRosTopicName(void *actor);
 
   // callbacks
   void AddActorCallback(void* actor, std::string ros_name, ActorCallback callback);
@@ -95,6 +122,15 @@ class ROS2
       carla::streaming::detail::stream_id_type stream_id,
       const carla::geom::Transform sensor_transform,
       const carla::geom::GeoLocation &data,
+      const carla::geom::Transform &sensor_world_transform,
+      void *actor = nullptr);
+  void ProcessDataFromAutowareGNSS(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      const carla::geom::GeoLocation &data,
+      const carla::geom::Transform &sensor_world_transform,
+      const double mgrs_offset_position[3],
       void *actor = nullptr);
   void ProcessDataFromIMU(
       uint64_t sensor_type,
@@ -115,6 +151,9 @@ class ROS2
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
       const carla::geom::Transform sensor_transform,
+      uint32_t channel_count,
+      float upper_fov_limit,
+      float lower_fov_limit,
       carla::sensor::data::LidarData &data,
       void *actor = nullptr);
   void ProcessDataFromSemanticLidar(
@@ -137,13 +176,22 @@ class ROS2
       AActor *second_actor,
       float distance,
       void *actor = nullptr);
-void ProcessDataFromCollisionSensor(
-    uint64_t sensor_type,
-    carla::streaming::detail::stream_id_type stream_id,
-    const carla::geom::Transform sensor_transform,
-    uint32_t other_actor,
-    carla::geom::Vector3D impulse,
-    void* actor);
+  void ProcessDataFromCollisionSensor(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      uint32_t other_actor,
+      carla::geom::Vector3D impulse,
+      void* actor);
+  void ProcessDataFromStatusSensor(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      const sensor::s11n::VehicleStatusData data,
+      void *vehicle_actor,
+      void *actor);
+
+    uint32_t GetDomainId() const noexcept { return _domain_id; }
 
   private:
   std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublisher>> GetOrCreateSensor(int type, carla::streaming::detail::stream_id_type id, void* actor);
@@ -151,15 +199,22 @@ void ProcessDataFromCollisionSensor(
   // sigleton
   ROS2() {};
 
+  bool ObtainDomainId() noexcept;
+
   static std::shared_ptr<ROS2> _instance;
 
   bool _enabled { false };
+  bool _publish_tf { true };
   uint64_t _frame { 0 };
   int32_t _seconds { 0 };
   uint32_t _nanoseconds { 0 };
+  uint32_t _domain_id { 0U };
   std::unordered_map<void *, std::string> _actor_ros_name;
+  std::unordered_map<void *, std::string> _actor_ros_topic_name;
   std::unordered_map<void *, std::vector<void*> > _actor_parent_ros_name;
   std::shared_ptr<CarlaEgoVehicleControlSubscriber> _controller;
+  std::shared_ptr<AutowareController> _autoware_controller;
+  std::shared_ptr<AutowarePublisher> _autoware_publisher;
   std::shared_ptr<CarlaClockPublisher> _clock_publisher;
   std::unordered_map<void *, std::shared_ptr<CarlaPublisher>> _publishers;
   std::unordered_map<void *, std::shared_ptr<CarlaTransformPublisher>> _transforms;

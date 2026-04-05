@@ -6,14 +6,14 @@
 #
 # Usage: ./generate_cyclonedds_types.sh [output_dir]
 #
-# If output_dir is not specified, defaults to ../dds/cyclonedds/types
+# If output_dir is not specified, defaults to ../cyclonedds/types
 # relative to the script location.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IDL_DIR="${SCRIPT_DIR}/../types"
-OUTPUT_DIR="${1:-${SCRIPT_DIR}/../dds/cyclonedds/types}"
+OUTPUT_DIR="${1:-${SCRIPT_DIR}/../cyclonedds/types}"
 
 # Verify idlc is available
 if ! command -v idlc &> /dev/null; then

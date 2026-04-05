@@ -6,7 +6,7 @@
 #include <iostream>
 
 #include "dds/dds.h"
-#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
+#include "carla/ros2/cyclonedds/CycloneDDSTopicHelper.h"
 #include "PointCloud2.h"
 #include "PointField.h"
 #include "Header.h"

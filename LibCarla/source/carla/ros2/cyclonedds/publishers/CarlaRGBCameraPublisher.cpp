@@ -1,4 +1,4 @@
-#include "CarlaDepthCameraPublisher.h"
+#include "CarlaRGBCameraPublisher.h"
 
 #include <string>
 #include <cstring>
@@ -6,7 +6,7 @@
 #include <iostream>
 
 #include "dds/dds.h"
-#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
+#include "carla/ros2/cyclonedds/CycloneDDSTopicHelper.h"
 #include "Image.h"
 #include "CameraInfo.h"
 #include "RegionOfInterest.h"
@@ -17,7 +17,7 @@
 namespace carla {
 namespace ros2 {
 
-  struct CarlaDepthCameraPublisherImpl {
+  struct CarlaRGBCameraPublisherImpl {
     dds_entity_t _participant { 0 };
     dds_entity_t _topic { 0 };
     dds_entity_t _writer { 0 };
@@ -38,21 +38,21 @@ namespace ros2 {
     std::string _distortion_model_store;
   };
 
-  bool CarlaDepthCameraPublisher::HasBeenInitialized() const {
+  bool CarlaRGBCameraPublisher::HasBeenInitialized() const {
     return _impl_info->_init;
   }
 
-  void CarlaDepthCameraPublisher::InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify) {
+  void CarlaRGBCameraPublisher::InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify) {
     cyclone_helpers::InitCameraInfo(_impl_info->_info, height, width, fov, _impl_info->_d_store, _impl_info->_distortion_model_store);
     SetInfoRegionOfInterest(x_offset, y_offset, height, width, do_rectify);
     _impl_info->_init = true;
   }
 
-  bool CarlaDepthCameraPublisher::Init() {
+  bool CarlaRGBCameraPublisher::Init() {
     return InitImage() && InitInfo();
   }
 
-  bool CarlaDepthCameraPublisher::InitImage() {
+  bool CarlaRGBCameraPublisher::InitImage() {
     _impl->_participant = dds_create_participant(0, nullptr, nullptr);
     if (_impl->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
@@ -86,7 +86,7 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaDepthCameraPublisher::InitInfo() {
+  bool CarlaRGBCameraPublisher::InitInfo() {
     _impl_info->_participant = dds_create_participant(0, nullptr, nullptr);
     if (_impl_info->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
@@ -120,37 +120,27 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaDepthCameraPublisher::Publish() {
+  bool CarlaRGBCameraPublisher::Publish() {
     return PublishImage() && PublishInfo();
   }
 
-  bool CarlaDepthCameraPublisher::PublishImage() {
+  bool CarlaRGBCameraPublisher::PublishImage() {
     return dds_write(_impl->_writer, &_impl->_image) >= 0;
   }
 
-  bool CarlaDepthCameraPublisher::PublishInfo() {
+  bool CarlaRGBCameraPublisher::PublishInfo() {
     return dds_write(_impl_info->_writer, &_impl_info->_info) >= 0;
   }
 
-  void CarlaDepthCameraPublisher::SetImageData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, const uint8_t* data) {
+  void CarlaRGBCameraPublisher::SetImageData(int32_t seconds, uint32_t nanoseconds, uint32_t height, uint32_t width, const uint8_t* data) {
     std::vector<uint8_t> vector_data;
     const size_t size = height * width * 4;
     vector_data.resize(size);
     std::memcpy(&vector_data[0], &data[0], size);
-    SetData(seconds, nanoseconds, height, width, std::move(vector_data));
+    SetImageData(seconds, nanoseconds, height, width, std::move(vector_data));
   }
 
-  void CarlaDepthCameraPublisher::SetInfoRegionOfInterest(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify) {
-    sensor_msgs_msg_RegionOfInterest roi;
-    roi.x_offset = x_offset;
-    roi.y_offset = y_offset;
-    roi.height = height;
-    roi.width = width;
-    roi.do_rectify = do_rectify;
-    _impl_info->_info.roi = roi;
-  }
-
-  void CarlaDepthCameraPublisher::SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, std::vector<uint8_t>&& data) {
+  void CarlaRGBCameraPublisher::SetImageData(int32_t seconds, uint32_t nanoseconds, uint32_t height, uint32_t width, std::vector<uint8_t>&& data) {
     builtin_interfaces_msg_Time time;
     time.sec = seconds;
     time.nanosec = nanoseconds;
@@ -159,8 +149,8 @@ namespace ros2 {
     std_msgs_msg_Header header;
     header.stamp = time;
     header.frame_id = const_cast<char*>(_impl->_frame_id_store.c_str());
-
     _impl->_image.header = header;
+
     _impl->_image.width = width;
     _impl->_image.height = height;
     _impl->_encoding_store = "bgra8";
@@ -174,7 +164,17 @@ namespace ros2 {
     _impl->_image.data._release = false;
   }
 
-  void CarlaDepthCameraPublisher::SetCameraInfoData(int32_t seconds, uint32_t nanoseconds) {
+  void CarlaRGBCameraPublisher::SetInfoRegionOfInterest(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify) {
+    sensor_msgs_msg_RegionOfInterest roi;
+    roi.x_offset = x_offset;
+    roi.y_offset = y_offset;
+    roi.height = height;
+    roi.width = width;
+    roi.do_rectify = do_rectify;
+    _impl_info->_info.roi = roi;
+  }
+
+  void CarlaRGBCameraPublisher::SetCameraInfoData(int32_t seconds, uint32_t nanoseconds) {
     builtin_interfaces_msg_Time time;
     time.sec = seconds;
     time.nanosec = nanoseconds;
@@ -186,23 +186,23 @@ namespace ros2 {
     _impl_info->_info.header = header;
   }
 
-  CarlaDepthCameraPublisher::CarlaDepthCameraPublisher(const char* ros_name, const char* parent) :
-  _impl(std::make_shared<CarlaDepthCameraPublisherImpl>()),
+  CarlaRGBCameraPublisher::CarlaRGBCameraPublisher(const char* ros_name, const char* parent) :
+  _impl(std::make_shared<CarlaRGBCameraPublisherImpl>()),
   _impl_info(std::make_shared<CarlaCameraInfoPublisherImpl>()) {
     _name = ros_name;
     _parent = parent;
   }
 
-  CarlaDepthCameraPublisher::~CarlaDepthCameraPublisher() {
+  CarlaRGBCameraPublisher::~CarlaRGBCameraPublisher() {
     if (_impl && _impl->_participant > 0)
         dds_delete(_impl->_participant);
     if (_impl_info && _impl_info->_participant > 0)
         dds_delete(_impl_info->_participant);
   }
 
-  CarlaDepthCameraPublisher::CarlaDepthCameraPublisher(const CarlaDepthCameraPublisher&) = default;
-  CarlaDepthCameraPublisher& CarlaDepthCameraPublisher::operator=(const CarlaDepthCameraPublisher&) = default;
-  CarlaDepthCameraPublisher::CarlaDepthCameraPublisher(CarlaDepthCameraPublisher&&) = default;
-  CarlaDepthCameraPublisher& CarlaDepthCameraPublisher::operator=(CarlaDepthCameraPublisher&&) = default;
+  CarlaRGBCameraPublisher::CarlaRGBCameraPublisher(const CarlaRGBCameraPublisher&) = default;
+  CarlaRGBCameraPublisher& CarlaRGBCameraPublisher::operator=(const CarlaRGBCameraPublisher&) = default;
+  CarlaRGBCameraPublisher::CarlaRGBCameraPublisher(CarlaRGBCameraPublisher&&) = default;
+  CarlaRGBCameraPublisher& CarlaRGBCameraPublisher::operator=(CarlaRGBCameraPublisher&&) = default;
 }
 }

@@ -1,4 +1,4 @@
-#include "CarlaNormalsCameraPublisher.h"
+#include "CarlaISCameraPublisher.h"
 
 #include <string>
 #include <cstring>
@@ -6,7 +6,7 @@
 #include <iostream>
 
 #include "dds/dds.h"
-#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
+#include "carla/ros2/cyclonedds/CycloneDDSTopicHelper.h"
 #include "Image.h"
 #include "CameraInfo.h"
 #include "RegionOfInterest.h"
@@ -17,7 +17,7 @@
 namespace carla {
 namespace ros2 {
 
-  struct CarlaNormalsCameraPublisherImpl {
+  struct CarlaISCameraPublisherImpl {
     dds_entity_t _participant { 0 };
     dds_entity_t _topic { 0 };
     dds_entity_t _writer { 0 };
@@ -38,21 +38,21 @@ namespace ros2 {
     std::string _distortion_model_store;
   };
 
-  bool CarlaNormalsCameraPublisher::HasBeenInitialized() const {
+  bool CarlaISCameraPublisher::HasBeenInitialized() const {
     return _impl_info->_init;
   }
 
-  void CarlaNormalsCameraPublisher::InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify) {
+  void CarlaISCameraPublisher::InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify) {
     cyclone_helpers::InitCameraInfo(_impl_info->_info, height, width, fov, _impl_info->_d_store, _impl_info->_distortion_model_store);
     SetInfoRegionOfInterest(x_offset, y_offset, height, width, do_rectify);
     _impl_info->_init = true;
   }
 
-  bool CarlaNormalsCameraPublisher::Init() {
+  bool CarlaISCameraPublisher::Init() {
     return InitImage() && InitInfo();
   }
 
-  bool CarlaNormalsCameraPublisher::InitImage() {
+  bool CarlaISCameraPublisher::InitImage() {
     _impl->_participant = dds_create_participant(0, nullptr, nullptr);
     if (_impl->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
@@ -86,7 +86,7 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaNormalsCameraPublisher::InitInfo() {
+  bool CarlaISCameraPublisher::InitInfo() {
     _impl_info->_participant = dds_create_participant(0, nullptr, nullptr);
     if (_impl_info->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
@@ -120,19 +120,19 @@ namespace ros2 {
     return true;
   }
 
-  bool CarlaNormalsCameraPublisher::Publish() {
+  bool CarlaISCameraPublisher::Publish() {
     return PublishImage() && PublishInfo();
   }
 
-  bool CarlaNormalsCameraPublisher::PublishImage() {
+  bool CarlaISCameraPublisher::PublishImage() {
     return dds_write(_impl->_writer, &_impl->_image) >= 0;
   }
 
-  bool CarlaNormalsCameraPublisher::PublishInfo() {
+  bool CarlaISCameraPublisher::PublishInfo() {
     return dds_write(_impl_info->_writer, &_impl_info->_info) >= 0;
   }
 
-  void CarlaNormalsCameraPublisher::SetImageData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, const uint8_t* data) {
+  void CarlaISCameraPublisher::SetImageData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, const uint8_t* data) {
     std::vector<uint8_t> vector_data;
     const size_t size = height * width * 4;
     vector_data.resize(size);
@@ -140,7 +140,7 @@ namespace ros2 {
     SetData(seconds, nanoseconds, height, width, std::move(vector_data));
   }
 
-  void CarlaNormalsCameraPublisher::SetInfoRegionOfInterest(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify) {
+  void CarlaISCameraPublisher::SetInfoRegionOfInterest(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, bool do_rectify) {
     sensor_msgs_msg_RegionOfInterest roi;
     roi.x_offset = x_offset;
     roi.y_offset = y_offset;
@@ -150,7 +150,7 @@ namespace ros2 {
     _impl_info->_info.roi = roi;
   }
 
-  void CarlaNormalsCameraPublisher::SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, std::vector<uint8_t>&& data) {
+  void CarlaISCameraPublisher::SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, std::vector<uint8_t>&& data) {
     builtin_interfaces_msg_Time time;
     time.sec = seconds;
     time.nanosec = nanoseconds;
@@ -174,7 +174,7 @@ namespace ros2 {
     _impl->_image.data._release = false;
   }
 
-  void CarlaNormalsCameraPublisher::SetCameraInfoData(int32_t seconds, uint32_t nanoseconds) {
+  void CarlaISCameraPublisher::SetCameraInfoData(int32_t seconds, uint32_t nanoseconds) {
     builtin_interfaces_msg_Time time;
     time.sec = seconds;
     time.nanosec = nanoseconds;
@@ -186,23 +186,23 @@ namespace ros2 {
     _impl_info->_info.header = header;
   }
 
-  CarlaNormalsCameraPublisher::CarlaNormalsCameraPublisher(const char* ros_name, const char* parent) :
-  _impl(std::make_shared<CarlaNormalsCameraPublisherImpl>()),
+  CarlaISCameraPublisher::CarlaISCameraPublisher(const char* ros_name, const char* parent) :
+  _impl(std::make_shared<CarlaISCameraPublisherImpl>()),
   _impl_info(std::make_shared<CarlaCameraInfoPublisherImpl>()) {
     _name = ros_name;
     _parent = parent;
   }
 
-  CarlaNormalsCameraPublisher::~CarlaNormalsCameraPublisher() {
+  CarlaISCameraPublisher::~CarlaISCameraPublisher() {
     if (_impl && _impl->_participant > 0)
         dds_delete(_impl->_participant);
     if (_impl_info && _impl_info->_participant > 0)
         dds_delete(_impl_info->_participant);
   }
 
-  CarlaNormalsCameraPublisher::CarlaNormalsCameraPublisher(const CarlaNormalsCameraPublisher&) = default;
-  CarlaNormalsCameraPublisher& CarlaNormalsCameraPublisher::operator=(const CarlaNormalsCameraPublisher&) = default;
-  CarlaNormalsCameraPublisher::CarlaNormalsCameraPublisher(CarlaNormalsCameraPublisher&&) = default;
-  CarlaNormalsCameraPublisher& CarlaNormalsCameraPublisher::operator=(CarlaNormalsCameraPublisher&&) = default;
+  CarlaISCameraPublisher::CarlaISCameraPublisher(const CarlaISCameraPublisher&) = default;
+  CarlaISCameraPublisher& CarlaISCameraPublisher::operator=(const CarlaISCameraPublisher&) = default;
+  CarlaISCameraPublisher::CarlaISCameraPublisher(CarlaISCameraPublisher&&) = default;
+  CarlaISCameraPublisher& CarlaISCameraPublisher::operator=(CarlaISCameraPublisher&&) = default;
 }
 }

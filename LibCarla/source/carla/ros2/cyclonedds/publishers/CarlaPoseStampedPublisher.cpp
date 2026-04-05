@@ -10,7 +10,7 @@
 #include "dds/dds.h"
 #include "PoseStamped.h"
 
-#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
+#include "carla/ros2/cyclonedds/CycloneDDSTopicHelper.h"
 
 namespace carla {
 namespace ros2 {

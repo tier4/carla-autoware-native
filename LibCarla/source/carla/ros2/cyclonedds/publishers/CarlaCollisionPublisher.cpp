@@ -4,7 +4,7 @@
 #include <iostream>
 
 #include "dds/dds.h"
-#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
+#include "carla/ros2/cyclonedds/CycloneDDSTopicHelper.h"
 #include "CarlaCollisionEvent.h"
 
 namespace carla {
