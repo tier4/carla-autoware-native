@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "dds/dds.h"
+#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
 #include "CarlaEgoVehicleControl.h"
 
 namespace carla {
@@ -57,9 +58,10 @@ namespace ros2 {
     topic_name += _name;
     topic_name += publisher_type;
 
+    topic_name = SanitizeTopicName(topic_name);
     _impl->_topic = dds_create_topic(_impl->_participant, &carla_msgs_msg_CarlaEgoVehicleControl_desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {
-        std::cerr << "Failed to create Topic" << std::endl;
+        std::cerr << "CycloneDDS: Failed to create Topic in subscriber [" << topic_name << "] name=[" << _name << "] parent=[" << _parent << "]: " << dds_strretcode(-_impl->_topic) << std::endl;
         dds_delete(_impl->_participant);
         return false;
     }

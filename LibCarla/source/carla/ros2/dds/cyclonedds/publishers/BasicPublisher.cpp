@@ -27,7 +27,7 @@ namespace ros2 {
     const std::string topic_name { "rt/basic_publisher_example" };
     _impl->_topic = dds_create_topic(_impl->_participant, &std_msgs_msg_String__desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {
-        std::cerr << "Failed to create Topic" << std::endl;
+        std::cerr << "CycloneDDS: Failed to create Topic in " << type() << ": " << dds_strretcode(-_impl->_topic) << std::endl;
         dds_delete(_impl->_participant);
         return false;
     }

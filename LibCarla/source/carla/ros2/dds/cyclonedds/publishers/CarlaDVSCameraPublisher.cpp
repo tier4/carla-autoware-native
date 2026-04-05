@@ -8,6 +8,7 @@
 #include "carla/sensor/data/DVSEvent.h"
 
 #include "dds/dds.h"
+#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
 #include "Image.h"
 #include "CameraInfo.h"
 #include "RegionOfInterest.h"
@@ -79,9 +80,10 @@ namespace ros2 {
     topic_name += _name;
     topic_name += publisher_type;
 
+    topic_name = SanitizeTopicName(topic_name);
     _impl->_topic = dds_create_topic(_impl->_participant, &sensor_msgs_msg_Image_desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {
-        std::cerr << "Failed to create Topic" << std::endl;
+        std::cerr << "CycloneDDS: Failed to create Topic in " << type() << ": " << dds_strretcode(-_impl->_topic) << std::endl;
         dds_delete(_impl->_participant);
         return false;
     }
@@ -112,9 +114,10 @@ namespace ros2 {
     topic_name += _name;
     topic_name += publisher_type;
 
+    topic_name = SanitizeTopicName(topic_name);
     _info->_topic = dds_create_topic(_info->_participant, &sensor_msgs_msg_CameraInfo_desc, topic_name.c_str(), nullptr, nullptr);
     if (_info->_topic < 0) {
-        std::cerr << "Failed to create Topic" << std::endl;
+        std::cerr << "CycloneDDS: Failed to create Topic in " << type() << ": " << dds_strretcode(-_impl->_topic) << std::endl;
         dds_delete(_info->_participant);
         return false;
     }
@@ -145,9 +148,10 @@ namespace ros2 {
     topic_name += _name;
     topic_name += publisher_type;
 
+    topic_name = SanitizeTopicName(topic_name);
     _point_cloud->_topic = dds_create_topic(_point_cloud->_participant, &sensor_msgs_msg_PointCloud2_desc, topic_name.c_str(), nullptr, nullptr);
     if (_point_cloud->_topic < 0) {
-        std::cerr << "Failed to create Topic" << std::endl;
+        std::cerr << "CycloneDDS: Failed to create Topic in " << type() << ": " << dds_strretcode(-_impl->_topic) << std::endl;
         dds_delete(_point_cloud->_participant);
         return false;
     }

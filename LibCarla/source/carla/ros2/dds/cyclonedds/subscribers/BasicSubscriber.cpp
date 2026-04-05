@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "dds/dds.h"
+#include "carla/ros2/dds/cyclonedds/CycloneDDSTopicHelper.h"
 #include "String.h"
 
 namespace carla {
@@ -51,9 +52,10 @@ namespace ros2 {
     topic_name += _name;
     topic_name += subscriber_type;
 
+    topic_name = SanitizeTopicName(topic_name);
     _impl->_topic = dds_create_topic(_impl->_participant, &std_msgs_msg_String__desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {
-        std::cerr << "Failed to create Topic" << std::endl;
+        std::cerr << "CycloneDDS: Failed to create Topic in BasicSubscriber [" << topic_name << "]: " << dds_strretcode(-_impl->_topic) << std::endl;
         dds_delete(_impl->_participant);
         return false;
     }

@@ -37,7 +37,7 @@ namespace ros2 {
     const std::string topic_name { "rt/tf" };
     _impl->_topic = dds_create_topic(_impl->_participant, &tf2_msgs_msg_TFMessage_desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {
-        std::cerr << "Failed to create Topic" << std::endl;
+        std::cerr << "CycloneDDS: Failed to create Topic in " << type() << ": " << dds_strretcode(-_impl->_topic) << std::endl;
         dds_delete(_impl->_participant);
         return false;
     }
