@@ -112,11 +112,20 @@ if (BUILD_CARLA_SERVER)
   )
 
   if (ENABLE_ROS2)
-    file (
-      GLOB
-      LIBCARLA_SERVER_SOURCES_ROS2
-      ${LIBCARLA_SOURCE_PATH}/carla/ros2/*.cpp
-    )
+    if (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
+      # CycloneDDS uses its own ROS2.cpp with Autoware integration
+      set (
+        LIBCARLA_SERVER_SOURCES_ROS2
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/ROS2.cpp
+      )
+    else ()
+      # FastDDS (default) uses the ros2/ directory ROS2.cpp
+      file (
+        GLOB
+        LIBCARLA_SERVER_SOURCES_ROS2
+        ${LIBCARLA_SOURCE_PATH}/carla/ros2/*.cpp
+      )
+    endif ()
     list (
       APPEND
       LIBCARLA_SERVER_SOURCES

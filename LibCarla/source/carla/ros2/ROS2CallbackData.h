@@ -9,6 +9,8 @@
 #include <variant>
 #include <functional>
 
+#include "carla/ros2/data_types.h"
+
 namespace carla {
 namespace ros2 {
 
@@ -32,13 +34,7 @@ namespace ros2 {
     float jerk;
   };
 
-  /// Control from /control/command/control_cmd: longitudinal acceleration [m/s^2] + steering
-  struct VehicleAccelerationControl
-  {
-    float acceleration;
-    float steer;
-    float steer_speed;
-  };
+  // VehicleAccelerationControl is defined in data_types.h
 
     struct MessageControl
   {
