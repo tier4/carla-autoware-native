@@ -16,7 +16,7 @@ namespace ros2 {
 
   class CarlaClockPublisher : public CarlaPublisher {
     public:
-      CarlaClockPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaClockPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaClockPublisher();
       CarlaClockPublisher(const CarlaClockPublisher&);
       CarlaClockPublisher& operator=(const CarlaClockPublisher&);
@@ -24,6 +24,7 @@ namespace ros2 {
       CarlaClockPublisher& operator=(CarlaClockPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t sec, uint32_t nanosec);
       const char* type() const override { return "clock"; }

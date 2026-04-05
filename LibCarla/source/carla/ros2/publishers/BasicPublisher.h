@@ -14,7 +14,7 @@ namespace ros2 {
 
   class BasicPublisher : public CarlaPublisher {
     public:
-      BasicPublisher(const char* ros_name = "", const char* parent = "");
+      BasicPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~BasicPublisher();
       BasicPublisher(const BasicPublisher&);
       BasicPublisher& operator=(const BasicPublisher&);
@@ -22,6 +22,7 @@ namespace ros2 {
       BasicPublisher& operator=(BasicPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(const char* msg);
       const char* type() const override { return "basic_publisher"; }

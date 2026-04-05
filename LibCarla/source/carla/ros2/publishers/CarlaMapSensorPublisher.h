@@ -15,7 +15,7 @@ namespace ros2 {
 
   class CarlaMapSensorPublisher : public CarlaPublisher {
     public:
-      CarlaMapSensorPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaMapSensorPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaMapSensorPublisher();
       CarlaMapSensorPublisher(const CarlaMapSensorPublisher&);
       CarlaMapSensorPublisher& operator=(const CarlaMapSensorPublisher&);
@@ -23,6 +23,7 @@ namespace ros2 {
       CarlaMapSensorPublisher& operator=(CarlaMapSensorPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(const char* data);
       const char* type() const override { return "map sensor"; }

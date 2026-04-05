@@ -708,26 +708,7 @@ void ROS2::ProcessDataFromCamera(
   }
 }
 
-// ue5-dev compatible overload
-void ROS2::ProcessDataFromGNSS(
-    uint64_t sensor_type,
-    carla::streaming::detail::stream_id_type stream_id,
-    const carla::geom::Transform sensor_transform,
-    const carla::geom::GeoLocation &data,
-    void *actor) {
-  log_info("Sensor GnssSensor to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "geo.", data.latitude, data.longitude, data.altitude);
-  auto sensors = GetOrCreateSensor(ESensors::GnssSensor, stream_id, actor);
-  if (sensors.first) {
-    std::shared_ptr<CarlaGNSSPublisher> publisher = std::dynamic_pointer_cast<CarlaGNSSPublisher>(sensors.first);
-    publisher->SetData(_seconds, _nanoseconds, reinterpret_cast<const double*>(&data));
-    publisher->Publish();
-  }
-  if (sensors.second) {
-    std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
-    publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
-    publisher->Publish();
-  }
-}
+// Removed: ue5-dev compatible GNSS overload (5-arg) — only Autoware signature (6-arg) remains
 
 void ROS2::ProcessDataFromIMU(
     uint64_t sensor_type,
@@ -781,28 +762,7 @@ void ROS2::ProcessDataFromDVS(
   }
 }
 
-// ue5-dev compatible overload
-void ROS2::ProcessDataFromLidar(
-    uint64_t sensor_type,
-    carla::streaming::detail::stream_id_type stream_id,
-    const carla::geom::Transform sensor_transform,
-    carla::sensor::data::LidarData &data,
-    void *actor) {
-  log_info("Sensor Lidar to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "points.", data._points.size());
-  auto sensors = GetOrCreateSensor(ESensors::RayCastLidar, stream_id, actor);
-  if (sensors.first) {
-    std::shared_ptr<CarlaLidarPublisher> publisher = std::dynamic_pointer_cast<CarlaLidarPublisher>(sensors.first);
-    size_t width = data._points.size();
-    size_t height = 1;
-    publisher->SetData(_seconds, _nanoseconds, height, width, (float*)data._points.data());
-    publisher->Publish();
-  }
-  if (sensors.second) {
-    std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
-    publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
-    publisher->Publish();
-  }
-}
+// Removed: ue5-dev compatible Lidar overload (4-arg) — only Autoware signature (7-arg) remains
 
 void ROS2::ProcessDataFromSemanticLidar(
     uint64_t sensor_type,
@@ -881,7 +841,6 @@ void ROS2::ProcessDataFromCollisionSensor(
   }
 }
 
-// Autoware overload stubs — forward to ue5-dev versions or no-op
 void ROS2::ProcessDataFromGNSS(
     uint64_t sensor_type,
     carla::streaming::detail::stream_id_type stream_id,
@@ -889,7 +848,18 @@ void ROS2::ProcessDataFromGNSS(
     const carla::geom::GeoLocation &data,
     const carla::geom::Transform &/*sensor_world_transform*/,
     void *actor) {
-  ProcessDataFromGNSS(sensor_type, stream_id, sensor_transform, data, actor);
+  log_info("Sensor GnssSensor to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "geo.", data.latitude, data.longitude, data.altitude);
+  auto sensors = GetOrCreateSensor(ESensors::GnssSensor, stream_id, actor);
+  if (sensors.first) {
+    std::shared_ptr<CarlaGNSSPublisher> publisher = std::dynamic_pointer_cast<CarlaGNSSPublisher>(sensors.first);
+    publisher->SetData(_seconds, _nanoseconds, reinterpret_cast<const double*>(&data));
+    publisher->Publish();
+  }
+  if (sensors.second) {
+    std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
+    publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
+    publisher->Publish();
+  }
 }
 
 void ROS2::ProcessDataFromLidar(
@@ -901,7 +871,20 @@ void ROS2::ProcessDataFromLidar(
     float /*lower_fov_limit*/,
     carla::sensor::data::LidarData &data,
     void *actor) {
-  ProcessDataFromLidar(sensor_type, stream_id, sensor_transform, data, actor);
+  log_info("Sensor Lidar to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "points.", data._points.size());
+  auto sensors = GetOrCreateSensor(ESensors::RayCastLidar, stream_id, actor);
+  if (sensors.first) {
+    std::shared_ptr<CarlaLidarPublisher> publisher = std::dynamic_pointer_cast<CarlaLidarPublisher>(sensors.first);
+    size_t width = data._points.size();
+    size_t height = 1;
+    publisher->SetData(_seconds, _nanoseconds, height, width, (float*)data._points.data());
+    publisher->Publish();
+  }
+  if (sensors.second) {
+    std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
+    publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
+    publisher->Publish();
+  }
 }
 
 // Stub implementations for Autoware APIs (used by CycloneDDS ROS2.cpp, not FastDDS)

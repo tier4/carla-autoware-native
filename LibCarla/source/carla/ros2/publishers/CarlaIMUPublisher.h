@@ -15,7 +15,7 @@ namespace ros2 {
 
   class CarlaIMUPublisher : public CarlaPublisher {
     public:
-      CarlaIMUPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaIMUPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaIMUPublisher();
       CarlaIMUPublisher(const CarlaIMUPublisher&);
       CarlaIMUPublisher& operator=(const CarlaIMUPublisher&);
@@ -23,6 +23,7 @@ namespace ros2 {
       CarlaIMUPublisher& operator=(CarlaIMUPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, float* accelerometer, float* gyroscope, float compass);
       const char* type() const override { return "inertial measurement unit"; }

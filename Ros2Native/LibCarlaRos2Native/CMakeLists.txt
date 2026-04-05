@@ -16,34 +16,34 @@ if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
   file (
     GLOB
     LIBCARLA_ROS2_SOURCES
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/listeners/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/publishers/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/subscribers/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/listeners/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.cpp
   )
   file (
     GLOB
     LIBCARLA_ROS2_HEADERS
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.h
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/listeners/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.h
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/listeners/*.h
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.h
   )
 elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
   file (
     GLOB
     LIBCARLA_ROS2_SOURCES
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/cyclonedds/publishers/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/cyclonedds/subscribers/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/cyclonedds/types/*.c
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/subscribers/*.cpp
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.c
   )
   file (
     GLOB
     LIBCARLA_ROS2_HEADERS
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.h
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/cyclonedds/publishers/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/cyclonedds/types/*.h
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers/*.h
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.h
   )
 endif()
 
@@ -59,6 +59,11 @@ if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
     carla-ros2-native
     SYSTEM PRIVATE
     ${LIBCARLA_SOURCE_PATH}
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types
     ${CMAKE_INSTALL_PREFIX}/include
   )
 elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
@@ -68,8 +73,8 @@ elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
     ${LIBCARLA_SOURCE_PATH}
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers
     ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/cyclonedds/publishers
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/cyclonedds/types
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers
+    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types
     ${CMAKE_INSTALL_PREFIX}/include
     ${CMAKE_INSTALL_PREFIX}/include/ddsc
   )

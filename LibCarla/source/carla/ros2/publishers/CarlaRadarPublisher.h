@@ -16,7 +16,7 @@ namespace ros2 {
 
   class CarlaRadarPublisher : public CarlaPublisher {
     public:
-      CarlaRadarPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaRadarPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaRadarPublisher();
       CarlaRadarPublisher(const CarlaRadarPublisher&);
       CarlaRadarPublisher& operator=(const CarlaRadarPublisher&);
@@ -24,6 +24,7 @@ namespace ros2 {
       CarlaRadarPublisher& operator=(CarlaRadarPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, size_t elements, const uint8_t* data);
       const char* type() const override { return "radar"; }

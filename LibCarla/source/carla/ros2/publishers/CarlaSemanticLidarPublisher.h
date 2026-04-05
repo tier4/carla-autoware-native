@@ -16,7 +16,7 @@ namespace ros2 {
 
   class CarlaSemanticLidarPublisher : public CarlaPublisher {
     public:
-      CarlaSemanticLidarPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaSemanticLidarPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaSemanticLidarPublisher();
       CarlaSemanticLidarPublisher(const CarlaSemanticLidarPublisher&);
       CarlaSemanticLidarPublisher& operator=(const CarlaSemanticLidarPublisher&);
@@ -24,6 +24,7 @@ namespace ros2 {
       CarlaSemanticLidarPublisher& operator=(CarlaSemanticLidarPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, size_t elements, size_t height, size_t width, float* data);
       const char* type() const override { return "semantic lidar"; }

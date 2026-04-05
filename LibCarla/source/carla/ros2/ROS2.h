@@ -117,14 +117,6 @@ class ROS2
       int W, int H, float Fov,
       const carla::SharedBufferView buffer,
       void *actor = nullptr);
-  // ue5-dev compatible overload (without sensor_world_transform)
-  void ProcessDataFromGNSS(
-      uint64_t sensor_type,
-      carla::streaming::detail::stream_id_type stream_id,
-      const carla::geom::Transform sensor_transform,
-      const carla::geom::GeoLocation &data,
-      void *actor = nullptr);
-  // Autoware overload (with sensor_world_transform)
   void ProcessDataFromGNSS(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
@@ -132,6 +124,15 @@ class ROS2
       const carla::geom::GeoLocation &data,
       const carla::geom::Transform &sensor_world_transform,
       void *actor = nullptr);
+  // ue5-dev compatible overload (without sensor_world_transform)
+  void ProcessDataFromGNSS(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      const carla::geom::GeoLocation &data,
+      void *actor = nullptr) {
+    ProcessDataFromGNSS(sensor_type, stream_id, sensor_transform, data, sensor_transform, actor);
+  }
   void ProcessDataFromAutowareGNSS(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
@@ -155,14 +156,6 @@ class ROS2
       const carla::SharedBufferView buffer,
       int W, int H, float Fov,
       void *actor = nullptr);
-  // ue5-dev compatible overload (without channel_count, fov)
-  void ProcessDataFromLidar(
-      uint64_t sensor_type,
-      carla::streaming::detail::stream_id_type stream_id,
-      const carla::geom::Transform sensor_transform,
-      carla::sensor::data::LidarData &data,
-      void *actor = nullptr);
-  // Autoware overload (with channel_count, fov)
   void ProcessDataFromLidar(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
@@ -172,6 +165,15 @@ class ROS2
       float lower_fov_limit,
       carla::sensor::data::LidarData &data,
       void *actor = nullptr);
+  // ue5-dev compatible overload (without channel_count, fov)
+  void ProcessDataFromLidar(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      carla::sensor::data::LidarData &data,
+      void *actor = nullptr) {
+    ProcessDataFromLidar(sensor_type, stream_id, sensor_transform, 0, 0.f, 0.f, data, actor);
+  }
   void ProcessDataFromSemanticLidar(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,

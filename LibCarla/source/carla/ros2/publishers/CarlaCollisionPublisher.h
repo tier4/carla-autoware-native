@@ -16,7 +16,7 @@ namespace ros2 {
 
   class CarlaCollisionPublisher : public CarlaPublisher {
     public:
-      CarlaCollisionPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaCollisionPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaCollisionPublisher();
       CarlaCollisionPublisher(const CarlaCollisionPublisher&);
       CarlaCollisionPublisher& operator=(const CarlaCollisionPublisher&);
@@ -24,6 +24,7 @@ namespace ros2 {
       CarlaCollisionPublisher& operator=(CarlaCollisionPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, uint32_t actor_id, float x, float y, float z);
       const char* type() const override { return "collision"; }

@@ -17,7 +17,7 @@ namespace ros2 {
 
   class BasicSubscriber : public CarlaSubscriber {
     public:
-      BasicSubscriber(void* actor, const char* ros_name = "", const char* parent = "");
+      BasicSubscriber(void* actor, const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~BasicSubscriber();
       BasicSubscriber(const BasicSubscriber&);
       BasicSubscriber& operator=(const BasicSubscriber&);
@@ -30,6 +30,7 @@ namespace ros2 {
       void* GetActor();
 
       bool Init();
+      bool Init(const TopicConfig& config);
       // bool Read();
       const char* type() const override { return "basic_subscriber"; }
 

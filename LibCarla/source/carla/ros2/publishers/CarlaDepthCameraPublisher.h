@@ -17,7 +17,7 @@ namespace ros2 {
 
   class CarlaDepthCameraPublisher : public CarlaPublisher {
     public:
-      CarlaDepthCameraPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaDepthCameraPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaDepthCameraPublisher();
       CarlaDepthCameraPublisher(const CarlaDepthCameraPublisher&);
       CarlaDepthCameraPublisher& operator=(const CarlaDepthCameraPublisher&);
@@ -25,6 +25,7 @@ namespace ros2 {
       CarlaDepthCameraPublisher& operator=(CarlaDepthCameraPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       void InitInfoData(uint32_t x_offset, uint32_t y_offset, uint32_t height, uint32_t width, float fov, bool do_rectify);
       bool Publish();
 

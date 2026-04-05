@@ -15,7 +15,7 @@ namespace ros2 {
 
   class CarlaGNSSPublisher : public CarlaPublisher {
     public:
-      CarlaGNSSPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaGNSSPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaGNSSPublisher();
       CarlaGNSSPublisher(const CarlaGNSSPublisher&);
       CarlaGNSSPublisher& operator=(const CarlaGNSSPublisher&);
@@ -23,6 +23,7 @@ namespace ros2 {
       CarlaGNSSPublisher& operator=(CarlaGNSSPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, const double* data);
       const char* type() const override { return "gnss"; }

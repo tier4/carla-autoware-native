@@ -17,7 +17,7 @@ namespace ros2 {
 
   class CarlaEgoVehicleControlSubscriber : public CarlaSubscriber {
     public:
-      CarlaEgoVehicleControlSubscriber(void* vehicle, const char* ros_name = "", const char* parent = "");
+      CarlaEgoVehicleControlSubscriber(void* vehicle, const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaEgoVehicleControlSubscriber();
       CarlaEgoVehicleControlSubscriber(const CarlaEgoVehicleControlSubscriber&);
       CarlaEgoVehicleControlSubscriber& operator=(const CarlaEgoVehicleControlSubscriber&);
@@ -30,6 +30,7 @@ namespace ros2 {
       void* GetVehicle();
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Read();
       const char* type() const override { return "Ego vehicle control"; }
 

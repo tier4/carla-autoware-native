@@ -15,7 +15,7 @@ namespace ros2 {
 
   class CarlaLineInvasionPublisher : public CarlaPublisher {
     public:
-      CarlaLineInvasionPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaLineInvasionPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaLineInvasionPublisher();
       CarlaLineInvasionPublisher(const CarlaLineInvasionPublisher&);
       CarlaLineInvasionPublisher& operator=(const CarlaLineInvasionPublisher&);
@@ -23,6 +23,7 @@ namespace ros2 {
       CarlaLineInvasionPublisher& operator=(CarlaLineInvasionPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, const int32_t* data);
       const char* type() const override { return "line invasion"; }

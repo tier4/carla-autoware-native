@@ -16,7 +16,7 @@ namespace ros2 {
 
   class CarlaTransformPublisher : public CarlaPublisher {
     public:
-      CarlaTransformPublisher(const char* ros_name = "", const char* parent = "");
+      CarlaTransformPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
       ~CarlaTransformPublisher();
       CarlaTransformPublisher(const CarlaTransformPublisher&);
       CarlaTransformPublisher& operator=(const CarlaTransformPublisher&);
@@ -24,6 +24,7 @@ namespace ros2 {
       CarlaTransformPublisher& operator=(CarlaTransformPublisher&&);
 
       bool Init();
+      bool Init(const TopicConfig& config);
       bool Publish();
       void SetData(int32_t seconds, uint32_t nanoseconds, const float* translation, const float* rotation);
       const char* type() const override { return "transform"; }
