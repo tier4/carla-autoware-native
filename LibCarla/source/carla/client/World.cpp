@@ -387,5 +387,16 @@ namespace client {
     }
   }
 
+  void World::SetPublishTF(bool publish_tf) {
+    _episode.Lock()->SetPublishTF(publish_tf);
+  }
+
+  bool World::GetPublishTF() const {
+    return _episode.Lock()->GetPublishTF();
+  }
+
+  std::vector<geom::Transform> World::GetEgoSpawnPoints() const {
+    return _episode.Lock()->GetEgoSpawnPoints();
+  }
 } // namespace client
 } // namespace carla

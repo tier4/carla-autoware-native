@@ -18,3 +18,11 @@ CMakeSettings.json
 .clangd
 
 Help.md
+
+# Ignore Rider IDE files
+.idea/
+Unreal/CarlaUnreal/Plugins/Developer/RiderLink/
+Unreal/CarlaUnreal/Plugins/RiderLink/
+
+# Ignore perforce files
+.p4ignore

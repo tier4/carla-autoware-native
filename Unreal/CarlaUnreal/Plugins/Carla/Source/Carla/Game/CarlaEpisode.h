@@ -336,6 +336,7 @@ public:
 private:
 
   friend class ACarlaGameModeBase;
+  friend class AAutowareGameModeBase;
   friend class FCarlaEngine;
 
   void InitializeAtBeginPlay();

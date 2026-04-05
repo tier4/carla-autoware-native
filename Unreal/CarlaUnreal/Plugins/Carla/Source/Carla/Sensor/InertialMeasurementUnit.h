@@ -43,7 +43,7 @@ public:
       const FVector &Gyroscope);
 
   /// Accelerometer: measures linear acceleration in m/s^2
-  carla::geom::Vector3D ComputeAccelerometer(const float DeltaTime);
+  carla::geom::Vector3D ComputeAccelerometer(const float CurrentTime);
 
   /// Gyroscope: measures angular velocity in rad/sec
   carla::geom::Vector3D ComputeGyroscope();
@@ -86,10 +86,14 @@ private:
   FVector BiasGyro;
 
   /// Used to compute the acceleration
-  std::array<FVector, 2> PrevLocation;
+  TArray<FVector, TFixedAllocator<2>> PrevLocation{
+    FVector::OneVector * std::numeric_limits<float>::quiet_NaN(),
+    FVector::OneVector * std::numeric_limits<float>::quiet_NaN()
+  };
 
   /// Used to compute the acceleration
-  float PrevDeltaTime;
+  float PrevDeltaTime{std::numeric_limits<float>::quiet_NaN()};
+  float PrevTime{std::numeric_limits<float>::quiet_NaN()};
 
   /// Accelerometer value calculated after each PostPhysTick
   carla::geom::Vector3D AccelerometerValue;
@@ -99,5 +103,4 @@ private:
 
   /// Magnetometer value calculated after each PostPhysTick
   float CompassValue;
-	
 };

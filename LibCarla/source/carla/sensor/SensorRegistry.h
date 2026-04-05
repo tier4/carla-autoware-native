@@ -29,6 +29,7 @@
 #include "carla/sensor/s11n/SemanticLidarSerializer.h"
 #include "carla/sensor/s11n/GBufferUint8Serializer.h"
 #include "carla/sensor/s11n/GBufferFloatSerializer.h"
+#include "carla/sensor/s11n/VehicleStatusSerializer.h" // Autoware
 
 // 2. Add a forward-declaration of the sensor here.
 class ACollisionSensor;
@@ -50,6 +51,8 @@ class ARssSensor;
 class FWorldObserver;
 struct FCameraGBufferUint8;
 struct FCameraGBufferFloat;
+class AVehicleStatusSensor; // Autoware
+class AAutowareGnssSensor; // Autoware
 
 namespace carla {
 namespace sensor {
@@ -80,7 +83,9 @@ namespace sensor {
     std::pair<AInstanceSegmentationCamera *, s11n::ImageSerializer>,
     std::pair<FWorldObserver *, s11n::EpisodeStateSerializer>,
     std::pair<FCameraGBufferUint8 *, s11n::GBufferUint8Serializer>,
-    std::pair<FCameraGBufferFloat *, s11n::GBufferFloatSerializer>
+    std::pair<FCameraGBufferFloat *, s11n::GBufferFloatSerializer>,
+    std::pair<AVehicleStatusSensor *, s11n::VehicleStatusSerializer>, // Autoware
+    std::pair<AAutowareGnssSensor *, s11n::GnssSerializer> // Autoware
   >;
 
 } // namespace sensor
@@ -108,5 +113,7 @@ namespace sensor {
 #include "Carla/Sensor/SemanticSegmentationCamera.h"
 #include "Carla/Sensor/InstanceSegmentationCamera.h"
 #include "Carla/Sensor/WorldObserver.h"
+#include "Carla/Autoware/Sensors/VehicleStatusSensor.h" // Autoware
+#include "Carla/Autoware/Sensors/AutowareGnssSensor.h"
 
 #endif // LIBCARLA_SENSOR_REGISTRY_WITH_SENSOR_INCLUDES

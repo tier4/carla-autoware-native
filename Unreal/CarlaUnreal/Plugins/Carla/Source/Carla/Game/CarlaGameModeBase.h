@@ -132,12 +132,17 @@ protected:
 
   void Tick(float DeltaSeconds) override;
 
-private:
-
-  void SpawnActorFactories();
+  virtual void LoadGeoReference();
 
   void StoreSpawnPoints();
 
+  UPROPERTY()
+  UCarlaEpisode *Episode = nullptr;
+
+private:
+
+  void SpawnActorFactories();
+  
   void GenerateSpawnPoints();
 
   void ParseOpenDrive();
@@ -156,10 +161,7 @@ private:
 
   UPROPERTY()
   UCarlaSettingsDelegate *CarlaSettingsDelegate = nullptr;
-
-  UPROPERTY()
-  UCarlaEpisode *Episode = nullptr;
-
+  
   UPROPERTY()
   ACarlaRecorder *Recorder = nullptr;
 

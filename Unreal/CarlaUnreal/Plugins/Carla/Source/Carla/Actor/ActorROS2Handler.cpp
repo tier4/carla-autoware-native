@@ -10,10 +10,10 @@
 
 void ActorROS2Handler::operator()(carla::ros2::VehicleControl &Source)
 {
-  if (!_Actor) return;
+  if (!IsValid(_Actor)) return;
 
   ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
-  if (!Vehicle) return;
+  if (!IsValid(Vehicle)) return;
 
   // setup control values
   FVehicleControl NewControl;
@@ -28,15 +28,64 @@ void ActorROS2Handler::operator()(carla::ros2::VehicleControl &Source)
   Vehicle->ApplyVehicleControl(NewControl, EVehicleInputPriority::User);
 }
 
-void ActorROS2Handler::operator()(carla::ros2::MessageControl Message)
+void ActorROS2Handler::operator()(carla::ros2::VehicleAckermannControl &Source)
 {
-  if (!_Actor) return;
+  if (!IsValid(_Actor)) return;
 
   ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
-  if (!Vehicle) return;
+  if (!IsValid(Vehicle)) return;
+
+  // setup control values
+  FVehicleAckermannControl NewControl;
+  NewControl.Steer = Source.steer;
+  NewControl.SteerSpeed = Source.steer_speed;
+  NewControl.Speed = Source.speed;
+  NewControl.Acceleration = Source.acceleration;
+  NewControl.Jerk = Source.jerk;
+
+  Vehicle->ApplyVehicleAckermannControl(NewControl, EVehicleInputPriority::User);
+}
+
+void ActorROS2Handler::operator()(carla::ros2::VehicleAccelerationControl &Source)
+{
+  if (!IsValid(_Actor)) return;
+
+  ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
+  if (!IsValid(Vehicle)) return;
+
+  // /control/command/control_cmd: use acceleration [m/s^2] + steering for acceleration control
+  Vehicle->ApplyVehicleAccelerationControl(Source.acceleration, Source.steer, Source.steer_speed);
+}
+
+void ActorROS2Handler::operator()(carla::ros2::MessageControl Message)
+{
+  if (!IsValid(_Actor)) return;
+
+  ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
+  if (!IsValid(Vehicle)) return;
 
   Vehicle->PrintROS2Message(Message.message);
 
   // FString ROSMessage = Message.message;
   // UE_LOG(LogCarla, Warning, TEXT("ROS2 Message received: %s"), *ROSMessage);
+}
+
+bool ActorROS2Handler::FlattenSteeringCurve(AActor * Actor)
+{
+  if (!IsValid(Actor)) return false;
+
+  ACarlaWheeledVehicle * const Vehicle = Cast<ACarlaWheeledVehicle>(Actor);
+  if (!IsValid(Vehicle)) return false;
+
+  auto VehiclePhysicsControl = Vehicle->GetVehiclePhysicsControl();
+
+  /// @note Flatten steering curve to be always 1.0 to properly map wheel angle to steering at all speeds
+  VehiclePhysicsControl.SteeringCurve.Reset();
+  VehiclePhysicsControl.SteeringCurve.AddKey(0.f,   1.f);
+  VehiclePhysicsControl.SteeringCurve.AddKey(120.f, 1.f);
+
+  Vehicle->ApplyVehiclePhysicsControl(VehiclePhysicsControl);
+  UE_LOG(LogCarla, Log, TEXT("Resetting SteeringCurve!"));
+
+  return true;
 }
