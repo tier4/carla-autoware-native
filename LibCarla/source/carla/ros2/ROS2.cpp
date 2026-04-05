@@ -8,7 +8,6 @@
 #include "carla/ros2/ROS2.h"
 #include "carla/geom/GeoLocation.h"
 #include "carla/geom/Vector3D.h"
-#include "carla/sensor/data/VehicleStatusEvent.h"
 #include <cstdlib>
 #include <cmath>
 #include "carla/sensor/data/DVSEvent.h"
@@ -709,12 +708,12 @@ void ROS2::ProcessDataFromCamera(
   }
 }
 
+// ue5-dev compatible overload
 void ROS2::ProcessDataFromGNSS(
     uint64_t sensor_type,
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
     const carla::geom::GeoLocation &data,
-    const carla::geom::Transform &/*sensor_world_transform*/,
     void *actor) {
   log_info("Sensor GnssSensor to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "geo.", data.latitude, data.longitude, data.altitude);
   auto sensors = GetOrCreateSensor(ESensors::GnssSensor, stream_id, actor);
@@ -782,13 +781,11 @@ void ROS2::ProcessDataFromDVS(
   }
 }
 
+// ue5-dev compatible overload
 void ROS2::ProcessDataFromLidar(
     uint64_t sensor_type,
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
-    uint32_t /*channel_count*/,
-    float /*upper_fov_limit*/,
-    float /*lower_fov_limit*/,
     carla::sensor::data::LidarData &data,
     void *actor) {
   log_info("Sensor Lidar to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "points.", data._points.size());
@@ -884,6 +881,29 @@ void ROS2::ProcessDataFromCollisionSensor(
   }
 }
 
+// Autoware overload stubs — forward to ue5-dev versions or no-op
+void ROS2::ProcessDataFromGNSS(
+    uint64_t sensor_type,
+    carla::streaming::detail::stream_id_type stream_id,
+    const carla::geom::Transform sensor_transform,
+    const carla::geom::GeoLocation &data,
+    const carla::geom::Transform &/*sensor_world_transform*/,
+    void *actor) {
+  ProcessDataFromGNSS(sensor_type, stream_id, sensor_transform, data, actor);
+}
+
+void ROS2::ProcessDataFromLidar(
+    uint64_t sensor_type,
+    carla::streaming::detail::stream_id_type stream_id,
+    const carla::geom::Transform sensor_transform,
+    uint32_t /*channel_count*/,
+    float /*upper_fov_limit*/,
+    float /*lower_fov_limit*/,
+    carla::sensor::data::LidarData &data,
+    void *actor) {
+  ProcessDataFromLidar(sensor_type, stream_id, sensor_transform, data, actor);
+}
+
 // Stub implementations for Autoware APIs (used by CycloneDDS ROS2.cpp, not FastDDS)
 void ROS2::SetPublishTF(bool publish_tf) { _publish_tf = publish_tf; }
 
@@ -919,7 +939,7 @@ void ROS2::ProcessDataFromStatusSensor(
     uint64_t /*sensor_type*/,
     carla::streaming::detail::stream_id_type /*stream_id*/,
     const carla::geom::Transform /*sensor_transform*/,
-    const carla::sensor::s11n::VehicleStatusData /*data*/,
+    const carla::sensor::s11n::VehicleStatusData &/*data*/,
     void */*vehicle_actor*/,
     void */*actor*/) {
   // Vehicle status processing is handled by CycloneDDS ROS2.cpp
