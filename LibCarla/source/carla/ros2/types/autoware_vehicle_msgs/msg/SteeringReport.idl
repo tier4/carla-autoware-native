@@ -1,0 +1,13 @@
+// autoware_vehicle_msgs/msg/SteeringReport.idl
+// Canonical IDL definition for autoware_vehicle_msgs::msg::SteeringReport
+
+#include "builtin_interfaces/msg/Time.idl"
+
+module autoware_vehicle_msgs {
+  module msg {
+    struct SteeringReport {
+      builtin_interfaces::msg::Time stamp;
+      float steering_tire_angle;
+    };
+  };
+};

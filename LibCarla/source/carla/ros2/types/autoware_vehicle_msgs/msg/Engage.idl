@@ -1,0 +1,13 @@
+// autoware_vehicle_msgs/msg/Engage.idl
+// Canonical IDL definition for autoware_vehicle_msgs::msg::Engage
+
+#include "builtin_interfaces/msg/Time.idl"
+
+module autoware_vehicle_msgs {
+  module msg {
+    struct Engage {
+      builtin_interfaces::msg::Time stamp;
+      boolean engage;
+    };
+  };
+};
