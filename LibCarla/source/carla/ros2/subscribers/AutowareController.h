@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "carla/ros2/ROS2CallbackData.h"
 #include "carla/ros2/data_types.h"
 
 namespace carla {

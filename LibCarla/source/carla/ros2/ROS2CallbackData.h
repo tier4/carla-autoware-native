@@ -23,33 +23,16 @@ namespace ros2 {
     bool    manual_gear_shift;
   };
 
-  struct VehicleAckermannControl
-  {
-    float steer;
-    float steer_speed;
-    float speed;
-    float acceleration;
-    float jerk;
-  };
-
-  /// Control from /control/command/control_cmd: longitudinal acceleration [m/s^2] + steering
-  struct VehicleAccelerationControl
-  {
-    float acceleration;
-    float steer;
-    float steer_speed;
-  };
-
     struct MessageControl
   {
     const char* message;
   };
 
-  using ROS2CallbackData = std::variant<VehicleControl, VehicleAckermannControl, VehicleAccelerationControl>;
+  using ROS2CallbackData = std::variant<VehicleControl>;
   using ROS2MessageCallbackData = std::variant<MessageControl>;
 
   using ActorCallback = std::function<void(void *actor, ROS2CallbackData data)>;
   using ActorMessageCallback = std::function<void(void *actor, ROS2MessageCallbackData data)>;
-
+  
 } // namespace ros2
 } // namespace carla

@@ -38,5 +38,12 @@ struct TopicConfig {
   int32_t history_qos_depth;
 };
 
+/// Control from Autoware /control/command/control_cmd
+struct VehicleAccelerationControl {
+  float acceleration;
+  float steer;
+  float steer_speed;
+};
+
 } // namespace ros2
 } // namespace carla
