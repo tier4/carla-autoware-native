@@ -44,7 +44,7 @@ namespace ros2 {
   }
 
   bool CarlaEgoVehicleControlSubscriber::Init() {
-    _impl->_participant = dds_create_participant(0, nullptr, nullptr);
+    _impl->_participant = dds_create_participant(GetDomainId(), nullptr, nullptr);
     if (_impl->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -58,6 +58,9 @@ namespace ros2 {
     topic_name += _name;
     topic_name += publisher_type;
 
+    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+        topic_name = custom_topic_name.value();
+    }
     topic_name = SanitizeTopicName(topic_name);
     _impl->_topic = dds_create_topic(_impl->_participant, &carla_msgs_msg_CarlaEgoVehicleControl_desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {

@@ -18,7 +18,7 @@ namespace ros2 {
   };
 
   bool CarlaSpeedometerSensor::Init() {
-    _impl->_participant = dds_create_participant(0, nullptr, nullptr);
+    _impl->_participant = dds_create_participant(GetDomainId(), nullptr, nullptr);
     if (_impl->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -30,6 +30,9 @@ namespace ros2 {
       topic_name += _parent + "/";
     topic_name += _name;
 
+    if (const auto custom_topic_name = ValidTopicName()) {
+        topic_name = custom_topic_name.value();
+    }
     topic_name = SanitizeTopicName(topic_name);
     _impl->_topic = dds_create_topic(_impl->_participant, &std_msgs_msg_Float32_desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {

@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "dds/dds.h"
+#include "carla/ros2/cyclonedds/CycloneDDSTopicHelper.h"
 #include "Clock.h"
 
 namespace carla {
@@ -17,7 +18,7 @@ namespace ros2 {
   };
 
   bool CarlaClockPublisher::Init() {
-    _impl->_participant = dds_create_participant(0, nullptr, nullptr);
+    _impl->_participant = dds_create_participant(GetDomainId(), nullptr, nullptr);
     if (_impl->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;

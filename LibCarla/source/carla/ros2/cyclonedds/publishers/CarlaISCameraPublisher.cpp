@@ -53,7 +53,7 @@ namespace ros2 {
   }
 
   bool CarlaISCameraPublisher::InitImage() {
-    _impl->_participant = dds_create_participant(0, nullptr, nullptr);
+    _impl->_participant = dds_create_participant(GetDomainId(), nullptr, nullptr);
     if (_impl->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -67,6 +67,9 @@ namespace ros2 {
     topic_name += _name;
     topic_name += publisher_type;
 
+    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+        topic_name = custom_topic_name.value();
+    }
     topic_name = SanitizeTopicName(topic_name);
     _impl->_topic = dds_create_topic(_impl->_participant, &sensor_msgs_msg_Image_desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl->_topic < 0) {
@@ -87,7 +90,7 @@ namespace ros2 {
   }
 
   bool CarlaISCameraPublisher::InitInfo() {
-    _impl_info->_participant = dds_create_participant(0, nullptr, nullptr);
+    _impl_info->_participant = dds_create_participant(GetDomainId(), nullptr, nullptr);
     if (_impl_info->_participant < 0) {
         std::cerr << "Failed to create DomainParticipant" << std::endl;
         return false;
@@ -101,6 +104,9 @@ namespace ros2 {
     topic_name += _name;
     topic_name += publisher_type;
 
+    if (const auto custom_topic_name = ValidTopicName(publisher_type)) {
+        topic_name = custom_topic_name.value();
+    }
     topic_name = SanitizeTopicName(topic_name);
     _impl_info->_topic = dds_create_topic(_impl_info->_participant, &sensor_msgs_msg_CameraInfo_desc, topic_name.c_str(), nullptr, nullptr);
     if (_impl_info->_topic < 0) {
