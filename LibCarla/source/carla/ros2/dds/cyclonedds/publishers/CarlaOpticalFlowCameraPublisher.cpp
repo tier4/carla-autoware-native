@@ -77,7 +77,7 @@ namespace ros2 {
         return false;
     }
 
-    const std::string publisher_type {"/image"};
+    const std::string publisher_type { _impl->_config.suffix.empty() ? "/image" : _impl->_config.suffix };
     const std::string base { "rt/carla/" };
     std::string topic_name = base;
     if (!_parent.empty())
