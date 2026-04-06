@@ -31,10 +31,10 @@ struct TopicConfig {
   /**
    * QoS profile
    */
-  ReliabilityQoS reliability_qos;
-  DurabilityQoS durability_qos;
-  HistoryQoS history_qos;
-  int32_t history_qos_depth;
+  ReliabilityQoS reliability_qos{ReliabilityQoS::RELIABLE};
+  DurabilityQoS durability_qos{DurabilityQoS::VOLATILE};
+  HistoryQoS history_qos{HistoryQoS::KEEP_LAST};
+  int32_t history_qos_depth{1};
 };
 
 } // namespace ros2
