@@ -56,7 +56,7 @@ TEST(DDSPublisherImpl, InitWriteDestroyLifecycle) {
     config.history_qos = HistoryQoS::KEEP_LAST;
     config.history_qos_depth = 1;
 
-    ASSERT_TRUE(pub.Init(config, "test_participant", "rt/test/topic"));
+    ASSERT_TRUE(pub.Init(config, "test_participant", "rt/test/topic", false));
     ASSERT_TRUE(pub.init_called);
     ASSERT_TRUE(pub.IsConnected());
 
@@ -73,7 +73,7 @@ TEST(DDSPublisherImpl, DestructorCallsDestroy) {
     auto pub = std::make_unique<MockPublisher>();
     TopicConfig config{};
     config.domain_id = 0;
-    pub->Init(config, "test", "rt/test");
+    pub->Init(config, "test", "rt/test", false);
     // unique_ptr destruction should be safe
     pub.reset();
 }

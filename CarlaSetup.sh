@@ -6,14 +6,15 @@ interactive=0
 skip_prerequisites=0
 launch=0
 python_root=
+dds_vendor=FastDDS
 
 workspace_path="$(dirname $(realpath "${BASH_SOURCE[-1]}"))"
 echo "workspace_path=$workspace_path"
 
 options=$(\
     getopt \
-    -o "i,p,l,pyroot:" \
-    --long "interactive,skip-prerequisites,launch,python-root:" \
+    -o "i,p,l,pyroot:,dds:" \
+    --long "interactive,skip-prerequisites,launch,python-root:,dds-vendor:" \
     -n 'CarlaSetup.sh' -- "$@")
 
 eval set -- "$options"
@@ -33,6 +34,10 @@ while true; do
             ;;
         -pyroot|--python-root)
             python_root=$2
+            shift 2
+            ;;
+        -dds|--dds-vendor)
+            dds_vendor=$2
             shift 2
             ;;
         --)
@@ -103,7 +108,8 @@ else
     pushd ..
     if [ -z "$GIT_LOCAL_CREDENTIALS" ]
     then
-        UE5_URL=https://github.com/CarlaUnreal/UnrealEngine.git
+        #UE5_URL=https://github.com/CarlaUnreal/UnrealEngine.git
+        UE5_URL=git@github.com:CarlaUnreal/UnrealEngine.git
     else
         GIT_CREDENTIALS_INFO=(${GIT_LOCAL_CREDENTIALS//@/ })
         GIT_LOCAL_USER=${GIT_CREDENTIALS_INFO[0]}
@@ -130,6 +136,7 @@ cmake -G Ninja -S . -B Build \
     -DLAUNCH_ARGS="-prefernvidia" \
     -DCMAKE_BUILD_TYPE=Release \
     -DENABLE_ROS2=ON \
+    -DCARLA_DDS_VENDOR=${dds_vendor} \
     -DPython_ROOT_DIR=${python_root} \
     -DPython3_ROOT_DIR=${python_root} \
     -DCARLA_UNREAL_ENGINE_PATH=$CARLA_UNREAL_ENGINE_PATH
