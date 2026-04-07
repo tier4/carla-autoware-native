@@ -75,6 +75,12 @@ carla_option (
 )
 
 carla_option (
+  ENABLE_RGL
+  "Enable RobotecGPULidar (RGL) for GPU-accelerated LiDAR/RADAR simulation."
+  OFF
+)
+
+carla_option (
   INSTALL_LIBCARLA
   "Install LibCarla and all of its dependencies."
   ON
