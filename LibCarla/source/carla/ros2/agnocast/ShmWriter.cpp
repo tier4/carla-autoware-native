@@ -86,8 +86,10 @@ void ShmWriter::WriteData(SensorSegment& seg, int32_t sec, uint32_t nsec,
                           uint32_t width, uint32_t height,
                           const char* encoding,
                           const uint8_t* data, size_t data_size) {
+  if (!data || data_size == 0) return;
   if (data_size > seg.writer->GetBufferCapacity()) return;
   uint8_t* buf = seg.writer->GetWriteBuffer();
+  if (!buf) return;
   std::memcpy(buf, data, data_size);
   SlotMetadata* meta = seg.writer->GetWriteMetadata();
   meta->timestamp_sec = sec;

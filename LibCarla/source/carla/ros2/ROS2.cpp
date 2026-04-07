@@ -112,18 +112,15 @@ void ROS2::Enable(bool enable) {
 
 #if defined(ENABLE_AGNOCAST)
 void ROS2::EnableAgnocast(bool enable) {
-  fprintf(stderr, "[agnocast] EnableAgnocast(%d) called\n", enable); fflush(stderr);
   _agnocast_enabled = enable;
   if (enable && !_shm_writer) {
-    fprintf(stderr, "[agnocast] Creating ShmWriter...\n"); fflush(stderr);
     _shm_writer = std::make_unique<carla::ros2::agnocast::ShmWriter>();
-    fprintf(stderr, "[agnocast] ShmWriter created, Init()...\n"); fflush(stderr);
     if (!_shm_writer->Init()) {
-      fprintf(stderr, "[agnocast] ShmWriter Init FAILED\n"); fflush(stderr);
+      log_warning("Failed to initialize Agnocast ShmWriter");
       _agnocast_enabled = false;
       _shm_writer.reset();
     } else {
-      fprintf(stderr, "[agnocast] ShmWriter Init OK\n"); fflush(stderr);
+      log_info("Agnocast ShmWriter initialized");
     }
   } else if (!enable && _shm_writer) {
     _shm_writer->Shutdown();
