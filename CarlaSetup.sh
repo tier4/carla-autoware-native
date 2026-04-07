@@ -130,6 +130,7 @@ cmake -G Ninja -S . -B Build \
     -DLAUNCH_ARGS="-prefernvidia" \
     -DCMAKE_BUILD_TYPE=Release \
     -DENABLE_ROS2=ON \
+    -DBUILD_LIBCARLA_TESTS=OFF \
     -DPython_ROOT_DIR=${python_root} \
     -DPython3_ROOT_DIR=${python_root} \
     -DCARLA_UNREAL_ENGINE_PATH=$CARLA_UNREAL_ENGINE_PATH
