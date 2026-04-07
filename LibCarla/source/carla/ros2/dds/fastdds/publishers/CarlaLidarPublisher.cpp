@@ -1,6 +1,9 @@
 #include "CarlaLidarPublisher.h"
 
 #include <string>
+#include <cstring>
+#include <sstream>
+#include <cmath>
 
 #include "carla/ros2/dds/fastdds/conversions.hpp"
 
@@ -160,12 +163,17 @@ namespace ros2 {
   }
 
 
-void CarlaLidarPublisher::SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, float* data) {
-    float* it = data;
-    float* end = &data[height * width];
-    for (++it; it < end; it += 4) {
-        *it *= -1.0f;
+  void CarlaLidarPublisher::ConvertToRosFormat(const size_t height, const size_t width, float * data) {
+    float const * const end = data + height * width;
+    // Invert Y axis
+    for (auto it = data + 1; it < end; it += 4) {
+      *it *= -1.0f;
     }
+  }
+
+void CarlaLidarPublisher::SetData(int32_t seconds, uint32_t nanoseconds, size_t height, size_t width, float* data) {
+    ConvertToRosFormat(height, width, data);
+
     std::vector<uint8_t> vector_data;
     const size_t size = height * width * sizeof(float);
     vector_data.resize(size);
@@ -213,6 +221,164 @@ void CarlaLidarPublisher::SetData(int32_t seconds, uint32_t nanoseconds, size_t 
     _impl->_lidar.row_step(width * sizeof(float));
     _impl->_lidar.is_dense(false); //True if there are not invalid points
     _impl->_lidar.data(std::move(data));
+  }
+
+  void CarlaLidarPublisher::SetDataEx(const int32_t seconds, const uint32_t nanoseconds,const size_t height, const size_t width,
+                                      float * data, const size_t header_size, uint32_t * header_data, const std::vector<float> & vertical_angles) {
+    ConvertToRosFormat(height, width, data);
+
+    builtin_interfaces::msg::Time time;
+    time.sec(seconds);
+    time.nanosec(nanoseconds);
+
+    std_msgs::msg::Header header;
+    header.stamp(std::move(time));
+    header.frame_id(_frame_id);
+
+    uint32_t offset{0U};
+
+    sensor_msgs::msg::PointField descriptor1;
+    descriptor1.name("x");
+    descriptor1.offset(offset);
+    descriptor1.datatype(sensor_msgs::msg::PointField__FLOAT32);
+    descriptor1.count(1);
+    offset += sizeof(float);
+    sensor_msgs::msg::PointField descriptor2;
+    descriptor2.name("y");
+    descriptor2.offset(offset);
+    descriptor2.datatype(sensor_msgs::msg::PointField__FLOAT32);
+    descriptor2.count(1);
+    offset += sizeof(float);
+    sensor_msgs::msg::PointField descriptor3;
+    descriptor3.name("z");
+    descriptor3.offset(offset);
+    descriptor3.datatype(sensor_msgs::msg::PointField__FLOAT32);
+    descriptor3.count(1);
+    offset += sizeof(float);
+    sensor_msgs::msg::PointField descriptor4;
+    descriptor4.name("intensity");
+    descriptor4.offset(offset);
+    descriptor4.datatype(sensor_msgs::msg::PointField__UINT8);
+    descriptor4.count(1);
+    offset += sizeof(uint8_t);
+    // Dummy data
+    sensor_msgs::msg::PointField descriptor5;
+    descriptor5.name("return_type");
+    descriptor5.offset(offset);
+    descriptor5.datatype(sensor_msgs::msg::PointField__UINT8);
+    descriptor5.count(1);
+    offset += sizeof(uint8_t);
+    sensor_msgs::msg::PointField descriptor6;
+    descriptor6.name("channel");
+    descriptor6.offset(offset);
+    descriptor6.datatype(sensor_msgs::msg::PointField__UINT16);
+    descriptor6.count(1);
+    offset += sizeof(uint16_t);
+    sensor_msgs::msg::PointField descriptor7;
+    descriptor7.name("azimuth");
+    descriptor7.offset(offset);
+    descriptor7.datatype(sensor_msgs::msg::PointField__FLOAT32);
+    descriptor7.count(1);
+    offset += sizeof(float);
+    sensor_msgs::msg::PointField descriptor8;
+    descriptor8.name("elevation");
+    descriptor8.offset(offset);
+    descriptor8.datatype(sensor_msgs::msg::PointField__FLOAT32);
+    descriptor8.count(1);
+    offset += sizeof(float);
+    sensor_msgs::msg::PointField descriptor9;
+    descriptor9.name("distance");
+    descriptor9.offset(offset);
+    descriptor9.datatype(sensor_msgs::msg::PointField__FLOAT32);
+    descriptor9.count(1);
+    offset += sizeof(float);
+    sensor_msgs::msg::PointField descriptor10;
+    descriptor10.name("time_stamp");
+    descriptor10.offset(offset);
+    descriptor10.datatype(sensor_msgs::msg::PointField__UINT32);
+    descriptor10.count(1);
+    offset += sizeof(uint32_t);
+
+    /// @note Input data is 4 floats per point, input width is number of data elements (number of floats)
+    const size_t cloud_width  = width / 4;
+
+    _impl->_lidar.header(std::move(header));
+    _impl->_lidar.width(cloud_width);
+    _impl->_lidar.height(height);
+    _impl->_lidar.is_bigendian(false);
+    _impl->_lidar.fields({
+      descriptor1,
+      descriptor2,
+      descriptor3,
+      descriptor4,
+      descriptor5,
+      descriptor6,
+      descriptor7,
+      descriptor8,
+      descriptor9,
+      descriptor10
+    });
+    _impl->_lidar.point_step(offset);
+    _impl->_lidar.row_step(cloud_width * offset);  // number of points * size of one point
+    _impl->_lidar.is_dense(false); //True if there are not invalid points
+
+    struct PointEx {
+      float x{0.0f};
+      float y{0.0f};
+      float z{0.0f};
+      uint8_t intensity{0U};
+      uint8_t return_type{0U};
+      uint16_t channel{0U};
+      float azimuth{0.0f};
+      float elevation{0.0f};
+      float distance{0.0f};
+      uint32_t time_stamp{0U};
+    };
+
+    // Validate whether sizes match
+    if (sizeof(PointEx) != offset) {
+      throw std::runtime_error([] {
+        std::ostringstream oss;
+        oss << __FILE__ << ":" << __LINE__ << " LiDAR extended data sizes don't match!";
+        return oss.str();
+      }());
+    }
+
+    std::vector<PointEx> data_ex;
+    data_ex.reserve(height * width);
+    for (auto it = data; it < data + height * width; it += 4) {
+      auto & point = data_ex.emplace_back();
+      point.x = *(it);
+      point.y = *(it + 1);
+      point.z = *(it + 2);
+      point.intensity = static_cast<decltype(point.intensity)>(*(it + 3));
+      // Leave the other members empty and use structure size to easy cast
+    }
+
+    // Assign channel
+    size_t accumulated_size = 0;
+    for (size_t header_idx = 0; header_idx < header_size; ++header_idx) {
+      for (size_t point_idx = 0; point_idx < header_data[header_idx]; ++point_idx) {
+        data_ex.at(accumulated_size + point_idx).channel = header_idx;
+        data_ex.at(accumulated_size + point_idx).elevation = vertical_angles.at(header_idx);
+      }
+      accumulated_size += header_data[header_idx];
+    }
+
+    // Compute missing data from Cartesian data
+    const uint32_t time_stamp = seconds * static_cast<uint32_t>(1e+9) + nanoseconds;
+    for (auto & point : data_ex) {
+      point.distance = std::hypot(point.x, point.y, point.z);
+      point.azimuth = std::atan2(point.y, point.x);
+      point.time_stamp = time_stamp;
+    }
+
+    std::vector<uint8_t> data_ex_raw;
+    const std::size_t data_ex_raw_size = data_ex.size() * sizeof(PointEx);
+    data_ex_raw.resize(data_ex_raw_size);
+    std::memcpy(data_ex_raw.data(), data_ex.data(), data_ex_raw_size);
+
+    _impl->_lidar.data(std::move(data_ex_raw));
   }
 
   CarlaLidarPublisher::CarlaLidarPublisher(const char* ros_name, const char* parent, const char* ros_topic_name) :
