@@ -27,6 +27,21 @@ while true; do
     esac
 done
 
+# -- DETECT UBUNTU VERSION --
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    UBUNTU_VERSION_ID="${VERSION_ID}"
+else
+    UBUNTU_VERSION_ID="22.04"
+fi
+
+# Select libtiff package name based on Ubuntu version
+if dpkg --compare-versions "$UBUNTU_VERSION_ID" ge "24.04"; then
+    LIBTIFF_PKG="libtiff-dev"
+else
+    LIBTIFF_PKG="libtiff5-dev"
+fi
+
 # -- INSTALL APT PACKAGES --
 echo "Installing Ubuntu Packages..."
 sudo apt-get update
@@ -36,7 +51,7 @@ sudo apt-get -y install \
     ninja-build \
     libvulkan1 \
     libpng-dev \
-    libtiff5-dev \
+    "$LIBTIFF_PKG" \
     libjpeg-dev \
     tzdata \
     sed \
@@ -65,8 +80,12 @@ git lfs install
 
 # -- INSTALL PYTHON PACKAGES --
 echo "Installing Python Packages..."
-$python_path -m pip install --upgrade pip
-$python_path -m pip install -r requirements.txt
+PIP_EXTRA_ARGS=""
+if dpkg --compare-versions "$UBUNTU_VERSION_ID" ge "24.04"; then
+    PIP_EXTRA_ARGS="--break-system-packages"
+fi
+$python_path -m pip install --upgrade pip $PIP_EXTRA_ARGS
+$python_path -m pip install -r requirements.txt $PIP_EXTRA_ARGS
 
 # -- INSTALL CMAKE --
 check_cmake_version() {
