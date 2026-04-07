@@ -187,6 +187,25 @@ if (ENABLE_ROS2_DEMO)
   )
 endif()
 
+# [RGL] Add WITH_RGL definition and RGL include/library paths when ENABLE_RGL is ON.
+if (ENABLE_RGL)
+  list (
+    APPEND
+    CARLA_UNREAL_DEFINITIONS
+    "WITH_RGL"
+  )
+  list (
+    APPEND
+    CARLA_UNREAL_INCLUDE_PATHS
+    "${CARLA_WORKSPACE_PATH}/../RobotecGPULidar/include"
+  )
+  list (
+    APPEND
+    CARLA_UNREAL_LIBRARIES
+    "${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Plugins/Carla/Binaries/Linux/libRobotecGPULidar.so"
+  )
+endif()
+
 if (ENABLE_OSM2ODR)
   list (
     APPEND

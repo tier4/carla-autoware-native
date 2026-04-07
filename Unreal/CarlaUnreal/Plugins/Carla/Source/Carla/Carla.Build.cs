@@ -198,5 +198,44 @@ public class Carla :
         RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.11.2"));
       }
     }
+
+    // [RGL] RobotecGPULidar - GPU-accelerated LiDAR sensor via OptiX/CUDA.
+    // WITH_RGL is defined in Definitions.def; the library is linked via Libraries.def.
+    // Deploy the .so from Binaries/Linux/ (same pattern as ROS2).
+    {
+      bool EnableRGL = false;
+      foreach (var Def in PrivateDefinitions)
+      {
+        if (Def == "WITH_RGL")
+        {
+          EnableRGL = true;
+          break;
+        }
+      }
+      if (EnableRGL)
+      {
+        Console.WriteLine("RGL (RobotecGPULidar) support is enabled.");
+        string CarlaPluginSourcePath = Path.GetFullPath(ModuleDirectory);
+        string CarlaPluginBinariesLinuxPath = Path.Combine(CarlaPluginSourcePath, "..", "..", "Binaries", "Linux");
+        AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libRobotecGPULidar.so"));
+
+        // RGL ROS2 extension headers
+        foreach (var Lib in PublicAdditionalLibraries)
+        {
+          if (Lib.Contains("libRobotecGPULidar"))
+          {
+            // Derive RGL root from the library path
+            string RGLRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Lib), "..", "..", ".."));
+            string RGLRos2Include = Path.Combine(RGLRoot, "extensions", "ros2", "include");
+            if (Directory.Exists(RGLRos2Include))
+            {
+              PublicIncludePaths.Add(RGLRos2Include);
+              Console.WriteLine("RGL ROS2 extension include: " + RGLRos2Include);
+            }
+            break;
+          }
+        }
+      }
+    }
   }
 }

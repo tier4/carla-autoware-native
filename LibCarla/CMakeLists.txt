@@ -183,6 +183,12 @@ if (BUILD_CARLA_SERVER)
     set (CARLA_ROS2_DEFINITIONS WITH_ROS2)
   endif ()
 
+  # [RGL] RobotecGPULidar: define WITH_RGL so SensorRegistry.h includes ARGLLidar.
+  # ENABLE_RGL is set in the top-level CMake or by -DENABLE_RGL=ON.
+  if (ENABLE_RGL)
+    set (CARLA_RGL_DEFINITIONS WITH_RGL)
+  endif ()
+
   if (ENABLE_ROS2_DEMO)
     set (CARLA_ROS2_DEFINITIONS ${CARLA_ROS2_DEFINITIONS} WITH_ROS2_DEMO)
   endif ()
@@ -230,6 +236,7 @@ if (BUILD_CARLA_SERVER)
     ${CARLA_EXCEPTION_DEFINITIONS}
     ${CARLA_RTTI_DEFINITIONS}
     ${CARLA_ROS2_DEFINITIONS}
+    ${CARLA_RGL_DEFINITIONS}
   )
 
   if (ENABLE_ROS2)

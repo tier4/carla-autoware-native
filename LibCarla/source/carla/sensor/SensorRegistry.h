@@ -53,6 +53,9 @@ struct FCameraGBufferUint8;
 struct FCameraGBufferFloat;
 class AVehicleStatusSensor; // Autoware
 class AAutowareGnssSensor; // Autoware
+#ifdef WITH_RGL
+class ARGLLidar; // RGL GPU-accelerated LiDAR
+#endif
 
 namespace carla {
 namespace sensor {
@@ -86,6 +89,9 @@ namespace sensor {
     std::pair<FCameraGBufferFloat *, s11n::GBufferFloatSerializer>,
     std::pair<AVehicleStatusSensor *, s11n::VehicleStatusSerializer>, // Autoware
     std::pair<AAutowareGnssSensor *, s11n::GnssSerializer> // Autoware
+#ifdef WITH_RGL
+    ,std::pair<ARGLLidar *, s11n::LidarSerializer> // RGL GPU-accelerated LiDAR (reuses LidarSerializer)
+#endif
   >;
 
 } // namespace sensor
@@ -115,5 +121,8 @@ namespace sensor {
 #include "Carla/Sensor/WorldObserver.h"
 #include "Carla/Autoware/Sensors/VehicleStatusSensor.h" // Autoware
 #include "Carla/Autoware/Sensors/AutowareGnssSensor.h"
+#ifdef WITH_RGL
+#include "Carla/Sensor/RGLLidar.h" // RGL GPU-accelerated LiDAR
+#endif
 
 #endif // LIBCARLA_SENSOR_REGISTRY_WITH_SENSOR_INCLUDES

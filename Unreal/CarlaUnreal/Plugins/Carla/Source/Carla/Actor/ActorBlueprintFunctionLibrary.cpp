@@ -781,6 +781,97 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       LowerFOV,
       HorizontalFOV});
   }
+  // [RGL] GPU-accelerated LiDAR using RobotecGPULidar.
+  // Uses the same parameters as "ray_cast" for Python API compatibility.
+  else if (Id == "rgl") {
+    // [RGL] rgl_show_lidar_points: draw point cloud in UE5 viewport for debugging
+    FActorVariation RglShowLidarPoints;
+    RglShowLidarPoints.Id = TEXT("rgl_show_lidar_points");
+    RglShowLidarPoints.Type = EActorAttributeType::Bool;
+    RglShowLidarPoints.RecommendedValues = { TEXT("false") };
+    RglShowLidarPoints.bRestrictToRecommended = false;
+
+    FActorVariation RglLidarDrawPointRate;
+    RglLidarDrawPointRate.Id = TEXT("rgl_lidar_draw_point_rate");
+    RglLidarDrawPointRate.Type = EActorAttributeType::Float;
+    RglLidarDrawPointRate.RecommendedValues = { TEXT("1.0") };
+    RglLidarDrawPointRate.bRestrictToRecommended = false;
+
+    FActorVariation RglLidarDrawLifeTime;
+    RglLidarDrawLifeTime.Id = TEXT("rgl_lidar_draw_life_time");
+    RglLidarDrawLifeTime.Type = EActorAttributeType::Float;
+    RglLidarDrawLifeTime.RecommendedValues = { TEXT("0.2") };
+    RglLidarDrawLifeTime.bRestrictToRecommended = false;
+
+    // [RGL] ROS2 publish via RGL extension (independent of CARLA's built-in ROS2)
+    FActorVariation RglRos2Topic;
+    RglRos2Topic.Id = TEXT("rgl_ros2_topic");
+    RglRos2Topic.Type = EActorAttributeType::String;
+    RglRos2Topic.RecommendedValues = { TEXT("") };  // empty = disabled
+    RglRos2Topic.bRestrictToRecommended = false;
+
+    FActorVariation RglRos2FrameId;
+    RglRos2FrameId.Id = TEXT("rgl_ros2_frame_id");
+    RglRos2FrameId.Type = EActorAttributeType::String;
+    RglRos2FrameId.RecommendedValues = { TEXT("lidar") };
+    RglRos2FrameId.bRestrictToRecommended = false;
+
+    FActorVariation RglRos2Reliability;
+    RglRos2Reliability.Id = TEXT("rgl_ros2_reliability");
+    RglRos2Reliability.Type = EActorAttributeType::String;
+    RglRos2Reliability.RecommendedValues = { TEXT("best_effort") };
+    RglRos2Reliability.bRestrictToRecommended = false;
+
+    FActorVariation RglRos2Durability;
+    RglRos2Durability.Id = TEXT("rgl_ros2_durability");
+    RglRos2Durability.Type = EActorAttributeType::String;
+    RglRos2Durability.RecommendedValues = { TEXT("volatile") };
+    RglRos2Durability.bRestrictToRecommended = false;
+
+    FActorVariation RglRos2HistoryDepth;
+    RglRos2HistoryDepth.Id = TEXT("rgl_ros2_history_depth");
+    RglRos2HistoryDepth.Type = EActorAttributeType::Int;
+    RglRos2HistoryDepth.RecommendedValues = { TEXT("10") };
+    RglRos2HistoryDepth.bRestrictToRecommended = false;
+
+    FActorVariation RglRos2History;
+    RglRos2History.Id = TEXT("rgl_ros2_history");
+    RglRos2History.Type = EActorAttributeType::String;
+    RglRos2History.RecommendedValues = { TEXT("keep_last") };
+    RglRos2History.bRestrictToRecommended = false;
+
+    // Point cloud format for RGL ROS2 publish (matches AWSIM PointCloudFormatLibrary)
+    FActorVariation RglRos2Format;
+    RglRos2Format.Id = TEXT("rgl_ros2_format");
+    RglRos2Format.Type = EActorAttributeType::String;
+    RglRos2Format.RecommendedValues = { TEXT("PointXYZIRCAEDT") };
+    RglRos2Format.bRestrictToRecommended = false;
+
+    Definition.Variations.Append({
+      Channels,
+      Range,
+      PointsPerSecond,
+      Frequency,
+      UpperFOV,
+      LowerFOV,
+      AtmospAttenRate,
+      NoiseSeed,
+      DropOffGenRate,
+      DropOffIntensityLimit,
+      DropOffAtZeroIntensity,
+      StdDevLidar,
+      HorizontalFOV,
+      RglShowLidarPoints,
+      RglLidarDrawPointRate,
+      RglLidarDrawLifeTime,
+      RglRos2Topic,
+      RglRos2FrameId,
+      RglRos2Reliability,
+      RglRos2Durability,
+      RglRos2HistoryDepth,
+      RglRos2History,
+      RglRos2Format});
+  }
   else {
     DEBUG_ASSERT(false);
   }
