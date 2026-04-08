@@ -24,9 +24,5 @@ Help.md
 Unreal/CarlaUnreal/Plugins/Developer/RiderLink/
 Unreal/CarlaUnreal/Plugins/RiderLink/
 
-# CarlaRGL plugin - generated/copied by CMake (ENABLE_RGL=ON)
-Unreal/CarlaUnreal/Plugins/CarlaRGL/CarlaRGL.uplugin
-Unreal/CarlaUnreal/Plugins/CarlaRGL/Binaries/
-
 # Ignore perforce files
 .p4ignore
