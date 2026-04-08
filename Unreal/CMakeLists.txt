@@ -201,13 +201,29 @@ if (ENABLE_RGL)
     "${RGL_ROOT}/include"
     "${RGL_ROOT}/extensions/ros2/include"
   )
-  # libRobotecGPULidar.so is now in the independent CarlaRGL plugin (Plugins/CarlaRGL/Binaries/Linux/).
-  # CarlaRGL.Build.cs links it directly. No need to add to CARLA_UNREAL_LIBRARIES (Libraries.def).
+  # Copy RGL libraries to CarlaRGL plugin Binaries/ for self-contained deployment.
+  # $ORIGIN in libRobotecGPULidar.so's RUNPATH resolves to this directory,
+  # so placing ros2_standalone libs here removes the need for LD_LIBRARY_PATH.
+  set (CARLA_RGL_PLUGIN_DIR "${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Plugins/CarlaRGL")
+  set (RGL_LIB_DIR "${RGL_ROOT}/build/lib")
+  set (RGL_BIN_DST "${CARLA_RGL_PLUGIN_DIR}/Binaries/Linux")
+  file (MAKE_DIRECTORY "${RGL_BIN_DST}")
+  if (EXISTS "${RGL_LIB_DIR}/libRobotecGPULidar.so")
+    file (COPY "${RGL_LIB_DIR}/libRobotecGPULidar.so" DESTINATION "${RGL_BIN_DST}")
+    message (STATUS "CarlaRGL: Copied libRobotecGPULidar.so to plugin Binaries/")
+  endif ()
+  if (IS_DIRECTORY "${RGL_LIB_DIR}/ros2_standalone")
+    file (GLOB RGL_ROS2_LIBS "${RGL_LIB_DIR}/ros2_standalone/*.so*")
+    if (RGL_ROS2_LIBS)
+      file (COPY ${RGL_ROS2_LIBS} DESTINATION "${RGL_BIN_DST}")
+      list (LENGTH RGL_ROS2_LIBS RGL_ROS2_COUNT)
+      message (STATUS "CarlaRGL: Copied ${RGL_ROS2_COUNT} ROS2 standalone libraries to plugin Binaries/")
+    endif ()
+  endif ()
 
   # Activate CarlaRGL plugin by copying .uplugin.in → .uplugin.
   # Without the .uplugin file, UE5 ignores the plugin entirely.
   # This ensures CarlaRGL is only loaded when explicitly built with ENABLE_RGL=ON.
-  set (CARLA_RGL_PLUGIN_DIR "${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Plugins/CarlaRGL")
   configure_file (
     "${CARLA_RGL_PLUGIN_DIR}/CarlaRGL.uplugin.in"
     "${CARLA_RGL_PLUGIN_DIR}/CarlaRGL.uplugin"
