@@ -258,15 +258,14 @@ def generate_vlp16_blueprint_both(blueprint_library, **kwargs):
     """Generate both ray_cast and rgl blueprints for side-by-side comparison.
 
 	Returns (ray_cast_blueprint, rgl_blueprint).
-	RGL uses a separate topic suffix to avoid collision.
+	Each gets a namespace prefix: /raycast/... and /rgl/...
 	"""
-    rc_kwargs = dict(kwargs, lidar_type="ray_cast")
-    rgl_kwargs = dict(kwargs, lidar_type="rgl")
+    base_topic = kwargs.get("ros_topic_name", "/sensing/lidar/top/pointcloud_raw_ex")
 
-    # Give RGL a separate topic if not explicitly set
-    if not rgl_kwargs.get("rgl_ros2_topic"):
-        base_topic = kwargs.get("ros_topic_name", "/sensing/lidar/top/pointcloud_raw_ex")
-        rgl_kwargs["rgl_ros2_topic"] = base_topic + "_rgl"
+    rc_kwargs = dict(kwargs, lidar_type="ray_cast",
+                     ros_topic_name="/raycast" + base_topic)
+    rgl_kwargs = dict(kwargs, lidar_type="rgl",
+                      ros_topic_name="/rgl" + base_topic)
 
     return (generate_vlp16_blueprint(blueprint_library, **rc_kwargs),
             generate_vlp16_blueprint(blueprint_library, **rgl_kwargs))
