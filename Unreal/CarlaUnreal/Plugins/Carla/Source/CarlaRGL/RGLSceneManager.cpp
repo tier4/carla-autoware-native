@@ -3,8 +3,8 @@
 
 #ifdef WITH_RGL
 
-#include "Carla/RGL/RGLSceneManager.h"
-#include "Carla/RGL/RGLCoordinateUtils.h"
+#include "RGLSceneManager.h"
+#include "RGLCoordinateUtils.h"
 
 #include <util/ue-header-guard-begin.h>
 #include "Engine/World.h"
