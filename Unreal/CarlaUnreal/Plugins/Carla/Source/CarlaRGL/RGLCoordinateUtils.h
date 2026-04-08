@@ -43,6 +43,8 @@ namespace RGLLog
 
 #ifdef WITH_RGL
 
+#include "CarlaRGLModule.h"
+
 #include <util/disable-ue4-macros.h>
 #include <rgl/api/core.h>
 #include <util/enable-ue4-macros.h>
@@ -56,7 +58,7 @@ namespace RGLLog
         if (_s != RGL_SUCCESS) {                                              \
             const char* _err = nullptr;                                       \
             rgl_get_last_error_string(&_err);                                 \
-            UE_LOG(LogCarla, Error,                                           \
+            UE_LOG(LogCarlaRGL, Error,                                           \
                    TEXT("RGL error in %s: %s"),                               \
                    TEXT(#call),                                               \
                    _err ? *FString(UTF8_TO_TCHAR(_err)) : TEXT("unknown"));   \

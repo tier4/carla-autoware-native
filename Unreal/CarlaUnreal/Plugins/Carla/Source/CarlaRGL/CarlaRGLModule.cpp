@@ -1,6 +1,8 @@
 #include "CarlaRGLModule.h"
 #include "Carla/RGL/IRGLBackend.h"
 
+DEFINE_LOG_CATEGORY(LogCarlaRGL);
+
 #ifdef WITH_RGL
 #include "RGLBackendImpl.h"
 #endif

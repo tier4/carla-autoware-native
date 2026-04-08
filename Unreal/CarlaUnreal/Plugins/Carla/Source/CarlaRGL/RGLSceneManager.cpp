@@ -5,6 +5,7 @@
 
 #include "RGLSceneManager.h"
 #include "RGLCoordinateUtils.h"
+#include "CarlaRGLModule.h"
 
 #include <util/ue-header-guard-begin.h>
 #include "Engine/World.h"
@@ -809,7 +810,7 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
     {
         const char* ErrMsg = nullptr;
         rgl_get_last_error_string(&ErrMsg);
-        UE_LOG(LogCarla, Warning,
+        UE_LOG(LogCarlaRGL, Warning,
                TEXT("RGLSceneManager: Failed to upload mesh '%s' (%d verts, %d tris): %s"),
                *StaticMesh->GetName(),
                Vertices.Num(), Indices.Num(),
@@ -852,7 +853,7 @@ bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
     {
         const char* ErrMsg = nullptr;
         rgl_get_last_error_string(&ErrMsg);
-        UE_LOG(LogCarla, Warning,
+        UE_LOG(LogCarlaRGL, Warning,
                TEXT("RGLSceneManager: Failed to create entity for '%s': %s"),
                *Component->GetName(),
                ErrMsg ? *FString(UTF8_TO_TCHAR(ErrMsg)) : TEXT("unknown"));
