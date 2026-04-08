@@ -17,6 +17,8 @@ public class CarlaRGL : ModuleRules
             "Engine",
             "RenderCore",
             "RHI",
+            "PhysicsCore",
+            "Chaos",
             "Carla"
         });
 
