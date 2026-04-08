@@ -57,14 +57,14 @@ public class Carla :
     foreach (var Path in File.ReadAllText(Path.Combine(PluginDirectory, "Includes.def")).Split(';'))
     {
       var Trimmed = Path.Trim();
-      if (Trimmed.Length != 0 && !Trimmed.Contains("RobotecGPULidar"))
+      if (Trimmed.Length != 0)
         PublicIncludePaths.Add(Trimmed.Trim());
     }
 
     foreach (var Path in File.ReadAllText(Path.Combine(PluginDirectory, "Libraries.def")).Split(';'))
     {
       var Trimmed = Path.Trim();
-      if (Trimmed.Length != 0 && !Trimmed.Contains("RobotecGPULidar"))
+      if (Trimmed.Length != 0)
         PublicAdditionalLibraries.Add(Trimmed.Trim());
     }
 
@@ -199,27 +199,5 @@ public class Carla :
       }
     }
 
-    // [RGL] RobotecGPULidar - GPU-accelerated LiDAR sensor via OptiX/CUDA.
-    // The .so is linked via the CarlaRGL module (not here) to prevent dependency
-    // propagation to StreetMap, CarlaTools, and other Carla-dependent modules.
-    {
-      bool EnableRGL = false;
-      foreach (var Def in PrivateDefinitions)
-      {
-        if (Def == "WITH_RGL")
-        {
-          EnableRGL = true;
-          break;
-        }
-      }
-      if (EnableRGL)
-      {
-        Console.WriteLine("RGL (RobotecGPULidar) support is enabled. Library linked via CarlaRGL module.");
-        // NOTE: Do NOT add PrivateDependencyModuleNames("CarlaRGL") here.
-        // CarlaRGL depends on Carla (not the reverse). Adding it would create a cycle.
-        // Carla module uses IRGLBackend/FRGLBackendRegistry (defined in Carla itself).
-        // CarlaRGL registers its backend implementation at module startup.
-      }
-    }
   }
 }
