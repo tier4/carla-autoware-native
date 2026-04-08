@@ -1,6 +1,6 @@
 #[[
 
-  Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+  Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
   de Barcelona (UAB).
   
   This work is licensed under the terms of the MIT license.
@@ -113,7 +113,7 @@ carla_option (
 carla_option (
   ENABLE_ALL_WARNINGS
   "Whether to emit extra build warnings."
-  OFF
+  ON
 )
 
 carla_option (
@@ -245,6 +245,18 @@ carla_string_option (
   "${CARLA_UNREAL_PACKAGE_BUILD_TYPE_DEFAULT}"
 )
 
+if ("${CARLA_UNREAL_PACKAGE_BUILD_TYPE}" STREQUAL "Shipping")
+  set (CARLA_UNREAL_PACKAGE_NO_COMPRESSION_DEFAULT OFF)
+else ()
+  set (CARLA_UNREAL_PACKAGE_NO_COMPRESSION_DEFAULT ON)
+endif ()
+
+carla_option (
+  CARLA_UNREAL_PACKAGE_NO_COMPRESSION
+  "Whether to skip the package compression step."
+  ${CARLA_UNREAL_PACKAGE_NO_COMPRESSION_DEFAULT}
+)
+
 
 
 # ================================
@@ -295,6 +307,9 @@ carla_string_option (
 
 # ==== LIBPNG ====
 
+# We can not upgrade any further due to ZLIB.
+# See https://github.com/madler/zlib/issues/1019
+# Once this is resolved we can target 1.6.50
 carla_string_option (
   CARLA_LIBPNG_VERSION
   "Target libpng version."
@@ -312,7 +327,7 @@ carla_string_option (
 carla_string_option (
   CARLA_PROJ_VERSION
   "Target PROJ version."
-  7.2.1
+  9.7.0
 )
 
 carla_string_option (
@@ -342,7 +357,13 @@ carla_string_option (
 carla_string_option (
   CARLA_SQLITE_VERSION
   "Target SQLite version (major[1].minor[2].patch[2].revision[2])."
-  3.45.01.00
+  3.50.04.00
+)
+
+carla_string_option (
+  CARLA_SQLITE_RELEASE_YEAR
+  "Year corresponding to the target SQLite release."
+  2025
 )
 
 # ==== XERCESC ====
@@ -350,7 +371,7 @@ carla_string_option (
 carla_string_option (
   CARLA_XERCESC_VERSION
   "Target xerces-c version."
-  3.2.4
+  3.3.0
 )
 
 carla_string_option (

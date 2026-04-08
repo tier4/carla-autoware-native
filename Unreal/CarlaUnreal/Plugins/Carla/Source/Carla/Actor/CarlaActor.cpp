@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -642,6 +642,40 @@ ECarlaServerResponse FVehicleActor::DisableActorConstantVelocity()
       return ECarlaServerResponse::NullActor;
     }
     CarlaVehicle->DeactivateVelocityControl();
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::EnableActorConstantAcceleration(const FVector& Acceleration)
+{
+  if (IsDormant())
+  {
+  }
+  else
+  {
+    auto CarlaVehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (CarlaVehicle == nullptr)
+    {
+      return ECarlaServerResponse::NullActor;
+    }
+    CarlaVehicle->ActivateAccelerationControl(Acceleration);
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::DisableActorConstantAcceleration()
+{
+  if (IsDormant())
+  {
+  }
+  else
+  {
+    auto CarlaVehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (CarlaVehicle == nullptr)
+    {
+      return ECarlaServerResponse::NullActor;
+    }
+    CarlaVehicle->DeactivateAccelerationControl();
   }
   return ECarlaServerResponse::Success;
 }

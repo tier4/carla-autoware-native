@@ -1,10 +1,101 @@
 import argparse
+import json
 import math
-import random
+import os
 import time
+import random
 
 import PyKDL as kdl
 import carla
+
+
+# Autoware post-process profile for traffic light recognition camera.
+# These values were originally hardcoded in ActorBlueprintFunctionLibrary.cpp
+# and are now managed as a JSON profile loaded by UPostProcessJsonUtils.
+AUTOWARE_POSTPROCESS_SETTINGS = {
+    "Settings": {
+        "bOverride_MotionBlurAmount": True, "MotionBlurAmount": 0.5,
+        "bOverride_MotionBlurMax": True, "MotionBlurMax": 5.0,
+        "bOverride_MotionBlurPerObjectSize": True, "MotionBlurPerObjectSize": 0.0,
+        "bOverride_LensFlareIntensity": True, "LensFlareIntensity": 0.2,
+        "bOverride_BloomIntensity": True, "BloomIntensity": 0.0,
+        "bOverride_AutoExposureMethod": True, "AutoExposureMethod": 1,
+        "bOverride_AutoExposureBias": True, "AutoExposureBias": 1.5,
+        "bOverride_LocalExposureHighlightContrastScale": True, "LocalExposureHighlightContrastScale": 0.7,
+        "bOverride_LocalExposureShadowContrastScale": True, "LocalExposureShadowContrastScale": 0.65,
+        "bOverride_CameraShutterSpeed": True, "CameraShutterSpeed": 15.0,
+        "bOverride_CameraISO": True, "CameraISO": 300000.0,
+        "bOverride_DepthOfFieldFstop": True, "DepthOfFieldFstop": 9.8,
+        "bOverride_DepthOfFieldMinFstop": True, "DepthOfFieldMinFstop": 1.2,
+        "bOverride_DepthOfFieldBladeCount": True, "DepthOfFieldBladeCount": 5,
+        "bOverride_AutoExposureMinBrightness": True, "AutoExposureMinBrightness": 0.0,
+        "bOverride_AutoExposureMaxBrightness": True, "AutoExposureMaxBrightness": 20.0,
+        "bOverride_AutoExposureSpeedUp": True, "AutoExposureSpeedUp": 3.0,
+        "bOverride_AutoExposureSpeedDown": True, "AutoExposureSpeedDown": 1.0,
+        "bOverride_AutoExposureCalibrationConstant_DEPRECATED": True, "AutoExposureCalibrationConstant_DEPRECATED": 16.0,
+        "bOverride_DepthOfFieldSensorWidth": True, "DepthOfFieldSensorWidth": 24.576,
+        "bOverride_DepthOfFieldFocalDistance": True, "DepthOfFieldFocalDistance": 250.0,
+        "bOverride_DepthOfFieldDepthBlurAmount": True, "DepthOfFieldDepthBlurAmount": 1.0,
+        "bOverride_DepthOfFieldDepthBlurRadius": True, "DepthOfFieldDepthBlurRadius": 0.0,
+        "bOverride_FilmSlope": True, "FilmSlope": 0.88,
+        "bOverride_FilmToe": True, "FilmToe": 0.55,
+        "bOverride_FilmShoulder": True, "FilmShoulder": 0.26,
+        "bOverride_FilmBlackClip": True, "FilmBlackClip": 0.0,
+        "bOverride_FilmWhiteClip": True, "FilmWhiteClip": 0.04,
+        "bOverride_WhiteTemp": True, "WhiteTemp": 7700.0,
+        "bOverride_WhiteTint": True, "WhiteTint": -0.15,
+        "bOverride_SceneFringeIntensity": True, "SceneFringeIntensity": 0.15,
+        "bOverride_ChromaticAberrationStartOffset": True, "ChromaticAberrationStartOffset": 0.0,
+        "bOverride_ColorSaturation": True, "ColorSaturation": {"X": 0.5, "Y": 0.5, "Z": 0.5, "W": 1.0},
+        "bOverride_ColorContrast": True, "ColorContrast": {"X": 1.6, "Y": 1.6, "Z": 1.6, "W": 1.0},
+        "bOverride_ColorGamma": True, "ColorGamma": {"X": 1.2, "Y": 1.2, "Z": 1.2, "W": 1.0},
+        "bOverride_ColorGammaHighlights": True, "ColorGammaHighlights": {"X": 0.5, "Y": 0.5, "Z": 0.5, "W": 1.0},
+        "bOverride_ToneCurveAmount": True, "ToneCurveAmount": 1.0,
+        "bOverride_SceneColorTint": True, "SceneColorTint": {"R": 0.785339, "G": 0.879092, "B": 0.93125, "A": 1.0},
+        "bOverride_VignetteIntensity": True, "VignetteIntensity": 0.7,
+    }
+}
+
+
+def deploy_postprocess_profile(profile_name, settings):
+    """Deploy a PostProcess JSON profile to the Content directory.
+
+    The file is placed at Content/Carla/Config/PostProcess/{profile_name}.json,
+    which is the path UPostProcessJsonUtils::GetPostProcessConfigPath() resolves to.
+
+    Deploys to both:
+    - Source tree: {workspace}/Unreal/CarlaUnreal/Content/Carla/Config/PostProcess/
+    - Package builds found under: {workspace}/Build/Package/*/Linux/CarlaUnreal/Content/Carla/Config/PostProcess/
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    workspace_path = os.path.abspath(os.path.join(script_dir, "..", ".."))
+
+    # Collect all target directories
+    target_dirs = []
+
+    # Source tree
+    source_config = os.path.join(
+        workspace_path, "Unreal", "CarlaUnreal", "Content",
+        "Carla", "Config", "PostProcess"
+    )
+    target_dirs.append(source_config)
+
+    # Package builds
+    package_base = os.path.join(workspace_path, "Build", "Package")
+    if os.path.isdir(package_base):
+        import glob
+        for pkg_content in glob.glob(os.path.join(
+            package_base, "*", "Linux", "CarlaUnreal", "Content",
+            "Carla", "Config", "PostProcess"
+        )):
+            target_dirs.append(pkg_content)
+
+    for config_dir in target_dirs:
+        os.makedirs(config_dir, exist_ok=True)
+        profile_path = os.path.join(config_dir, f"{profile_name}.json")
+        with open(profile_path, 'w') as f:
+            json.dump(settings, f, indent=2)
+        log_info(f"Deployed PostProcess profile: {profile_path}")
 
 
 def log_info(text):
@@ -138,6 +229,7 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
     blueprint.set_attribute("image_size_x", "1920")
     blueprint.set_attribute("image_size_y", "1080")
     blueprint.set_attribute("sensor_tick", "0.1")
+    blueprint.set_attribute("post_process_profile", "autoware_demo")
 
     # ROS settings
     blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_optical_link")  # frame_id
@@ -160,10 +252,22 @@ def generate_imu_blueprint(blueprint_library):
     return blueprint
 
 
-def generate_gnss_blueprint(blueprint_library):
+def generate_gnss_blueprint(blueprint_library, is_mgrs_enabled):
     """Generates a blueprint for GNSS"""
 
-    blueprint = blueprint_library.find("sensor.other.gnss")
+    sensor_name = "sensor.other.autoware_gnss" if is_mgrs_enabled else "sensor.other.gnss"
+
+    try:
+        blueprint = blueprint_library.find(sensor_name)
+    except Exception:
+        if is_mgrs_enabled:
+            log_warning(
+                "Tried to spawn Autoware GNSS Sensor, but it is inaccessible. "
+                "Try running without MGRS offset: autoware_demo.py --mgrs_off"
+            )
+        else:
+            log_error("Cannot spawn Carla GNSS sensor!")
+        return None
 
     blueprint.set_attribute("sensor_tick", "1.0")
 
@@ -174,7 +278,7 @@ def generate_gnss_blueprint(blueprint_library):
     return blueprint
 
 
-def spawn_sensors(world, base_link, ego):
+def spawn_sensors(world, base_link, ego, args):
     """Spawns sensors relatively to the provided base_link actor
 
 	Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
@@ -189,7 +293,7 @@ def spawn_sensors(world, base_link, ego):
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = generate_imu_blueprint(blueprint_library)
-    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library)
+    gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library, args.mgrs_off)
     vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     base_link_to_sensor_kit_transform = ROS2.Transform(
@@ -260,7 +364,7 @@ def spawn_sensors(world, base_link, ego):
 # vehicle_status_sensor.enable_for_ros()
 
 
-def spawn_ego_with_sensors(world, spawn_point):
+def spawn_ego_with_sensors(world, spawn_point, args):
     """Spawns a controllable vehicle with a basic sensor configuration
 
 	The sensor configuration is compatible with the one for Lexus RX450h in AWSIM.
@@ -270,7 +374,8 @@ def spawn_ego_with_sensors(world, spawn_point):
 
     ego_blueprint = blueprint_library.find("vehicle.lincoln.mkz")
     ego_blueprint.set_attribute("role_name", "ego")
-    ego_blueprint.set_attribute("ros_topic_name", "/carla/input")  # Default Carla ROS input topic name
+    # Ego uses acceleration control from Autoware /control/command/control_cmd (not ackermann)
+    ego_blueprint.set_attribute("ros_topic_name", "/carla/input")  # Fallback; Autoware control_cmd has priority
 
     ego = world.spawn_actor(ego_blueprint, spawn_point)
 
@@ -285,7 +390,7 @@ def spawn_ego_with_sensors(world, spawn_point):
         pivot_to_base_link_transform.to_carla(),
         attach_to=ego)
 
-    spawn_sensors(world, base_link, ego)
+    spawn_sensors(world, base_link, ego, args)
 
     return ego
 
@@ -316,39 +421,53 @@ class TimeStepData:
         return self.synchronous_mode and self.hz_rate not in (None, 0) and not self.phys_substepping
 
 
-def get_current_map_name(world):
+def get_current_map_name(client):
+    """
+    Fetches active world from client to avoid stale pointer errors, and returns active world map name.
+    :returns: Active world map name (not a path).
+    """
+    world = client.get_world()
     return world.get_map().name.split('/')[-1]
 
 
-def apply_world_settings(client, world, time_step_info, map_name=None, force_map_reload=False):
+def apply_world_settings(client, time_step_info, map_name=None, force_map_reload=False):
     """
 	Stores all settings related to the simulation world.
-	Applies Synchronous mode + fixed time-step into world settings.
+	\nDefault: applies synchronous mode + fixed time-step.
+
 
 	:param client: Connected client to the Carla server instance.
-	:param world: The simulation world instance.
 	:param time_step_info: Instance of TimeStepData.
 	:param map_name: Map to load and apply settings to.
 	:param force_map_reload: Forces map to be reloaded. Reload action cleans up the scene.
+
+	:returns: world instance (possibly new) after loading a map
 	"""
 
-    # Load the desired map
-    current_map = get_current_map_name(world)
-    should_reload = force_map_reload or (map_name and current_map.lower() != map_name.lower())
+    # Get current world reference
+    world = client.get_world()
+    current_map = 'Not set yet'
 
-    if should_reload:
-        print(f"Loading map: {map_name}")
-        try:
-            client.load_world(map_name)
-            current_map = get_current_map_name(world) # set new world name to active one (current)
-        except Exception as exc:
-            traceback.print_exc()
-            print(
-                f"Provided invalid map name: {map_name}. "
-                f"Please check the spelling and make sure the map is available."
-            )
+    # Reload map
+    if force_map_reload:
+        print(f"Force reloading map: {current_map}")
+        world = client.load_world(get_current_map_name(client))
+        current_map = get_current_map_name(client)
 
-    print(f'Loaded map: {current_map}')
+    # Load a new map
+    elif map_name and map_name != current_map:
+        print(f"Loading new map: {map_name}")
+        client.load_world(map_name)
+        world = client.get_world()
+        current_map = map_name
+    else:
+        print(f"Map '{map_name}' is already loaded — skipping reload.")
+
+
+    print(f'Loaded map: {current_map if map_name is None else map_name}')
+
+    if world is None:
+        raise RuntimeError("World instance is invalid after map load.")
 
     # Get Settings
     settings = world.get_settings()
@@ -372,8 +491,9 @@ def apply_world_settings(client, world, time_step_info, map_name=None, force_map
     # client.reload_world(False)  # reload map keeping the world settings
 
     # Disable TF publishing in CARLA to avoid conflicts.
-    world.set_publish_tf(
-        False)  # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
+    world.set_publish_tf(False) # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
+
+    return world
 
 
 def run_sync_simulation_loop(world,
@@ -489,7 +609,7 @@ def main():
         '--load_map',
         nargs='?',
         const='Town10HD_Opt',  # used when flag present but no value
-        help="Load a map the provided map."
+        help="Load the provided map by it's name."
     )
     argparser.add_argument(
         '--force_reload', action='store_true',
@@ -506,12 +626,25 @@ def main():
         default=100,
         help="Set 'None' or 0 for variable time step, otherwise use an integer for fixed time step rate."
     )
+    argparser.add_argument(
+        '--mgrs_off', action='store_false',
+        help='Disable application of MGRS offset.')
+    argparser.add_argument(
+        '--list_maps', action='store_true',
+        help='Lists only available maps and exit. Omit applying world setting and ego spawn.')
     args = argparser.parse_args()
+
+    # Deploy PostProcess profiles before connecting to server
+    deploy_postprocess_profile("autoware_demo", AUTOWARE_POSTPROCESS_SETTINGS)
 
     # Get Client info
     client = carla.Client(args.host, args.port)
     client.set_timeout(60.0)
-    world = client.get_world()
+
+    if args.list_maps:
+        print("Available maps")
+        print(client.get_available_maps())
+        return
 
     # Determine TimeStep Data to be used
     time_step_info = TimeStepData(synchronous_mode=(not args.run_async),
@@ -519,11 +652,10 @@ def main():
                                   phys_substepping=args.substepping)
 
     # Apply Settings
-    apply_world_settings(client=client,
-                         world=world,
-                         time_step_info=time_step_info,
-                         map_name=args.load_map,
-                         force_map_reload=args.force_reload)
+    world = apply_world_settings(client=client,
+                                 time_step_info=time_step_info,
+                                 map_name=args.load_map,
+                                 force_map_reload=args.force_reload)
     log_info(
         f"Applied settings:\n"
         f"\tsynchronous mode: {time_step_info.synchronous_mode}\n"
@@ -534,9 +666,17 @@ def main():
         f"\tpure step execution: {time_step_info.is_pure_step_execution_enabled()}"
     )
 
+
     # Spawn Ego
-    spawn_point = random.choice(world.get_map().get_spawn_points())
-    ego = spawn_ego_with_sensors(world, spawn_point)
+    try:
+        spawn_points = world.get_ego_spawn_points()
+    except AttributeError:
+        # Fallback when get_ego_spawn_points is not available (e.g. standard carla package)
+        spawn_points = world.get_map().get_spawn_points()
+    if not spawn_points:
+        raise RuntimeError("No spawn points available. Load a map that provides spawn points.")
+    spawn_point = random.choice(spawn_points)
+    ego = spawn_ego_with_sensors(world, spawn_point, args)
 
     world.tick()  # tick to process the changes (settings, ego + sensors spawn)
     move_spectator(world, ego)

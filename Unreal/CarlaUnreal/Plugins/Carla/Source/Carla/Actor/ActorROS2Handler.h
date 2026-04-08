@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -19,6 +19,7 @@ class ActorROS2Handler
 
         void operator()(carla::ros2::VehicleControl &Source);
         void operator()(carla::ros2::VehicleAckermannControl &Source);
+        void operator()(carla::ros2::VehicleAccelerationControl &Source);
         void operator()(carla::ros2::MessageControl Message);
 
         static bool FlattenSteeringCurve(AActor * Actor);

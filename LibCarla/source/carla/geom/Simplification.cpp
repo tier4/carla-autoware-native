@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -32,7 +32,7 @@ namespace geom {
 
     // Reduce to the X% of the polys
     float target_size = static_cast<float>(Simplification.triangles.size());
-    Simplification.simplify_mesh((target_size * simplification_percentage));
+    Simplification.simplify_mesh(static_cast<int>(target_size * simplification_percentage));
 
     pmesh->GetVertices().clear();
     pmesh->GetIndexes().clear();
@@ -46,9 +46,9 @@ namespace geom {
     }
 
     for (size_t i = 0; i < Simplification.triangles.size(); ++i) {
-      pmesh->GetIndexes().push_back((Simplification.triangles[i].v[0]) + 1);
-      pmesh->GetIndexes().push_back((Simplification.triangles[i].v[1]) + 1);
-      pmesh->GetIndexes().push_back((Simplification.triangles[i].v[2]) + 1);
+      pmesh->GetIndexes().push_back(static_cast<size_t>((Simplification.triangles[i].v[0]) + 1));
+      pmesh->GetIndexes().push_back(static_cast<size_t>((Simplification.triangles[i].v[1]) + 1));
+      pmesh->GetIndexes().push_back(static_cast<size_t>((Simplification.triangles[i].v[2]) + 1));
     }
   }
 

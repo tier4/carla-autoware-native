@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -271,6 +271,10 @@ namespace detail {
       return _client.GetPublishTF();
     }
 
+    std::vector<geom::Transform> GetEgoSpawnPoints() const {
+      return _client.GetEgoSpawnPoints();
+    }
+
     rpc::VehiclePhysicsControl GetVehiclePhysicsControl(const Vehicle &vehicle) const {
       return _client.GetVehiclePhysicsControl(vehicle.GetId());
     }
@@ -424,6 +428,14 @@ namespace detail {
 
     void DisableActorConstantVelocity(const Actor &actor) {
       _client.DisableActorConstantVelocity(actor.GetId());
+    }
+
+    void EnableActorConstantAcceleration(const Actor &actor, const geom::Vector3D &vector) {
+      _client.EnableActorConstantAcceleration(actor.GetId(), vector);
+    }
+
+    void DisableActorConstantAcceleration(const Actor &actor) {
+      _client.DisableActorConstantAcceleration(actor.GetId());
     }
 
     void AddActorImpulse(const Actor &actor, const geom::Vector3D &impulse) {

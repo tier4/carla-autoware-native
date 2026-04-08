@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -64,6 +64,14 @@ namespace client {
 
   void Actor::DisableConstantVelocity() {
     GetEpisode().Lock()->DisableActorConstantVelocity(*this);
+  }
+
+  void Actor::EnableConstantAcceleration(const geom::Vector3D &vector) {
+    GetEpisode().Lock()->EnableActorConstantAcceleration(*this, vector);
+  }
+
+  void Actor::DisableConstantAcceleration() {
+    GetEpisode().Lock()->DisableActorConstantAcceleration(*this);
   }
 
   void Actor::AddImpulse(const geom::Vector3D &impulse) {

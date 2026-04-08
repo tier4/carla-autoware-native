@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -158,12 +158,7 @@ void ACarlaGameModeBase::InitGame(
   Recorder->SetEpisode(Episode);
   Episode->SetRecorder(Recorder);
 
-  ParseOpenDrive();
-
-  if(Map.has_value())
-  {
-    StoreSpawnPoints();
-  }
+  LoadGeoReference();
 }
 
 void ACarlaGameModeBase::RestartPlayer(AController *NewPlayer)
@@ -395,6 +390,16 @@ void ACarlaGameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
   if ((CarlaSettingsDelegate != nullptr) && (EndPlayReason != EEndPlayReason::EndPlayInEditor))
   {
     CarlaSettingsDelegate->Reset();
+  }
+}
+
+void ACarlaGameModeBase::LoadGeoReference()
+{
+  ParseOpenDrive();
+
+  if(Map.has_value())
+  {
+    StoreSpawnPoints();
   }
 }
 

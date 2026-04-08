@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -32,12 +32,20 @@ namespace ros2 {
     float jerk;
   };
 
+  /// Control from /control/command/control_cmd: longitudinal acceleration [m/s^2] + steering
+  struct VehicleAccelerationControl
+  {
+    float acceleration;
+    float steer;
+    float steer_speed;
+  };
+
     struct MessageControl
   {
     const char* message;
   };
 
-  using ROS2CallbackData = std::variant<VehicleControl, VehicleAckermannControl>;
+  using ROS2CallbackData = std::variant<VehicleControl, VehicleAckermannControl, VehicleAccelerationControl>;
   using ROS2MessageCallbackData = std::variant<MessageControl>;
 
   using ActorCallback = std::function<void(void *actor, ROS2CallbackData data)>;

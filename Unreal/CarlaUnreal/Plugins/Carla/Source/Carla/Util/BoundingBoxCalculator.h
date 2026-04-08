@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -48,6 +48,9 @@ public:
     TArray<FBoundingBox>& OutBB,
     TArray<uint8>& OutTag,
     uint8 InTagQueried = 0xFF);
+
+  UFUNCTION(Category = "Carla Util", BlueprintCallable)
+  static FBoundingBox GetSkeletalMeshBoundingBoxFromComponent(const USkeletalMeshComponent* SkeletalMeshComp);
 
   UFUNCTION(Category = "Carla Util", BlueprintCallable)
   static FBoundingBox GetSkeletalMeshBoundingBox(const USkeletalMesh* SkeletalMesh);

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -190,7 +190,7 @@ namespace element {
     constexpr double interval_size = 0.5;
     size_t number_intervals =
         std::max(static_cast<size_t>(_length / interval_size), size_t(5));
-    double delta_p = 1.0 / number_intervals;
+    double delta_p = 1.0 / static_cast<double>(number_intervals);
     if (_arcLength) {
         delta_p *= _length;
     }

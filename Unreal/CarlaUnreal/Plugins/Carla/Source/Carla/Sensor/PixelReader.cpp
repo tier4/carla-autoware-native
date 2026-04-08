@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -14,6 +14,9 @@
 #include "ImageWriteQueue.h"
 #include "RHIGPUReadback.h"
 #include <util/ue-header-guard-end.h>
+
+#include <chrono>
+#include <thread>
 
 // =============================================================================
 // -- FPixelReader -------------------------------------------------------------
@@ -63,7 +66,7 @@ void FPixelReader::WritePixelsToBuffer(
       TRACE_CPUPROFILER_EVENT_SCOPE_STR("Wait GPU transfer");
       while (!Readback->IsReady())
       {
-        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
       }
     }
 

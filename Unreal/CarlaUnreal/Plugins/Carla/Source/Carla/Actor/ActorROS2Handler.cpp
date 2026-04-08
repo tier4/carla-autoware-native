@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -44,6 +44,17 @@ void ActorROS2Handler::operator()(carla::ros2::VehicleAckermannControl &Source)
   NewControl.Jerk = Source.jerk;
 
   Vehicle->ApplyVehicleAckermannControl(NewControl, EVehicleInputPriority::User);
+}
+
+void ActorROS2Handler::operator()(carla::ros2::VehicleAccelerationControl &Source)
+{
+  if (!IsValid(_Actor)) return;
+
+  ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
+  if (!IsValid(Vehicle)) return;
+
+  // /control/command/control_cmd: use acceleration [m/s^2] + steering for acceleration control
+  Vehicle->ApplyVehicleAccelerationControl(Source.acceleration, Source.steer, Source.steer_speed);
 }
 
 void ActorROS2Handler::operator()(carla::ros2::MessageControl Message)

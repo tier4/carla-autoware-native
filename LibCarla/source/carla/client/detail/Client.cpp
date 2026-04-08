@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -295,6 +295,10 @@ namespace detail {
     return _pimpl->CallAndWait<bool>("get_publish_tf");
   }
 
+  std::vector<geom::Transform> Client::GetEgoSpawnPoints() const {
+    return _pimpl->CallAndWait<std::vector<carla::geom::Transform>>("get_ego_spawn_points");
+  }
+
   std::vector<rpc::Actor> Client::GetActorsById(
       const std::vector<ActorId> &ids) {
     using return_t = std::vector<rpc::Actor>;
@@ -410,6 +414,14 @@ namespace detail {
 
   void Client::DisableActorConstantVelocity(rpc::ActorId actor) {
     _pimpl->AsyncCall("disable_actor_constant_velocity", actor);
+  }
+
+  void Client::EnableActorConstantAcceleration(rpc::ActorId actor, const geom::Vector3D &vector) {
+    _pimpl->AsyncCall("enable_actor_constant_acceleration", actor, vector);
+  }
+
+  void Client::DisableActorConstantAcceleration(rpc::ActorId actor) {
+    _pimpl->AsyncCall("disable_actor_constant_acceleration", actor);
   }
 
   void Client::AddActorImpulse(rpc::ActorId actor, const geom::Vector3D &impulse) {

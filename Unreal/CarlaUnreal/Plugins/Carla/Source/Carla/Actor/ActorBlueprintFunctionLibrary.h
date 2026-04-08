@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -16,6 +16,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include <util/ue-header-guard-end.h>
 
+#include "Autoware/Sensors/AutowareGnssSensor.h"
 #include "ActorBlueprintFunctionLibrary.generated.h"
 
 class AGnssSensor;
@@ -90,12 +91,14 @@ public:
       bool &Success,
       FActorDefinition &Definition);
 
-  static FActorDefinition MakeGnssDefinition();
+  static FActorDefinition MakeGnssDefinition(); 
+  static FActorDefinition MakeAutowareGnssDefinition(); 
 
   UFUNCTION(Category = "Carla Actor", BlueprintCallable)
   static void MakeGnssDefinition(
       bool &Success,
-      FActorDefinition &Definition);
+      FActorDefinition &Definition,
+      FString Name);
 
   static FActorDefinition MakeIMUDefinition();
 
@@ -245,6 +248,7 @@ public:
   static void SetLidar(const FActorDescription &Description, FLidarDescription &Lidar);
 
   static void SetGnss(const FActorDescription &Description, AGnssSensor *Gnss);
+  static void SetAutowareGnss(const FActorDescription &Description, AAutowareGnssSensor *Gnss);
 
   static void SetIMU(const FActorDescription &Description, AInertialMeasurementUnit *IMU);
 

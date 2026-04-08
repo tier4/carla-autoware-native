@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -118,13 +118,13 @@ void ROS2::SetFrame(uint64_t frame) {
       RemoveActorCallback(actor);
     }
    }
-  if (_autoware_controller) {  // Autoware input has priority
+  if (_autoware_controller) {  // Autoware input has priority (acceleration control from /control/command/control_cmd)
     void* actor = _autoware_controller->GetVehicle();
     if (_autoware_controller->HasNewControl()) {
       auto it = _actor_callbacks.find(actor);
       if (it != _actor_callbacks.cend()) {
         const auto control = _autoware_controller->GetControl();
-        it->second(actor, control);
+        it->second(actor, ROS2CallbackData(control));
       }
     }
   }
@@ -871,6 +871,29 @@ void ROS2::ProcessDataFromGNSS(
       carla_publisher->Publish();
     } else if (const auto autoware_publisher = std::dynamic_pointer_cast<AutowareGNSSPublisher>(sensors.first)) {
       autoware_publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_world_transform.location, (const float*)&sensor_world_transform.rotation);
+      autoware_publisher->Publish();
+    }
+  }
+  if (sensors.second && _publish_tf) {
+    std::shared_ptr<CarlaTransformPublisher> publisher = std::dynamic_pointer_cast<CarlaTransformPublisher>(sensors.second);
+    publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_transform.location, (const float*)&sensor_transform.rotation);
+    publisher->Publish();
+  }
+}
+
+void ROS2::ProcessDataFromAutowareGNSS(
+  uint64_t sensor_type,
+  carla::streaming::detail::stream_id_type stream_id,
+  const carla::geom::Transform sensor_transform,
+  const carla::geom::GeoLocation &data,
+  const carla::geom::Transform &sensor_world_transform,
+  const double mgrs_offset_position[3],
+  void *actor) {
+  log_info("Sensor GnssSensor to ROS data: frame.", _frame, "sensor.", sensor_type, "stream.", stream_id, "geo.", data.latitude, data.longitude, data.altitude);
+  auto sensors = GetOrCreateSensor(ESensors::GnssSensor, stream_id, actor);
+  if (sensors.first) {
+    if (const auto autoware_publisher = std::dynamic_pointer_cast<AutowareGNSSPublisher>(sensors.first)) {
+      autoware_publisher->SetData(_seconds, _nanoseconds, (const float*)&sensor_world_transform.location, (const float*)&sensor_world_transform.rotation, mgrs_offset_position);
       autoware_publisher->Publish();
     }
   }

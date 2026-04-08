@@ -144,8 +144,8 @@ bool AutowareController::HasNewControl() const {
          _impl->_engage_subscriber.HasNewMessage();
 }
 
-VehicleAckermannControl AutowareController::GetControl() {
-  VehicleAckermannControl control_out;
+VehicleAccelerationControl AutowareController::GetControl() {
+  VehicleAccelerationControl control_out{};
 
   const auto control_in = _impl->_control_subscriber.GetMessage();
   const auto gear_in = _impl->_gear_subscriber.GetMessage();
@@ -190,20 +190,18 @@ VehicleAckermannControl AutowareController::GetControl() {
       << std::endl;
   }
 
-  control_out.speed = control_in.longitudinal().velocity();
-  if (control_in.longitudinal().is_defined_acceleration()) {
-    control_out.acceleration = control_in.longitudinal().acceleration();
-  }
-  if (control_in.longitudinal().is_defined_jerk()) {
-    control_out.jerk = control_in.longitudinal().jerk();
-  }
+  // Longitudinal: use ONLY acceleration from /control/command/control_cmd to drive the vehicle.
+  // Velocity and jerk from the message are intentionally ignored to keep pure acceleration control.
+  control_out.acceleration = control_in.longitudinal().acceleration();
 
   /// @note Set lateral negative, because Carla treats positive as right and Autoware expects positive to represent left (all when moving forward)
   const auto raw_steering = -control_in.lateral().steering_tire_angle();
 
-  // Apply steering compensation using lookup table
+  // Apply steering compensation lookup table (measured on Lincoln MKZ).
+  // This reduces understeer / outward drift by mapping Autoware's target tire angle to a vehicle input that
+  // better matches the requested actual tire angle.
   control_out.steer = autoware_steering_compensation::GetSteeringInput(raw_steering);
-
+  control_out.steer_speed = 0.0f;
   if (control_in.lateral().is_defined_steering_tire_rotation_rate()) {
     control_out.steer_speed = -control_in.lateral().steering_tire_rotation_rate();
   }

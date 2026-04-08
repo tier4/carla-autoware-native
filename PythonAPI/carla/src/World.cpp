@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -342,6 +342,7 @@ void export_world() {
     .def("get_names_of_all_objects", CALL_RETURNING_LIST(cc::World, GetNamesOfAllObjects))
     .def("get_publish_tf", &cc::World::GetPublishTF)
     .def("set_publish_tf", &cc::World::SetPublishTF, (arg("publish_tf")))
+    .def("get_ego_spawn_points", &cc::World::GetEgoSpawnPoints)
     //.def("get_lightmanager", CONST_CALL_WITHOUT_GIL(cc::World, GetLightManager)) Disabling the light manager as it is not supported in 0.10.0 due to lack of night mode
     
     // All of this is deprecated:

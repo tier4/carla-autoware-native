@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -89,6 +89,12 @@ namespace client {
 
     /// Disable the constant velocity mode
     void DisableConstantVelocity();
+
+    /// Enable a constant acceleration mode (direct acceleration, no pedal input)
+    void EnableConstantAcceleration(const geom::Vector3D &vector);
+
+    /// Disable the constant acceleration mode
+    void DisableConstantAcceleration();
 
     /// Add impulse to the actor at its center of mass.
     void AddImpulse(const geom::Vector3D &vector);

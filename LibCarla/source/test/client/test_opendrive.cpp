@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -369,7 +369,7 @@ TEST(road, iterate_waypoints) {
         }
       }
       ASSERT_GT(count, 0u);
-      float seconds = 1e-3f * stop_watch.GetElapsedTime();
+      float seconds = 1e-3f * static_cast<float>(stop_watch.GetElapsedTime());
       carla::logging::log(file, "done in", seconds, "seconds.");
     }));
   }
@@ -416,7 +416,7 @@ TEST(road, get_waypoint) {
           ASSERT_EQ(right->s, wp.s);
         }
       }
-      float seconds = 1e-3f * stop_watch.GetElapsedTime();
+      float seconds = 1e-3f * static_cast<float>(stop_watch.GetElapsedTime());
       carla::logging::log(file, "done in", seconds, "seconds.");
     }));
   }

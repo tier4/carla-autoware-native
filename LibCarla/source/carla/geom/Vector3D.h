@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -66,7 +66,9 @@ namespace geom {
 
     inline Vector3D MakeUnitVector() const {
       const float length = Length();
-      DEVELOPMENT_ASSERT(length > 2.0f * std::numeric_limits<float>::epsilon());
+      if (length <= 0.0f) {
+        return Vector3D(0.0f, 0.0f, 0.0f);
+      }
       const float k = 1.0f / length;
       return Vector3D(x * k, y * k, z * k);
     }

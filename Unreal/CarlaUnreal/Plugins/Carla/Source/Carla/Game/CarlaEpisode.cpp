@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -32,6 +32,8 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include <util/ue-header-guard-end.h>
+
+#include "Autoware/Game/AutowareGameModeBase.h"
 
 constexpr TCHAR DefaultRecastBuilderPath[] = TEXT(RECASTBUILDER_PATH);
 
@@ -225,7 +227,6 @@ void UCarlaEpisode::ApplySettings(const FEpisodeSettings &Settings)
 TArray<FTransform> UCarlaEpisode::GetRecommendedSpawnPoints() const
 {
   ACarlaGameModeBase *GM = UCarlaStatics::GetGameMode(GetWorld());
-
   return GM->GetSpawnPointsTransforms();
 }
 

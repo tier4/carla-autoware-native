@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -241,6 +241,9 @@ namespace client {
 
     /// Simple test method to verify binding
     // int GetTestValue() const { return 42; }
+
+    /// Get all ego spawn points available in the level.
+    std::vector<geom::Transform> GetEgoSpawnPoints() const;
 
   private:
 

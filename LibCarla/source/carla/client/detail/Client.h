@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -163,7 +163,9 @@ namespace detail {
 
     void SetPublishTF(bool publish_tf);
 
-    bool GetPublishTF() const; 
+    bool GetPublishTF() const;
+
+    std::vector<geom::Transform> GetEgoSpawnPoints() const;
 
     std::vector<rpc::Actor> GetActorsById(const std::vector<ActorId> &ids);
 
@@ -222,6 +224,13 @@ namespace detail {
         const geom::Vector3D &vector);
 
     void DisableActorConstantVelocity(
+        rpc::ActorId actor);
+
+    void EnableActorConstantAcceleration(
+        rpc::ActorId actor,
+        const geom::Vector3D &vector);
+
+    void DisableActorConstantAcceleration(
         rpc::ActorId actor);
 
     void AddActorImpulse(

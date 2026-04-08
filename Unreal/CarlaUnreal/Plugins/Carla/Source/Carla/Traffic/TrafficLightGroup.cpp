@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -14,6 +14,7 @@ ATrafficLightGroup::ATrafficLightGroup()
 {
   // Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
   PrimaryActorTick.bCanEverTick = true;
+  PrimaryActorTick.bStartWithTickEnabled = true;
   SceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
   RootComponent = SceneComponent;
 }
@@ -61,6 +62,12 @@ void ATrafficLightGroup::Tick(float DeltaTime)
 
   if (bIsFrozen)
   {
+    return;
+  }
+
+  if (Controllers.Num() == 0)
+  {
+    UE_LOG(LogCarla, Error, TEXT("TrafficLightGroup::Tick() JunctionId=%d has NO CONTROLLERS!"), JunctionId);
     return;
   }
 
