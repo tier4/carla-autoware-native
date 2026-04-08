@@ -212,6 +212,12 @@ if (ENABLE_RGL)
     file (COPY "${RGL_LIB_DIR}/libRobotecGPULidar.so" DESTINATION "${RGL_BIN_DST}")
     message (STATUS "CarlaRGL: Copied libRobotecGPULidar.so to plugin Binaries/")
   endif ()
+  # Ros2ForCarlaLite - thin rclcpp wrapper built alongside RGL (same parent directory)
+  set (ROS2_LITE_SO "${RGL_ROOT}/../Ros2ForCarlaLite/build/libRos2ForCarlaLite.so")
+  if (EXISTS "${ROS2_LITE_SO}")
+    file (COPY "${ROS2_LITE_SO}" DESTINATION "${RGL_BIN_DST}")
+    message (STATUS "CarlaRGL: Copied libRos2ForCarlaLite.so to plugin Binaries/")
+  endif ()
   if (IS_DIRECTORY "${RGL_LIB_DIR}/ros2_standalone")
     # Copy real files only (no symlinks) to avoid UE packaging issues.
     # Then create symlinks locally so the dynamic linker can resolve soname references.
