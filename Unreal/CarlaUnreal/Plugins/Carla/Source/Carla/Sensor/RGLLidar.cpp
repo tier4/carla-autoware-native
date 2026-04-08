@@ -9,7 +9,6 @@
 #include "Carla/Actor/ActorBlueprintFunctionLibrary.h"
 #include "Carla/Game/CarlaStatics.h"
 #include "Carla/RGL/IRGLBackend.h"
-#include "Carla/RGL/RGLLog.h"
 
 #include <util/ue-header-guard-begin.h>
 #include "Engine/World.h"
@@ -82,14 +81,14 @@ void ARGLLidar::Set(const FActorDescription& ActorDescription)
         RglLidarDrawLifeTime = FMath::Max(0.0f, FCString::Atof(*LifeTimeAttr->Value));
     }
 
-    RGLLog::Info("ARGLLidar configured: Channels=", Description.Channels,
-                 "Range=", Description.Range, "cm PPS=", Description.PointsPerSecond,
-                 "Freq=", Description.RotationFrequency, "Hz FOV=[",
-                 Description.LowerFovLimit, ",", Description.UpperFovLimit,
-                 "] HorizFOV=", Description.HorizontalFov,
-                 "ShowLidar=", bRglShowLidarPoints ? "ON" : "OFF",
-                 "PointRate=", RglLidarDrawPointRate,
-                 "LifeTime=", RglLidarDrawLifeTime);
+    UE_LOG(LogCarla, Log,
+        TEXT("ARGLLidar configured: Channels=%d Range=%.0f cm PPS=%d Freq=%.1f Hz FOV=[%.1f,%.1f] HorizFOV=%.1f ShowLidar=%s PointRate=%.2f LifeTime=%.2f"),
+        Description.Channels, Description.Range,
+        Description.PointsPerSecond, Description.RotationFrequency,
+        Description.LowerFovLimit, Description.UpperFovLimit,
+        Description.HorizontalFov,
+        bRglShowLidarPoints ? TEXT("ON") : TEXT("OFF"),
+        RglLidarDrawPointRate, RglLidarDrawLifeTime);
 }
 
 // ============================================================================
@@ -233,7 +232,7 @@ void ARGLLidar::CreateRGLGraph()
 
     bGraphCreated = true;
     bRglRos2Active = !Config.Ros2Topic.IsEmpty();
-    RGLLog::Info("ARGLLidar: Session created via CarlaRGL backend");
+    UE_LOG(LogCarla, Log, TEXT("ARGLLidar: Session created via CarlaRGL backend"));
 }
 
 void ARGLLidar::DestroyRGLGraph()
