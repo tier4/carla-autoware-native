@@ -202,6 +202,16 @@ if (ENABLE_RGL)
   )
   # libRobotecGPULidar.so is now in the independent CarlaRGL plugin (Plugins/CarlaRGL/Binaries/Linux/).
   # CarlaRGL.Build.cs links it directly. No need to add to CARLA_UNREAL_LIBRARIES (Libraries.def).
+
+  # Activate CarlaRGL plugin by copying .uplugin.in → .uplugin.
+  # Without the .uplugin file, UE5 ignores the plugin entirely.
+  # This ensures CarlaRGL is only loaded when explicitly built with ENABLE_RGL=ON.
+  set (CARLA_RGL_PLUGIN_DIR "${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Plugins/CarlaRGL")
+  configure_file (
+    "${CARLA_RGL_PLUGIN_DIR}/CarlaRGL.uplugin.in"
+    "${CARLA_RGL_PLUGIN_DIR}/CarlaRGL.uplugin"
+    COPYONLY
+  )
 endif()
 
 if (ENABLE_OSM2ODR)
