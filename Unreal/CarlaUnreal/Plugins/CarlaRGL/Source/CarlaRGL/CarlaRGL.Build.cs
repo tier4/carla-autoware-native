@@ -65,12 +65,17 @@ public class CarlaRGL : ModuleRules
             }
 
             // Include all .so files in Binaries/Linux/ for packaging (ROS2 standalone libs etc.)
+            // Skip symlinks - UE packaging cannot handle them (size mismatch loop).
             foreach (var SoFile in Directory.GetFiles(BinLinux, "*.so*"))
             {
                 string FileName = System.IO.Path.GetFileName(SoFile);
                 if (FileName != "libRobotecGPULidar.so" && !FileName.StartsWith("libUnrealEditor-"))
                 {
-                    RuntimeDependencies.Add(SoFile);
+                    var fi = new FileInfo(SoFile);
+                    if ((fi.Attributes & FileAttributes.ReparsePoint) == 0)
+                    {
+                        RuntimeDependencies.Add(SoFile);
+                    }
                 }
             }
 
