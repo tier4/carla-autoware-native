@@ -215,7 +215,10 @@ public class Carla :
       if (EnableRGL)
       {
         Console.WriteLine("RGL (RobotecGPULidar) support is enabled. Library linked via CarlaRGL module.");
-        PrivateDependencyModuleNames.Add("CarlaRGL");
+        // NOTE: Do NOT add PrivateDependencyModuleNames("CarlaRGL") here.
+        // CarlaRGL depends on Carla (not the reverse). Adding it would create a cycle.
+        // Carla module uses IRGLBackend/FRGLBackendRegistry (defined in Carla itself).
+        // CarlaRGL registers its backend implementation at module startup.
       }
     }
   }
