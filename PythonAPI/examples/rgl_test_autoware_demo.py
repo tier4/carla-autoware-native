@@ -240,7 +240,8 @@ def generate_vlp16_blueprint(blueprint_library, lidar_type="rgl",
             blueprint.set_attribute("rgl_lidar_draw_life_time", str(rgl_lidar_draw_life_time))
 
         # RGL ROS2 publish (GPU-direct, independent of CARLA ROS2)
-        rgl_topic = rgl_ros2_topic if rgl_ros2_topic else ros_topic_name
+        # Only enabled when --rgl_ros2_topic is explicitly set (no fallback to ros_topic_name).
+        rgl_topic = rgl_ros2_topic
         if rgl_topic:
             blueprint.set_attribute("rgl_ros2_topic", rgl_topic)
             blueprint.set_attribute("rgl_ros2_frame_id", ros_frame_id)
@@ -737,7 +738,7 @@ def main():
         help='Enable CARLA built-in ROS2 publish (via enable_for_ros())')
     # Common ROS2 settings (shared by CARLA and RGL)
     argparser.add_argument(
-        '--ros_topic_name', default='',
+        '--ros_topic_name', default='/sensing/lidar/top/pointcloud_raw_ex',
         help='ROS2 topic name for LiDAR pointcloud')
     argparser.add_argument(
         '--ros_frame_id', default='velodyne_top',
