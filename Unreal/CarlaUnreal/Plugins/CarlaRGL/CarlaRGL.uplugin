@@ -1,0 +1,27 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "CarlaRGL",
+  "Description": "RobotecGPULidar backend for CARLA GPU-accelerated LiDAR",
+  "Category": "CARLA",
+  "CreatedBy": "TIER IV",
+  "EnabledByDefault": true,
+  "CanContainContent": false,
+  "Installed": true,
+  "Modules":
+  [
+    {
+      "Name": "CarlaRGL",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins":
+  [
+    {
+      "Name": "Carla",
+      "Enabled": true
+    }
+  ]
+}
