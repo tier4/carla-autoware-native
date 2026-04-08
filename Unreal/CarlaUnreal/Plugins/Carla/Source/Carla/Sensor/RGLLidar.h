@@ -12,13 +12,14 @@
 //   - Same Python API: sensor.lidar.rgl
 //
 // NOTE: The UCLASS declaration must NOT be inside #ifdef blocks (UHT limitation).
-// RGL-specific types are hidden behind an opaque PIMPL struct to avoid
-// including rgl/api/core.h in this header.
+// All RGL-specific logic is delegated to the IRGLBackend interface,
+// which is implemented by the CarlaRGL module.
 
 #pragma once
 
 #include "Carla/Sensor/Sensor.h"
 #include "Carla/Sensor/LidarDescription.h"
+#include "Carla/RGL/IRGLBackend.h"
 
 #include <util/disable-ue4-macros.h>
 #include <carla/sensor/data/LidarData.h>
@@ -28,7 +29,7 @@
 
 /// GPU-accelerated LiDAR sensor using RobotecGPULidar.
 /// Registered as sensor.lidar.rgl in the CARLA sensor registry.
-/// When compiled without WITH_RGL, the sensor spawns but produces no output.
+/// When no RGL backend is registered (CarlaRGL module not loaded), the sensor produces no output.
 UCLASS()
 class CARLA_API ARGLLidar : public ASensor
 {
@@ -59,27 +60,18 @@ private:
     /// Destroy the RGL computation graph.
     void DestroyRGLGraph();
 
-    /// Generate ray pattern transforms based on current LiDAR configuration.
-    /// Returns the number of rays generated.
-    int32 GenerateRayPattern(float DeltaSeconds);
-
-    /// Simulate LiDAR for the current tick: update scene, run graph, collect results.
+    /// Simulate LiDAR for the current tick: delegates to IRGLBackend.
     void SimulateLidar(float DeltaSeconds);
-
-    /// Retrieve results from the RGL graph and populate LidarData.
-    void CollectResults();
 
     // ---- Configuration ----
 
     /// LiDAR parameters (channels, range, FOV, etc.) - same struct as ARayCastLidar.
     FLidarDescription Description;
 
-    // ---- RGL internals (opaque, defined only when WITH_RGL is available) ----
+    // ---- RGL session (managed by the CarlaRGL backend) ----
 
-    /// Opaque pointer to RGL-specific state (graph nodes, buffers).
-    /// Defined as FRGLLidarImpl in the .cpp file to avoid including rgl headers here.
-    struct FRGLLidarImpl;
-    FRGLLidarImpl* RGLImpl = nullptr;
+    /// Opaque handle returned by IRGLBackend::CreateSession().
+    FRGLSessionHandle RGLSessionHandle = nullptr;
 
     // ---- Simulation State ----
 
