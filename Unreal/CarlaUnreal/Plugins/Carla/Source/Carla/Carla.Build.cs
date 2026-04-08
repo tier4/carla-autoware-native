@@ -57,14 +57,14 @@ public class Carla :
     foreach (var Path in File.ReadAllText(Path.Combine(PluginDirectory, "Includes.def")).Split(';'))
     {
       var Trimmed = Path.Trim();
-      if (Trimmed.Length != 0)
+      if (Trimmed.Length != 0 && !Trimmed.Contains("RobotecGPULidar"))
         PublicIncludePaths.Add(Trimmed.Trim());
     }
 
     foreach (var Path in File.ReadAllText(Path.Combine(PluginDirectory, "Libraries.def")).Split(';'))
     {
       var Trimmed = Path.Trim();
-      if (Trimmed.Length != 0)
+      if (Trimmed.Length != 0 && !Trimmed.Contains("RobotecGPULidar"))
         PublicAdditionalLibraries.Add(Trimmed.Trim());
     }
 
@@ -200,8 +200,8 @@ public class Carla :
     }
 
     // [RGL] RobotecGPULidar - GPU-accelerated LiDAR sensor via OptiX/CUDA.
-    // WITH_RGL is defined in Definitions.def; the library is linked via Libraries.def.
-    // Deploy the .so from Binaries/Linux/ (same pattern as ROS2).
+    // The .so is linked via the CarlaRGL module (not here) to prevent dependency
+    // propagation to StreetMap, CarlaTools, and other Carla-dependent modules.
     {
       bool EnableRGL = false;
       foreach (var Def in PrivateDefinitions)
@@ -214,27 +214,8 @@ public class Carla :
       }
       if (EnableRGL)
       {
-        Console.WriteLine("RGL (RobotecGPULidar) support is enabled.");
-        string CarlaPluginSourcePath = Path.GetFullPath(ModuleDirectory);
-        string CarlaPluginBinariesLinuxPath = Path.Combine(CarlaPluginSourcePath, "..", "..", "Binaries", "Linux");
-        AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libRobotecGPULidar.so"));
-
-        // RGL ROS2 extension headers
-        foreach (var Lib in PublicAdditionalLibraries)
-        {
-          if (Lib.Contains("libRobotecGPULidar"))
-          {
-            // Derive RGL root from the library path
-            string RGLRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Lib), "..", "..", ".."));
-            string RGLRos2Include = Path.Combine(RGLRoot, "extensions", "ros2", "include");
-            if (Directory.Exists(RGLRos2Include))
-            {
-              PublicIncludePaths.Add(RGLRos2Include);
-              Console.WriteLine("RGL ROS2 extension include: " + RGLRos2Include);
-            }
-            break;
-          }
-        }
+        Console.WriteLine("RGL (RobotecGPULidar) support is enabled. Library linked via CarlaRGL module.");
+        PrivateDependencyModuleNames.Add("CarlaRGL");
       }
     }
   }

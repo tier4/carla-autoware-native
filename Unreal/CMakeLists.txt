@@ -198,6 +198,7 @@ if (ENABLE_RGL)
     APPEND
     CARLA_UNREAL_INCLUDE_PATHS
     "${CARLA_WORKSPACE_PATH}/../RobotecGPULidar/include"
+    "${CARLA_WORKSPACE_PATH}/../RobotecGPULidar/extensions/ros2/include"
   )
   list (
     APPEND
