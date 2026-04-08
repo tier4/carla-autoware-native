@@ -200,11 +200,8 @@ if (ENABLE_RGL)
     "${CARLA_WORKSPACE_PATH}/../RobotecGPULidar/include"
     "${CARLA_WORKSPACE_PATH}/../RobotecGPULidar/extensions/ros2/include"
   )
-  list (
-    APPEND
-    CARLA_UNREAL_LIBRARIES
-    "${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Plugins/Carla/Binaries/Linux/libRobotecGPULidar.so"
-  )
+  # libRobotecGPULidar.so is now in the independent CarlaRGL plugin (Plugins/CarlaRGL/Binaries/Linux/).
+  # CarlaRGL.Build.cs links it directly. No need to add to CARLA_UNREAL_LIBRARIES (Libraries.def).
 endif()
 
 if (ENABLE_OSM2ODR)
