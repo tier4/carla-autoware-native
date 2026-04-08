@@ -64,6 +64,16 @@ public class CarlaRGL : ModuleRules
                 Console.WriteLine("CarlaRGL WARNING: libRobotecGPULidar.so not found at " + RglSo);
             }
 
+            // Include all .so files in Binaries/Linux/ for packaging (ROS2 standalone libs etc.)
+            foreach (var SoFile in Directory.GetFiles(BinLinux, "*.so*"))
+            {
+                string FileName = System.IO.Path.GetFileName(SoFile);
+                if (FileName != "libRobotecGPULidar.so" && !FileName.StartsWith("libUnrealEditor-"))
+                {
+                    RuntimeDependencies.Add(SoFile);
+                }
+            }
+
             // RGL include paths from Includes.def (filter for RobotecGPULidar entries)
             string IncsPath = Path.Combine(CarlaPluginDir, "Includes.def");
             if (File.Exists(IncsPath))
