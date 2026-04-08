@@ -392,3 +392,49 @@ bool RGLDynLoader::IsLoaded()
 {
     return Handle != nullptr;
 }
+
+// --- Ros2ForCarlaLite dynamic loader ---
+
+static void* GRos2LiteHandle = nullptr;
+typedef bool (*fn_ros2_lite_init_t)(void);
+typedef bool (*fn_ros2_lite_ok_t)(void);
+typedef void (*fn_ros2_lite_shutdown_t)(void);
+static fn_ros2_lite_init_t fn_ros2_lite_init = nullptr;
+static fn_ros2_lite_ok_t fn_ros2_lite_ok = nullptr;
+static fn_ros2_lite_shutdown_t fn_ros2_lite_shutdown = nullptr;
+
+bool Ros2ForCarlaLite::Load(const char* LibPath)
+{
+    if (GRos2LiteHandle) return true;
+    GRos2LiteHandle = dlopen(LibPath, RTLD_NOW | RTLD_GLOBAL);
+    if (!GRos2LiteHandle) return false;
+
+    fn_ros2_lite_init = (fn_ros2_lite_init_t)dlsym(GRos2LiteHandle, "ros2_for_carla_lite_init");
+    fn_ros2_lite_ok = (fn_ros2_lite_ok_t)dlsym(GRos2LiteHandle, "ros2_for_carla_lite_ok");
+    fn_ros2_lite_shutdown = (fn_ros2_lite_shutdown_t)dlsym(GRos2LiteHandle, "ros2_for_carla_lite_shutdown");
+    return fn_ros2_lite_init != nullptr;
+}
+
+bool Ros2ForCarlaLite::Init()
+{
+    if (!fn_ros2_lite_init) return false;
+    return fn_ros2_lite_init();
+}
+
+void Ros2ForCarlaLite::Shutdown()
+{
+    if (fn_ros2_lite_shutdown) fn_ros2_lite_shutdown();
+}
+
+void Ros2ForCarlaLite::Unload()
+{
+    fn_ros2_lite_init = nullptr;
+    fn_ros2_lite_ok = nullptr;
+    fn_ros2_lite_shutdown = nullptr;
+    if (GRos2LiteHandle) { dlclose(GRos2LiteHandle); GRos2LiteHandle = nullptr; }
+}
+
+bool Ros2ForCarlaLite::IsLoaded()
+{
+    return GRos2LiteHandle != nullptr;
+}
