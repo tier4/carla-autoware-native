@@ -54,10 +54,10 @@ public class CarlaRGL : ModuleRules
             string RglSo = Path.Combine(BinLinux, "libRobotecGPULidar.so");
             if (File.Exists(RglSo))
             {
-                PublicAdditionalLibraries.Add(RglSo);
+                // No link-time dependency - RGLDynLoader handles dlopen at runtime.
+                // Keep RuntimeDependencies for UE packaging.
                 RuntimeDependencies.Add(RglSo);
-                PublicDelayLoadDLLs.Add(RglSo);
-                Console.WriteLine("CarlaRGL: libRobotecGPULidar.so linked from CarlaRGL plugin.");
+                Console.WriteLine("CarlaRGL: libRobotecGPULidar.so found (will be loaded at runtime via dlopen).");
             }
             else
             {
