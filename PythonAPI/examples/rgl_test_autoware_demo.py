@@ -358,13 +358,6 @@ def spawn_sensors(world, base_link, ego, args):
         rgl_ros2_history_depth=args.rgl_ros2_history_depth,
         rgl_ros2_format=args.rgl_ros2_format,
     )
-    vlp16_blueprints = []
-    if args.lidar_type == "both":
-        rc_bp, rgl_bp = generate_vlp16_blueprint_both(blueprint_library, **lidar_kwargs)
-        vlp16_blueprints = [rc_bp, rgl_bp]
-    else:
-        vlp16_blueprints = [generate_vlp16_blueprint(blueprint_library,
-                                                      lidar_type=args.lidar_type, **lidar_kwargs)]
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = generate_imu_blueprint(blueprint_library)
@@ -383,10 +376,28 @@ def spawn_sensors(world, base_link, ego, args):
         attach_to=base_link)
 
     # Spawn top lidar(s)
-    # When num_lidars > 1, each additional LiDAR is offset +20cm in Z.
+    # When num_lidars > 1, each additional LiDAR is offset +20cm in Z
+    # and topic names get a suffix _0, _1, ...
     for lidar_idx in range(args.num_lidars):
         z_offset = lidar_idx * 0.20  # 20cm per additional LiDAR
         sensor_kit_to_lidar_top_transform = ROS2.Transform(yaw=1.575, z=z_offset)
+
+        # Add topic suffix when multiple LiDARs
+        idx_kwargs = dict(lidar_kwargs)
+        if args.num_lidars >= 2:
+            suffix = f"_{lidar_idx}"
+            if idx_kwargs["ros_topic_name"]:
+                idx_kwargs["ros_topic_name"] = idx_kwargs["ros_topic_name"] + suffix
+            if idx_kwargs["rgl_ros2_topic"]:
+                idx_kwargs["rgl_ros2_topic"] = idx_kwargs["rgl_ros2_topic"] + suffix
+
+        vlp16_blueprints = []
+        if args.lidar_type == "both":
+            rc_bp, rgl_bp = generate_vlp16_blueprint_both(blueprint_library, **idx_kwargs)
+            vlp16_blueprints = [rc_bp, rgl_bp]
+        else:
+            vlp16_blueprints = [generate_vlp16_blueprint(blueprint_library,
+                                                          lidar_type=args.lidar_type, **idx_kwargs)]
         for vlp16_blueprint in vlp16_blueprints:
             lidar = world.spawn_actor(
                 vlp16_blueprint,
@@ -395,7 +406,7 @@ def spawn_sensors(world, base_link, ego, args):
             if args.enable_carla_ros2:
                 lidar.enable_for_ros()
     if args.num_lidars > 1:
-        print(f"Spawned {args.num_lidars} LiDARs (Z offset: 0 to +{(args.num_lidars-1)*20}cm)")
+        print(f"Spawned {args.num_lidars} LiDARs (Z offset: 0 to +{(args.num_lidars-1)*20}cm, topic suffix: _0 to _{args.num_lidars-1})")
 
     # Spawn traffic light camera
     sensor_kit_to_traffic_light_left_camera_transform = ROS2.Transform(x=0.05,
