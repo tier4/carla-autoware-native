@@ -737,7 +737,7 @@ def main():
         help='Enable CARLA built-in ROS2 publish (via enable_for_ros())')
     # Common ROS2 settings (shared by CARLA and RGL)
     argparser.add_argument(
-        '--ros_topic_name', default='/sensing/lidar/top/pointcloud_raw_ex',
+        '--ros_topic_name', default='',
         help='ROS2 topic name for LiDAR pointcloud')
     argparser.add_argument(
         '--ros_frame_id', default='velodyne_top',
