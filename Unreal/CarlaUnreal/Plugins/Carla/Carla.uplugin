@@ -23,11 +23,6 @@
       [
         "Engine"
       ]
-    },
-    {
-      "Name": "CarlaRGL",
-      "Type": "Runtime",
-      "LoadingPhase": "Default"
     }
   ],
   "Plugins":
