@@ -188,6 +188,7 @@ if (ENABLE_ROS2_DEMO)
 endif()
 
 # [RGL] Add WITH_RGL definition and RGL include/library paths when ENABLE_RGL is ON.
+set (RGL_ROOT "${CARLA_WORKSPACE_PATH}/../RobotecGPULidar" CACHE PATH "Path to RobotecGPULidar root directory")
 if (ENABLE_RGL)
   list (
     APPEND
@@ -197,8 +198,8 @@ if (ENABLE_RGL)
   list (
     APPEND
     CARLA_UNREAL_INCLUDE_PATHS
-    "${CARLA_WORKSPACE_PATH}/../RobotecGPULidar/include"
-    "${CARLA_WORKSPACE_PATH}/../RobotecGPULidar/extensions/ros2/include"
+    "${RGL_ROOT}/include"
+    "${RGL_ROOT}/extensions/ros2/include"
   )
   # libRobotecGPULidar.so is now in the independent CarlaRGL plugin (Plugins/CarlaRGL/Binaries/Linux/).
   # CarlaRGL.Build.cs links it directly. No need to add to CARLA_UNREAL_LIBRARIES (Libraries.def).
