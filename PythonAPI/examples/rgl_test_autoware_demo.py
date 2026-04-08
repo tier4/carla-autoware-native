@@ -404,7 +404,8 @@ def spawn_sensors(world, base_link, ego, args):
                 vlp16_blueprint,
                 sensor_kit_to_lidar_top_transform.to_carla(),
                 attach_to=sensor_kit)
-            if args.enable_carla_ros2:
+            # RGL lidar always uses CARLA ROS2 for publishing (no RGL-internal ROS2 by default)
+            if args.enable_carla_ros2 or args.lidar_type in ("rgl", "both"):
                 lidar.enable_for_ros()
     if args.num_lidars > 1:
         print(f"Spawned {args.num_lidars} LiDARs (Z offset: 0 to +{(args.num_lidars-1)*20}cm, topic suffix: _0 to _{args.num_lidars-1})")
