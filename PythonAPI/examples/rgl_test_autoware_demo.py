@@ -383,8 +383,8 @@ def spawn_sensors(world, base_link, ego, args):
         attach_to=base_link)
 
     # Spawn top lidar(s)
-    # When rgl_num_lidars > 1, each additional LiDAR is offset +20cm in Z.
-    for lidar_idx in range(args.rgl_num_lidars):
+    # When num_lidars > 1, each additional LiDAR is offset +20cm in Z.
+    for lidar_idx in range(args.num_lidars):
         z_offset = lidar_idx * 0.20  # 20cm per additional LiDAR
         sensor_kit_to_lidar_top_transform = ROS2.Transform(yaw=1.575, z=z_offset)
         for vlp16_blueprint in vlp16_blueprints:
@@ -394,8 +394,8 @@ def spawn_sensors(world, base_link, ego, args):
                 attach_to=sensor_kit)
             if args.enable_carla_ros2:
                 lidar.enable_for_ros()
-    if args.rgl_num_lidars > 1:
-        print(f"Spawned {args.rgl_num_lidars} LiDARs (Z offset: 0 to +{(args.rgl_num_lidars-1)*20}cm)")
+    if args.num_lidars > 1:
+        print(f"Spawned {args.num_lidars} LiDARs (Z offset: 0 to +{(args.num_lidars-1)*20}cm)")
 
     # Spawn traffic light camera
     sensor_kit_to_traffic_light_left_camera_transform = ROS2.Transform(x=0.05,
@@ -765,8 +765,8 @@ def main():
         choices=['minimal', 'pcl24', 'pcl48', 'PointXYZIRCAEDT'],
         help='RGL ROS2 point cloud format (default: PointXYZIRCAEDT)')
     argparser.add_argument(
-        '--rgl_num_lidars', type=int, default=1,
-        help='Number of RGL LiDARs to spawn. Each additional LiDAR is offset +20cm in Z. (default: 1)')
+        '--num_lidars', type=int, default=1,
+        help='Number of LiDARs to spawn. Each additional LiDAR is offset +20cm in Z. (default: 1)')
     args = argparser.parse_args()
 
     # Deploy PostProcess profiles before connecting to server
