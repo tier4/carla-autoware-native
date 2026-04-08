@@ -8,7 +8,7 @@
   "CreatedBy": "TIER IV",
   "EnabledByDefault": true,
   "CanContainContent": false,
-  "Installed": true,
+  "Installed": false,
   "Modules":
   [
     {
