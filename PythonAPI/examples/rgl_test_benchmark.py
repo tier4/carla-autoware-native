@@ -4,7 +4,7 @@ Automated LiDAR benchmark for CARLA + RGL.
 Runs all (num_lidars, lidar_type) combinations and aggregates results.
 
 Usage:
-    python3 rgl_test_benchmark.py --window-threshold 1000 --num_lidars 1,2,4
+    python3 rgl_test_benchmark.py --ros-clock-threshold 60 --num_lidars 1,2,4
 """
 
 import argparse
@@ -35,6 +35,7 @@ CLIENT_LAUNCH_WAIT         = 20   # seconds to wait for CARLA to become ready af
 EGO_SPAWN_TIMEOUT          = 30   # seconds to wait for "[INFO]: Ego spawned!" in client output
 INTER_RUN_PAUSE            = 5    # seconds between runs for OS/GPU to settle
 SIM_BEHIND_SILENCE_TIMEOUT = 5.0  # seconds; if no "Simulation is X ms behind" for this long, report 0
+SIM_CLOCK_TOPIC            = "/clock"  # ROS2 topic used to measure simulation time
 
 # ============================================================
 # LiDAR type definitions: (client_extra_args, hz_extra_args)
@@ -164,6 +165,86 @@ def _wait_for_keyword(lines, proc, keyword, timeout):
 
 
 # ============================================================
+# ROS clock monitor
+# ============================================================
+
+def _clock_monitor_thread(threshold_sec, stop_event, exceeded_event, proc_ref):
+    """
+    Background thread: subscribes to SIM_CLOCK_TOPIC via `ros2 topic echo`,
+    records the first sim timestamp as t0, and sets exceeded_event when
+    (current_sim_time - t0) >= threshold_sec.
+
+    proc_ref is a one-element list; the subprocess is stored there so the
+    caller can kill it from outside if stop_event is triggered externally.
+
+    Parses the YAML-style output of `ros2 topic echo --field clock /clock`:
+        sec: 1234
+        nanosec: 567000000
+        ---
+    """
+    cmd = ["ros2", "topic", "echo", "--field", "clock", SIM_CLOCK_TOPIC]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    proc_ref.append(proc)
+
+    start_ns  = None
+    cur_sec   = None
+    cur_nsec  = None
+
+    try:
+        for raw in iter(proc.stdout.readline, b""):
+            if stop_event.is_set():
+                break
+
+            line = raw.decode("utf-8", errors="replace").strip()
+
+            if line == "---":
+                # Process accumulated sec/nanosec pair
+                if cur_sec is not None and cur_nsec is not None:
+                    now_ns = cur_sec * 1_000_000_000 + cur_nsec
+                    if start_ns is None:
+                        start_ns = now_ns
+                        print(
+                            f"  [clock] Recording started at sim time "
+                            f"{cur_sec}.{cur_nsec:09d}  (threshold: {threshold_sec}s)",
+                            flush=True,
+                        )
+                    else:
+                        elapsed = (now_ns - start_ns) / 1e9
+                        if elapsed >= threshold_sec:
+                            print(
+                                f"  [clock] {elapsed:.2f}s of sim time elapsed "
+                                f"(threshold: {threshold_sec}s). Stopping measurement.",
+                                flush=True,
+                            )
+                            exceeded_event.set()
+                            break
+                cur_sec  = None
+                cur_nsec = None
+                continue
+
+            # Must use ^sec: to avoid matching nanosec: line
+            m = re.match(r"^sec:\s*(\d+)", line)
+            if m:
+                cur_sec = int(m.group(1))
+                continue
+
+            m = re.match(r"^nanosec:\s*(\d+)", line)
+            if m:
+                cur_nsec = int(m.group(1))
+
+    except Exception:
+        pass
+    finally:
+        _sigint_group(proc)
+        _wait(proc, timeout=3)
+
+
+# ============================================================
 # Result parsing
 # ============================================================
 
@@ -199,9 +280,10 @@ def _parse_summary(lines):
 # Single benchmark run
 # ============================================================
 
-def run_one(num_lidars, lidar_type, window_threshold):
+def run_one(num_lidars, lidar_type, ros_clock_threshold):
     """
     Execute one (num_lidars, lidar_type) benchmark run.
+    Stops measurement after ros_clock_threshold seconds of simulation time.
     Returns a dict with 'status' key plus parsed stats on success.
     """
     client_args, hz_args = LIDAR_TYPE_CONFIGS[lidar_type]
@@ -210,10 +292,13 @@ def run_one(num_lidars, lidar_type, window_threshold):
     print(f"  RUN: num_lidars={num_lidars}  lidar_type={lidar_type}")
     print(f"{'='*64}")
 
-    proc_carla  = None
-    proc_client = None
-    proc_hz     = None
-    t_hz        = None
+    proc_carla   = None
+    proc_client  = None
+    proc_hz      = None
+    t_hz         = None
+    stop_clock   = threading.Event()
+    clock_done   = threading.Event()
+    clock_proc   = []   # clock monitor stores its subprocess here
 
     try:
         # --------------------------------------------------
@@ -255,8 +340,8 @@ def run_one(num_lidars, lidar_type, window_threshold):
             start_new_session=True,
         )
 
-        client_lines  = []
-        sim_tracker   = _SimBehindTracker()
+        client_lines = []
+        sim_tracker  = _SimBehindTracker()
         threading.Thread(
             target=_drain_thread,
             args=(proc_client, client_lines, "    [client] "),
@@ -274,12 +359,11 @@ def run_one(num_lidars, lidar_type, window_threshold):
         print("    Ego spawned — proceeding.")
 
         # --------------------------------------------------
-        # [3] Launch topic-hz monitor
+        # [3] Launch topic-hz monitor (runs until we send SIGINT)
         # --------------------------------------------------
         hz_cmd = (
             ["bash", TEST_TOPIC_HZ_CMD]
             + ["--num_lidars", str(num_lidars)]
-            + ["--window-threshold", str(window_threshold)]
             + hz_args
         )
         print(f"[3] Starting topic-hz monitor ...")
@@ -300,11 +384,24 @@ def run_one(num_lidars, lidar_type, window_threshold):
         t_hz.start()
 
         # --------------------------------------------------
-        # [4] Wait for topic-hz to finish (auto-exits on threshold)
+        # [4] Start ROS clock monitor; wait for sim-time threshold
         # --------------------------------------------------
-        print(f"[4] Waiting for topic-hz to complete (window-threshold={window_threshold}) ...")
-        proc_hz.wait()
-        t_hz.join(timeout=5)  # ensure all buffered output is captured
+        print(f"[4] Monitoring {SIM_CLOCK_TOPIC} for {ros_clock_threshold}s of sim time ...")
+        threading.Thread(
+            target=_clock_monitor_thread,
+            args=(ros_clock_threshold, stop_clock, clock_done, clock_proc),
+            daemon=True,
+        ).start()
+
+        clock_done.wait()   # blocks until threshold reached or KeyboardInterrupt
+
+        # --------------------------------------------------
+        # [5] Stop hz (its cleanup trap prints the summary to stdout)
+        # --------------------------------------------------
+        print("  Sim-time threshold reached. Stopping topic-hz ...")
+        _sigint_group(proc_hz)
+        _wait(proc_hz, timeout=15)
+        t_hz.join(timeout=5)  # ensure all buffered output (incl. summary) is captured
 
         stats = _parse_summary(hz_lines)
         sim_behind_ms = sim_tracker.get_final_ms(SIM_BEHIND_SILENCE_TIMEOUT)
@@ -325,12 +422,18 @@ def run_one(num_lidars, lidar_type, window_threshold):
         return {"num_lidars": num_lidars, "lidar_type": lidar_type, "status": f"error: {exc}"}
 
     finally:
-        # Kill hz if still running (e.g. on early exit)
+        # Abort clock monitor
+        stop_clock.set()
+        if clock_proc:
+            _sigint_group(clock_proc[0])
+            _wait(clock_proc[0], timeout=3)
+
+        # Stop hz if still running (e.g. on early error exit)
         if proc_hz and proc_hz.poll() is None:
             _sigint_group(proc_hz)
-            _wait(proc_hz, timeout=5)
+            _wait(proc_hz, timeout=15)
         if t_hz:
-            t_hz.join(timeout=2)
+            t_hz.join(timeout=5)
 
         print("  Stopping client (SIGINT) ...")
         _sigint_group(proc_client)
@@ -392,8 +495,8 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--window-threshold", type=int, required=True,
-        help="Stop each run when cumulative topic-hz window total >= N",
+        "--ros-clock-threshold", type=float, required=True,
+        help=f"Seconds of simulation time (from {SIM_CLOCK_TOPIC}) to run each measurement",
     )
     parser.add_argument(
         "--num_lidars", type=str, required=True,
@@ -407,10 +510,10 @@ def main():
 
     print("=" * 64)
     print("CARLA LiDAR Benchmark")
-    print(f"  num_lidars list  : {num_lidars_list}")
-    print(f"  lidar_types      : {lidar_types}")
-    print(f"  window-threshold : {args.window_threshold}")
-    print(f"  total runs       : {total_runs}")
+    print(f"  num_lidars list      : {num_lidars_list}")
+    print(f"  lidar_types          : {lidar_types}")
+    print(f"  ros-clock-threshold  : {args.ros_clock_threshold}s  (topic: {SIM_CLOCK_TOPIC})")
+    print(f"  total runs           : {total_runs}")
     print("=" * 64)
 
     results  = []
@@ -423,7 +526,7 @@ def main():
         for lidar_type in lidar_types:
             run_idx += 1
             print(f"\n[Run {run_idx}/{total_runs}]")
-            result = run_one(n, lidar_type, args.window_threshold)
+            result = run_one(n, lidar_type, args.ros_clock_threshold)
             results.append(result)
 
             if result.get("status") == "aborted":
