@@ -36,6 +36,7 @@ EGO_SPAWN_TIMEOUT          = 30   # seconds to wait for "[INFO]: Ego spawned!" i
 INTER_RUN_PAUSE            = 5    # seconds between runs for OS/GPU to settle
 SIM_BEHIND_SILENCE_TIMEOUT = 5.0  # seconds; if no "Simulation is X ms behind" for this long, report 0
 SIM_CLOCK_TOPIC            = "/clock"  # ROS2 topic used to measure simulation time
+ROS2_SETUP_BASH            = "/mnt/dsk0/wk0/ROS2/humble/AW-OSS/1.7.1/autoware/install/setup.bash"
 
 # ============================================================
 # LiDAR type definitions: (client_extra_args, hz_extra_args)
@@ -95,6 +96,18 @@ class _SimBehindTracker:
 # ============================================================
 # Process helpers
 # ============================================================
+
+def _ros2_cmd(args):
+    """
+    Wrap a command list so it runs after sourcing ROS2_SETUP_BASH.
+    Returns ["bash", "-c", "source ... && <args>"] when ROS2_SETUP_BASH is set,
+    otherwise returns args unchanged.
+    """
+    if not ROS2_SETUP_BASH:
+        return args
+    inner = " ".join(shlex.quote(a) for a in args)
+    return ["bash", "-c", f"source {shlex.quote(ROS2_SETUP_BASH)} && {inner}"]
+
 
 def _sigint_group(proc):
     """Send SIGINT to the process group of proc (if still alive)."""
@@ -182,7 +195,7 @@ def _clock_monitor_thread(threshold_sec, stop_event, exceeded_event, proc_ref):
         nanosec: 567000000
         ---
     """
-    cmd = ["ros2", "topic", "echo", "--field", "clock", SIM_CLOCK_TOPIC]
+    cmd = _ros2_cmd(["ros2", "topic", "echo", "--field", "clock", SIM_CLOCK_TOPIC])
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -326,7 +339,7 @@ def run_one(num_lidars, lidar_type, ros_clock_threshold):
         # --------------------------------------------------
         # [2] Launch CARLA client; wait for Ego spawn
         # --------------------------------------------------
-        client_cmd = (
+        client_cmd = _ros2_cmd(
             shlex.split(f"python3 {CARLA_CLIENT_SCRIPT}")
             + ["--num_lidars", str(num_lidars)]
             + client_args
@@ -365,7 +378,7 @@ def run_one(num_lidars, lidar_type, ros_clock_threshold):
             ["bash", TEST_TOPIC_HZ_CMD]
             + ["--num_lidars", str(num_lidars)]
             + hz_args
-        )
+        )  # rgl_test_topic_hz.sh already sources ROS2_SETUP_BASH internally
         print(f"[3] Starting topic-hz monitor ...")
         print(f"    {' '.join(hz_cmd)}")
         proc_hz = subprocess.Popen(
