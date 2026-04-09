@@ -257,6 +257,12 @@ carla_option (
   ${CARLA_UNREAL_PACKAGE_NO_COMPRESSION_DEFAULT}
 )
 
+carla_string_option (
+  CARLA_PACKAGE_COMPRESSION
+  "Package compression method: gzip (default, compatible), zstd (parallel via pzstd)."
+  "gzip"
+)
+
 
 
 # ================================
