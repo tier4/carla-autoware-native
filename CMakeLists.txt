@@ -96,6 +96,64 @@ if (ENABLE_ROS2)
   add_subdirectory (Ros2Native)
 endif()
 
+# RclcppBridge - built with system compiler (NOT UE toolchain) because it
+# links against rclcpp which is built with libstdc++.
+# Only needed when ENABLE_RGL=ON; completely skipped otherwise so no ROS2
+# environment is required for non-RGL builds.
+if (ENABLE_RGL)
+  include (ExternalProject)
+  set (RCLCPP_BRIDGE_SRC "${CMAKE_SOURCE_DIR}/RclcppBridge")
+  if (IS_DIRECTORY "${RCLCPP_BRIDGE_SRC}")
+    # RclcppBridge needs `source /opt/ros/humble/setup.bash` equivalent:
+    #   - CMAKE_PREFIX_PATH for find_package(rclcpp)
+    #   - PYTHONPATH for ament_package (used by rclcpp's cmake config)
+    # We construct these from AMENT_PREFIX_PATH or fall back to /opt/ros/humble.
+    if (DEFINED ENV{AMENT_PREFIX_PATH})
+      set (RCLCPP_BRIDGE_ROS_PREFIX "$ENV{AMENT_PREFIX_PATH}")
+    else ()
+      set (RCLCPP_BRIDGE_ROS_PREFIX "/opt/ros/humble")
+    endif ()
+
+    set (RCLCPP_BRIDGE_BUILD_DIR "${CMAKE_BINARY_DIR}/rclcpp-bridge-prefix/src/rclcpp-bridge-build")
+
+    ExternalProject_add (
+      rclcpp-bridge
+      SOURCE_DIR ${RCLCPP_BRIDGE_SRC}
+      BINARY_DIR ${RCLCPP_BRIDGE_BUILD_DIR}
+      CONFIGURE_COMMAND
+        ${CMAKE_COMMAND} -E env
+          "PYTHONPATH=${RCLCPP_BRIDGE_ROS_PREFIX}/lib/python3.10/site-packages:${RCLCPP_BRIDGE_ROS_PREFIX}/local/lib/python3.10/dist-packages:$ENV{PYTHONPATH}"
+          "AMENT_PREFIX_PATH=${RCLCPP_BRIDGE_ROS_PREFIX}"
+        ${CMAKE_COMMAND}
+          -S ${RCLCPP_BRIDGE_SRC}
+          -B ${RCLCPP_BRIDGE_BUILD_DIR}
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+          -DCMAKE_PREFIX_PATH=${RCLCPP_BRIDGE_ROS_PREFIX}
+          -DCMAKE_C_COMPILER=/usr/bin/gcc
+          -DCMAKE_CXX_COMPILER=/usr/bin/g++
+      BUILD_COMMAND
+        ${CMAKE_COMMAND} --build ${RCLCPP_BRIDGE_BUILD_DIR}
+      INSTALL_COMMAND ""
+    )
+
+    set (CARLA_RGL_PLUGIN_BINARY_PATH ${CMAKE_SOURCE_DIR}/Unreal/CarlaUnreal/Plugins/CarlaRGL/Binaries/Linux)
+    file (MAKE_DIRECTORY ${CARLA_RGL_PLUGIN_BINARY_PATH})
+
+    add_custom_command (
+      TARGET rclcpp-bridge
+      POST_BUILD
+      COMMAND
+        ${CMAKE_COMMAND} -E copy
+        ${CMAKE_BINARY_DIR}/rclcpp-bridge-prefix/src/rclcpp-bridge-build/libRclcppBridge.so
+        ${CARLA_RGL_PLUGIN_BINARY_PATH}
+    )
+  else ()
+    message (WARNING "RclcppBridge source not found at ${RCLCPP_BRIDGE_SRC}. "
+                     "RGL ROS2 publish will not work without it.")
+  endif ()
+endif ()
+
 if (BUILD_PYTHON_API)
   add_subdirectory (PythonAPI)
 endif ()

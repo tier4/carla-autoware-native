@@ -15,9 +15,9 @@ namespace RGLDynLoader
     bool IsLoaded();
 }
 
-// Dynamic loader for libRos2ForCarlaLite.so
+// Dynamic loader for libRclcppBridge.so
 // Initializes rclcpp before CARLA's DDS so RGL's Ros2InitGuard reuses the existing context.
-namespace Ros2ForCarlaLite
+namespace RclcppBridge
 {
     bool Load(const char* LibPath);
     bool Init();

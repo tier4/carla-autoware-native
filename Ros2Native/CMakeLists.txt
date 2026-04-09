@@ -65,6 +65,7 @@ elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
       -DBUILD_DDSPERF=OFF
       -DENABLE_SSL=OFF
       -DENABLE_SECURITY=OFF
+      -DENABLE_SHM=OFF
   )
 
   set (DDS_TARGET cyclonedds)

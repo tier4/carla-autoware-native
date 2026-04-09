@@ -212,13 +212,8 @@ if (ENABLE_RGL)
     file (COPY "${RGL_LIB_DIR}/libRobotecGPULidar.so" DESTINATION "${RGL_BIN_DST}")
     message (STATUS "CarlaRGL: Copied libRobotecGPULidar.so to plugin Binaries/")
   endif ()
-  # Ros2ForCarlaLite - thin rclcpp wrapper for early rclcpp initialization
-  set (ROS2_FOR_CARLA_LITE_ROOT "${RGL_ROOT}/../Ros2ForCarlaLite" CACHE PATH "Path to Ros2ForCarlaLite root directory")
-  set (ROS2_LITE_SO "${ROS2_FOR_CARLA_LITE_ROOT}/build/libRos2ForCarlaLite.so")
-  if (EXISTS "${ROS2_LITE_SO}")
-    file (COPY "${ROS2_LITE_SO}" DESTINATION "${RGL_BIN_DST}")
-    message (STATUS "CarlaRGL: Copied libRos2ForCarlaLite.so to plugin Binaries/")
-  endif ()
+  # RclcppBridge (libRclcppBridge.so) is built as an ExternalProject at the
+  # top-level CMakeLists.txt and copied to RGL_BIN_DST via POST_BUILD command.
   if (IS_DIRECTORY "${RGL_LIB_DIR}/ros2_standalone")
     # Copy real files only (no symlinks) to avoid UE packaging issues.
     # Then create symlinks locally so the dynamic linker can resolve soname references.

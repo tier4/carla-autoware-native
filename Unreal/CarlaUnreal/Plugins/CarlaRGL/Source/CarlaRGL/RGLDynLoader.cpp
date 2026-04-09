@@ -393,48 +393,48 @@ bool RGLDynLoader::IsLoaded()
     return Handle != nullptr;
 }
 
-// --- Ros2ForCarlaLite dynamic loader ---
+// --- RclcppBridge dynamic loader ---
 
-static void* GRos2LiteHandle = nullptr;
-typedef bool (*fn_ros2_lite_init_t)(void);
-typedef bool (*fn_ros2_lite_ok_t)(void);
-typedef void (*fn_ros2_lite_shutdown_t)(void);
-static fn_ros2_lite_init_t fn_ros2_lite_init = nullptr;
-static fn_ros2_lite_ok_t fn_ros2_lite_ok = nullptr;
-static fn_ros2_lite_shutdown_t fn_ros2_lite_shutdown = nullptr;
+static void* GRclcppBridgeHandle = nullptr;
+typedef bool (*fn_rclcpp_bridge_init_t)(void);
+typedef bool (*fn_rclcpp_bridge_ok_t)(void);
+typedef void (*fn_rclcpp_bridge_shutdown_t)(void);
+static fn_rclcpp_bridge_init_t fn_rclcpp_bridge_init = nullptr;
+static fn_rclcpp_bridge_ok_t fn_rclcpp_bridge_ok = nullptr;
+static fn_rclcpp_bridge_shutdown_t fn_rclcpp_bridge_shutdown = nullptr;
 
-bool Ros2ForCarlaLite::Load(const char* LibPath)
+bool RclcppBridge::Load(const char* LibPath)
 {
-    if (GRos2LiteHandle) return true;
-    GRos2LiteHandle = dlopen(LibPath, RTLD_NOW | RTLD_GLOBAL);
-    if (!GRos2LiteHandle) return false;
+    if (GRclcppBridgeHandle) return true;
+    GRclcppBridgeHandle = dlopen(LibPath, RTLD_NOW | RTLD_GLOBAL);
+    if (!GRclcppBridgeHandle) return false;
 
-    fn_ros2_lite_init = (fn_ros2_lite_init_t)dlsym(GRos2LiteHandle, "ros2_for_carla_lite_init");
-    fn_ros2_lite_ok = (fn_ros2_lite_ok_t)dlsym(GRos2LiteHandle, "ros2_for_carla_lite_ok");
-    fn_ros2_lite_shutdown = (fn_ros2_lite_shutdown_t)dlsym(GRos2LiteHandle, "ros2_for_carla_lite_shutdown");
-    return fn_ros2_lite_init != nullptr;
+    fn_rclcpp_bridge_init = (fn_rclcpp_bridge_init_t)dlsym(GRclcppBridgeHandle, "rclcpp_bridge_init");
+    fn_rclcpp_bridge_ok = (fn_rclcpp_bridge_ok_t)dlsym(GRclcppBridgeHandle, "rclcpp_bridge_ok");
+    fn_rclcpp_bridge_shutdown = (fn_rclcpp_bridge_shutdown_t)dlsym(GRclcppBridgeHandle, "rclcpp_bridge_shutdown");
+    return fn_rclcpp_bridge_init != nullptr;
 }
 
-bool Ros2ForCarlaLite::Init()
+bool RclcppBridge::Init()
 {
-    if (!fn_ros2_lite_init) return false;
-    return fn_ros2_lite_init();
+    if (!fn_rclcpp_bridge_init) return false;
+    return fn_rclcpp_bridge_init();
 }
 
-void Ros2ForCarlaLite::Shutdown()
+void RclcppBridge::Shutdown()
 {
-    if (fn_ros2_lite_shutdown) fn_ros2_lite_shutdown();
+    if (fn_rclcpp_bridge_shutdown) fn_rclcpp_bridge_shutdown();
 }
 
-void Ros2ForCarlaLite::Unload()
+void RclcppBridge::Unload()
 {
-    fn_ros2_lite_init = nullptr;
-    fn_ros2_lite_ok = nullptr;
-    fn_ros2_lite_shutdown = nullptr;
-    if (GRos2LiteHandle) { dlclose(GRos2LiteHandle); GRos2LiteHandle = nullptr; }
+    fn_rclcpp_bridge_init = nullptr;
+    fn_rclcpp_bridge_ok = nullptr;
+    fn_rclcpp_bridge_shutdown = nullptr;
+    if (GRclcppBridgeHandle) { dlclose(GRclcppBridgeHandle); GRclcppBridgeHandle = nullptr; }
 }
 
-bool Ros2ForCarlaLite::IsLoaded()
+bool RclcppBridge::IsLoaded()
 {
-    return GRos2LiteHandle != nullptr;
+    return GRclcppBridgeHandle != nullptr;
 }
