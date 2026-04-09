@@ -73,9 +73,8 @@ start_sysmon() {
                 --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
             gpu_power=$(nvidia-smi --query-gpu=power.draw \
                 --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
-            gpu_mem=$(nvidia-smi --query-compute-apps=pid,used_memory \
-                --format=csv,noheader,nounits 2>/dev/null \
-                | awk -F',' -v p="$carla_pid" 'int($1)==p{gsub(/ /,"",$2); print $2}')
+            gpu_mem=$(nvidia-smi --query-gpu=memory.used \
+                --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
             echo "${cpu:-N/A} ${mem_mb:-N/A} ${gpu_temp:-N/A} ${gpu_power:-N/A} ${gpu_mem:-N/A}"
             sleep 1
         done
@@ -159,7 +158,7 @@ cleanup() {
         echo "  Memory (RSS)            : ${last_mem_mb} MB"
         echo "  GPU temperature         : ${last_gpu_temp} °C"
         echo "  GPU power               : ${last_gpu_power} W"
-        echo "  GPU memory (CARLA)      : ${last_gpu_mem} MiB"
+        echo "  GPU memory (total)      : ${last_gpu_mem} MiB"
     fi
 
     rm -rf "$TMP_DIR"
@@ -206,7 +205,7 @@ start_hz() {
 }
 
 # Find CARLA process
-CARLA_PID=$(pgrep -f "CarlaUE5" | head -1)
+CARLA_PID=$(pgrep -f "CarlaUnreal-Linux-Shipping" | head -1)
 if [[ -n "$CARLA_PID" ]]; then
     echo "Found CARLA process: PID=$CARLA_PID"
     start_sysmon "$CARLA_PID"

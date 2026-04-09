@@ -285,7 +285,7 @@ def _parse_summary(lines):
         if (v := m(r"Memory \(RSS\)\s*:\s*(\S+)")):          result["mem_mb"]       = v
         if (v := m(r"GPU temperature\s*:\s*(\S+)")):         result["gpu_temp_c"]   = v
         if (v := m(r"GPU power\s*:\s*(\S+)")):               result["gpu_power_w"]  = v
-        if (v := m(r"GPU memory \(CARLA\)\s*:\s*(\S+)")):    result["gpu_mem_mib"]  = v
+        if (v := m(r"GPU memory \(total\)\s*:\s*(\S+)")):    result["gpu_mem_mib"]  = v
     return result
 
 
@@ -478,7 +478,7 @@ _COLS = [
     ("Mem(MB)",      "mem_mb",        "%8s"),
     ("GPU C",        "gpu_temp_c",    "%6s"),
     ("GPU W",        "gpu_power_w",   "%7s"),
-    ("GPU MiB",      "gpu_mem_mib",   "%8s"),
+    ("GPU(MiB)",     "gpu_mem_mib",   "%8s"),
 ]
 
 
