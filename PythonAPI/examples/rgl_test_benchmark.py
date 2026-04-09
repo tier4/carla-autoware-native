@@ -374,11 +374,11 @@ def run_one(num_lidars, lidar_type, ros_clock_threshold):
         # --------------------------------------------------
         # [3] Launch topic-hz monitor (runs until we send SIGINT)
         # --------------------------------------------------
-        hz_cmd = (
+        hz_cmd = _ros2_cmd(
             ["bash", TEST_TOPIC_HZ_CMD]
             + ["--num_lidars", str(num_lidars)]
             + hz_args
-        )  # rgl_test_topic_hz.sh already sources ROS2_SETUP_BASH internally
+        )
         print(f"[3] Starting topic-hz monitor ...")
         print(f"    {' '.join(hz_cmd)}")
         proc_hz = subprocess.Popen(

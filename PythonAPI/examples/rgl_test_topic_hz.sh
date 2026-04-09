@@ -11,8 +11,6 @@
 # Only the first topic's output is shown on screen.
 # Ctrl+C (or reaching --window-threshold) shows total summary + last CARLA system stats.
 
-source /mnt/dsk0/wk0/ROS2/humble/AW-OSS/1.7.1/autoware/install/setup.bash
-
 CARLA_LIDAR_TYPE="rgl"
 RGL_LIDAR_DIRECT_PUBLISH=false
 NUM_LIDARS=1
