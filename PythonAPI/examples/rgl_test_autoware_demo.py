@@ -371,8 +371,11 @@ def spawn_sensors(world, base_link, ego, args):
 
     if spawn_ray_cast or spawn_rgl:
         for lidar_idx in range(args.num_lidars):
-            z_offset = lidar_idx * 0.20  # 20cm per additional LiDAR
-            sensor_kit_to_lidar_top_transform = ROS2.Transform(yaw=1.575, z=z_offset)
+            sensor_kit_to_lidar_top_transform = ROS2.Transform(
+                yaw=1.575,
+                x=lidar_idx * args.lidar_spawn_delta_x,
+                y=lidar_idx * args.lidar_spawn_delta_y,
+                z=lidar_idx * args.lidar_spawn_delta_z)
 
             # Add topic suffix when multiple LiDARs
             idx_kwargs = dict(lidar_kwargs)
@@ -404,7 +407,8 @@ def spawn_sensors(world, base_link, ego, args):
                     lidar.enable_for_ros()
 
         if args.num_lidars > 1:
-            print(f"Spawned {args.num_lidars} LiDARs (Z offset: 0 to +{(args.num_lidars-1)*20}cm, topic suffix: _0 to _{args.num_lidars-1})")
+            dx, dy, dz = args.lidar_spawn_delta_x, args.lidar_spawn_delta_y, args.lidar_spawn_delta_z
+            print(f"Spawned {args.num_lidars} LiDARs (delta: x={dx}m y={dy}m z={dz}m, topic suffix: _0 to _{args.num_lidars-1})")
 
     # Spawn traffic light camera
     sensor_kit_to_traffic_light_left_camera_transform = ROS2.Transform(x=0.05,
@@ -775,7 +779,16 @@ def main():
         help='RGL ROS2 point cloud format (default: PointXYZIRCAEDT)')
     argparser.add_argument(
         '--num_lidars', type=int, default=1,
-        help='Number of LiDARs to spawn. Each additional LiDAR is offset +20cm in Z. (default: 1)')
+        help='Number of LiDARs to spawn (default: 1)')
+    argparser.add_argument(
+        '--lidar_spawn_delta_x', type=float, default=0.0,
+        help='Spawn position delta X per LiDAR in meters (default: 0.0)')
+    argparser.add_argument(
+        '--lidar_spawn_delta_y', type=float, default=0.0,
+        help='Spawn position delta Y per LiDAR in meters (default: 0.0)')
+    argparser.add_argument(
+        '--lidar_spawn_delta_z', type=float, default=0.0,
+        help='Spawn position delta Z per LiDAR in meters (default: 0.0)')
     args = argparser.parse_args()
 
     # Deploy PostProcess profiles before connecting to server
