@@ -189,17 +189,18 @@ def chain_transforms(transforms):
 
 
 def generate_vlp16_blueprint(blueprint_library, lidar_type="rgl",
-                             ros_topic_name="/sensing/lidar/top/pointcloud_raw_ex",
-                             ros_frame_id="velodyne_top",
-                             rgl_show_lidar_points=False,
+                             carla_lidar_topic_name="/sensing/lidar/top/pointcloud_raw_ex",
+                             lidar_frame_id="velodyne_top",
+                             rgl_lidar_show_points=False,
                              rgl_lidar_draw_point_rate=1.0,
                              rgl_lidar_draw_life_time=0.2,
-                             rgl_ros2_topic="",
-                             rgl_ros2_reliability="best_effort",
-                             rgl_ros2_durability="volatile",
-                             rgl_ros2_history="keep_last",
-                             rgl_ros2_history_depth=5,
-                             rgl_ros2_format="PointXYZIRCAEDT"):
+                             rgl_lidar_direct_publish=False,
+                             rgl_lidar_topic_name="/sensing/lidar/top/pointcloud_raw_ex",
+                             rgl_lidar_topic_reliability="best_effort",
+                             rgl_lidar_topic_durability="volatile",
+                             rgl_lidar_topic_history="keep_last",
+                             rgl_lidar_topic_history_depth=5,
+                             rgl_lidar_pointcloud_format="PointXYZIRCAEDT"):
     """Generates a blueprint for VLP16
 
 	The following assumptions were made based on the configuration in AWSIM:
@@ -207,11 +208,13 @@ def generate_vlp16_blueprint(blueprint_library, lidar_type="rgl",
 	- 0.2 deg horizontal resolution
 
 	Args:
-	  lidar_type: "ray_cast", "rgl", or "both" (spawns two sensors)
-	  ros_topic_name: ROS2 topic name (shared by CARLA and RGL)
-	  ros_frame_id: frame_id in PointCloud2 header (shared by CARLA and RGL)
-	  rgl_ros2_topic: override topic for RGL ROS2 publish (empty = use ros_topic_name)
-	  rgl_ros2_*: RGL-specific QoS and format options
+	  lidar_type: "ray_cast" or "rgl"
+	  carla_lidar_topic_name: ROS2 topic name for CARLA ROS2 publish
+	  lidar_frame_id: frame_id in PointCloud2 header (shared by CARLA and RGL)
+	  rgl_lidar_direct_publish: enable RGL direct ROS2 publish
+	  rgl_lidar_topic_name: topic name for RGL direct ROS2 publish
+	  rgl_lidar_topic_*: RGL-specific QoS and topic options
+	  rgl_lidar_pointcloud_format: pointcloud format (PointXYZIRCAEDT, etc.)
 	"""
 
     sensor_id = "sensor.lidar.rgl" if lidar_type != "ray_cast" else "sensor.lidar.ray_cast"
@@ -229,46 +232,28 @@ def generate_vlp16_blueprint(blueprint_library, lidar_type="rgl",
     blueprint.set_attribute("sensor_tick", "0.1")
 
     # CARLA built-in ROS settings (used by enable_for_ros(), works for both ray_cast and rgl)
-    blueprint.set_attribute("ros_name", ros_frame_id)
-    blueprint.set_attribute("ros_topic_name", ros_topic_name)
+    blueprint.set_attribute("ros_name", lidar_frame_id)
+    blueprint.set_attribute("ros_topic_name", carla_lidar_topic_name)
 
     # RGL-specific settings (only applied if sensor is rgl)
     if lidar_type != "ray_cast":
-        if rgl_show_lidar_points:
-            blueprint.set_attribute("rgl_show_lidar_points", "true")
+        if rgl_lidar_show_points:
+            blueprint.set_attribute("rgl_lidar_show_points", "true")
             blueprint.set_attribute("rgl_lidar_draw_point_rate", str(rgl_lidar_draw_point_rate))
             blueprint.set_attribute("rgl_lidar_draw_life_time", str(rgl_lidar_draw_life_time))
 
-        # RGL ROS2 publish (GPU-direct, independent of CARLA ROS2)
-        # Only enabled when --rgl_ros2_topic is explicitly set (no fallback to ros_topic_name).
-        rgl_topic = rgl_ros2_topic
-        if rgl_topic:
-            blueprint.set_attribute("rgl_ros2_topic", rgl_topic)
-            blueprint.set_attribute("rgl_ros2_frame_id", ros_frame_id)
-            blueprint.set_attribute("rgl_ros2_reliability", rgl_ros2_reliability)
-            blueprint.set_attribute("rgl_ros2_durability", rgl_ros2_durability)
-            blueprint.set_attribute("rgl_ros2_history", rgl_ros2_history)
-            blueprint.set_attribute("rgl_ros2_history_depth", str(rgl_ros2_history_depth))
-            blueprint.set_attribute("rgl_ros2_format", rgl_ros2_format)
+        # RGL direct ROS2 publish (independent of CARLA ROS2)
+        if rgl_lidar_direct_publish:
+            blueprint.set_attribute("rgl_lidar_topic_name", rgl_lidar_topic_name)
+            blueprint.set_attribute("rgl_lidar_topic_frame_id", lidar_frame_id)
+            blueprint.set_attribute("rgl_lidar_topic_reliability", rgl_lidar_topic_reliability)
+            blueprint.set_attribute("rgl_lidar_topic_durability", rgl_lidar_topic_durability)
+            blueprint.set_attribute("rgl_lidar_topic_history", rgl_lidar_topic_history)
+            blueprint.set_attribute("rgl_lidar_topic_history_depth", str(rgl_lidar_topic_history_depth))
+            blueprint.set_attribute("rgl_lidar_pointcloud_format", rgl_lidar_pointcloud_format)
 
     return blueprint
 
-
-def generate_vlp16_blueprint_both(blueprint_library, **kwargs):
-    """Generate both ray_cast and rgl blueprints for side-by-side comparison.
-
-	Returns (ray_cast_blueprint, rgl_blueprint).
-	Each gets a namespace prefix: /raycast/... and /rgl/...
-	"""
-    base_topic = kwargs.get("ros_topic_name", "/sensing/lidar/top/pointcloud_raw_ex")
-
-    rc_kwargs = dict(kwargs, lidar_type="ray_cast",
-                     ros_topic_name="/raycast" + base_topic)
-    rgl_kwargs = dict(kwargs, lidar_type="rgl",
-                      ros_topic_name="/rgl" + base_topic)
-
-    return (generate_vlp16_blueprint(blueprint_library, **rc_kwargs),
-            generate_vlp16_blueprint(blueprint_library, **rgl_kwargs))
 
 
 def generate_traffic_light_camera_blueprint(blueprint_library):
@@ -346,17 +331,18 @@ def spawn_sensors(world, base_link, ego, args):
     sensor_kit_blueprint = blueprint_library.find("util.actor.empty")
     sensor_kit_blueprint.set_attribute("ros_name", "sensor_kit_base_link")
     lidar_kwargs = dict(
-        ros_topic_name=args.ros_topic_name,
-        ros_frame_id=args.ros_frame_id,
-        rgl_show_lidar_points=args.rgl_show_lidar_points,
+        carla_lidar_topic_name=args.carla_lidar_topic_name,
+        lidar_frame_id=args.lidar_frame_id,
+        rgl_lidar_show_points=args.rgl_lidar_show_points,
         rgl_lidar_draw_point_rate=args.rgl_lidar_draw_point_rate,
         rgl_lidar_draw_life_time=args.rgl_lidar_draw_life_time,
-        rgl_ros2_topic=args.rgl_ros2_topic,
-        rgl_ros2_reliability=args.rgl_ros2_reliability,
-        rgl_ros2_durability=args.rgl_ros2_durability,
-        rgl_ros2_history=args.rgl_ros2_history,
-        rgl_ros2_history_depth=args.rgl_ros2_history_depth,
-        rgl_ros2_format=args.rgl_ros2_format,
+        rgl_lidar_direct_publish=args.rgl_lidar_direct_publish,
+        rgl_lidar_topic_name=args.rgl_lidar_topic_name,
+        rgl_lidar_topic_reliability=args.rgl_lidar_topic_reliability,
+        rgl_lidar_topic_durability=args.rgl_lidar_topic_durability,
+        rgl_lidar_topic_history=args.rgl_lidar_topic_history,
+        rgl_lidar_topic_history_depth=args.rgl_lidar_topic_history_depth,
+        rgl_lidar_pointcloud_format=args.rgl_lidar_pointcloud_format,
     )
     traffic_light_camera_blueprint \
         = generate_traffic_light_camera_blueprint(blueprint_library)
@@ -376,38 +362,49 @@ def spawn_sensors(world, base_link, ego, args):
         attach_to=base_link)
 
     # Spawn top lidar(s)
-    # When num_lidars > 1, each additional LiDAR is offset +20cm in Z
-    # and topic names get a suffix _0, _1, ...
-    for lidar_idx in range(args.num_lidars):
-        z_offset = lidar_idx * 0.20  # 20cm per additional LiDAR
-        sensor_kit_to_lidar_top_transform = ROS2.Transform(yaw=1.575, z=z_offset)
+    # Sensor spawn is OR of carla_lidar_type and rgl_lidar_direct_publish
+    spawn_ray_cast = args.carla_lidar_type in ("ray_cast", "both")
+    spawn_rgl = args.carla_lidar_type in ("rgl", "both") or args.rgl_lidar_direct_publish
+    enable_carla_ros2_for_rgl = args.carla_lidar_type in ("rgl", "both")
+    # Namespace prefix when both ray_cast and rgl are spawned
+    use_namespace = spawn_ray_cast and spawn_rgl
 
-        # Add topic suffix when multiple LiDARs
-        idx_kwargs = dict(lidar_kwargs)
-        if args.num_lidars >= 2:
-            suffix = f"_{lidar_idx}"
-            if idx_kwargs["ros_topic_name"]:
-                idx_kwargs["ros_topic_name"] = idx_kwargs["ros_topic_name"] + suffix
-            if idx_kwargs["rgl_ros2_topic"]:
-                idx_kwargs["rgl_ros2_topic"] = idx_kwargs["rgl_ros2_topic"] + suffix
+    if spawn_ray_cast or spawn_rgl:
+        for lidar_idx in range(args.num_lidars):
+            z_offset = lidar_idx * 0.20  # 20cm per additional LiDAR
+            sensor_kit_to_lidar_top_transform = ROS2.Transform(yaw=1.575, z=z_offset)
 
-        vlp16_blueprints = []
-        if args.lidar_type == "both":
-            rc_bp, rgl_bp = generate_vlp16_blueprint_both(blueprint_library, **idx_kwargs)
-            vlp16_blueprints = [rc_bp, rgl_bp]
-        else:
-            vlp16_blueprints = [generate_vlp16_blueprint(blueprint_library,
-                                                          lidar_type=args.lidar_type, **idx_kwargs)]
-        for vlp16_blueprint in vlp16_blueprints:
-            lidar = world.spawn_actor(
-                vlp16_blueprint,
-                sensor_kit_to_lidar_top_transform.to_carla(),
-                attach_to=sensor_kit)
-            # RGL lidar always uses CARLA ROS2 for publishing (no RGL-internal ROS2 by default)
-            if args.enable_carla_ros2 or args.lidar_type in ("rgl", "both"):
+            # Add topic suffix when multiple LiDARs
+            idx_kwargs = dict(lidar_kwargs)
+            if args.num_lidars >= 2:
+                suffix = f"_{lidar_idx}"
+                idx_kwargs["carla_lidar_topic_name"] = idx_kwargs["carla_lidar_topic_name"] + suffix
+                idx_kwargs["rgl_lidar_topic_name"] = idx_kwargs["rgl_lidar_topic_name"] + suffix
+
+            if spawn_ray_cast:
+                rc_kwargs = dict(idx_kwargs, lidar_type="ray_cast")
+                if use_namespace:
+                    rc_kwargs["carla_lidar_topic_name"] = "/raycast" + rc_kwargs["carla_lidar_topic_name"]
+                bp = generate_vlp16_blueprint(blueprint_library, **rc_kwargs)
+                lidar = world.spawn_actor(
+                    bp, sensor_kit_to_lidar_top_transform.to_carla(),
+                    attach_to=sensor_kit)
                 lidar.enable_for_ros()
-    if args.num_lidars > 1:
-        print(f"Spawned {args.num_lidars} LiDARs (Z offset: 0 to +{(args.num_lidars-1)*20}cm, topic suffix: _0 to _{args.num_lidars-1})")
+
+            if spawn_rgl:
+                rgl_kwargs = dict(idx_kwargs, lidar_type="rgl")
+                if use_namespace:
+                    rgl_kwargs["carla_lidar_topic_name"] = "/rgl" + rgl_kwargs["carla_lidar_topic_name"]
+                    rgl_kwargs["rgl_lidar_topic_name"] = "/rgl" + rgl_kwargs["rgl_lidar_topic_name"]
+                bp = generate_vlp16_blueprint(blueprint_library, **rgl_kwargs)
+                lidar = world.spawn_actor(
+                    bp, sensor_kit_to_lidar_top_transform.to_carla(),
+                    attach_to=sensor_kit)
+                if enable_carla_ros2_for_rgl:
+                    lidar.enable_for_ros()
+
+        if args.num_lidars > 1:
+            print(f"Spawned {args.num_lidars} LiDARs (Z offset: 0 to +{(args.num_lidars-1)*20}cm, topic suffix: _0 to _{args.num_lidars-1})")
 
     # Spawn traffic light camera
     sensor_kit_to_traffic_light_left_camera_transform = ROS2.Transform(x=0.05,
@@ -730,22 +727,19 @@ def main():
         help='Lists only available maps and exit. Omit applying world setting and ego spawn.')
     # LiDAR type selection
     argparser.add_argument(
-        '--lidar_type', default='rgl',
-        choices=['ray_cast', 'rgl', 'both'],
-        help='LiDAR implementation: ray_cast (CPU), rgl (GPU), both (side-by-side)')
-    argparser.add_argument(
-        '--enable_carla_ros2', action='store_true',
-        help='Enable CARLA built-in ROS2 publish (via enable_for_ros())')
+        '--carla_lidar_type', default='rgl',
+        choices=['ray_cast', 'rgl', 'both', 'none'],
+        help='LiDAR implementation: ray_cast (CPU), rgl (GPU), both (side-by-side), none (no lidar)')
     # Common ROS2 settings (shared by CARLA and RGL)
     argparser.add_argument(
-        '--ros_topic_name', default='/sensing/lidar/top/pointcloud_raw_ex',
-        help='ROS2 topic name for LiDAR pointcloud')
+        '--carla_lidar_topic_name', default='/sensing/lidar/top/pointcloud_raw_ex',
+        help='ROS2 topic name for CARLA LiDAR publish')
     argparser.add_argument(
-        '--ros_frame_id', default='velodyne_top',
+        '--lidar_frame_id', default='velodyne_top',
         help='ROS2 frame_id for LiDAR pointcloud')
     # RGL viewport visualization
     argparser.add_argument(
-        '--rgl_show_lidar_points', action='store_true',
+        '--rgl_lidar_show_points', action='store_true',
         help='Draw LiDAR point cloud in the CARLA viewport (RGL only)')
     argparser.add_argument(
         '--rgl_lidar_draw_point_rate', type=float, default=1.0,
@@ -753,27 +747,30 @@ def main():
     argparser.add_argument(
         '--rgl_lidar_draw_life_time', type=float, default=0.2,
         help='How long each drawn point persists in seconds (default: 0.2)')
-    # RGL ROS2 publish (GPU-direct, independent of CARLA ROS2)
+    # RGL direct ROS2 publish (independent of CARLA ROS2)
     argparser.add_argument(
-        '--rgl_ros2_topic', default='',
-        help='Override topic for RGL ROS2 publish (empty=use ros_topic_name)')
+        '--rgl_lidar_direct_publish', action='store_true',
+        help='Enable RGL direct ROS2 publish (independent of CARLA ROS2)')
     argparser.add_argument(
-        '--rgl_ros2_reliability', default='best_effort',
+        '--rgl_lidar_topic_name', default='/sensing/lidar/top/pointcloud_raw_ex',
+        help='Topic name for RGL direct ROS2 publish')
+    argparser.add_argument(
+        '--rgl_lidar_topic_reliability', default='best_effort',
         choices=['reliable', 'best_effort'],
         help='RGL ROS2 QoS reliability (default: best_effort)')
     argparser.add_argument(
-        '--rgl_ros2_durability', default='volatile',
+        '--rgl_lidar_topic_durability', default='volatile',
         choices=['volatile', 'transient_local'],
         help='RGL ROS2 QoS durability (default: volatile)')
     argparser.add_argument(
-        '--rgl_ros2_history', default='keep_last',
+        '--rgl_lidar_topic_history', default='keep_last',
         choices=['keep_last', 'keep_all', 'system_default'],
         help='RGL ROS2 QoS history policy (default: keep_last)')
     argparser.add_argument(
-        '--rgl_ros2_history_depth', type=int, default=5,
+        '--rgl_lidar_topic_history_depth', type=int, default=5,
         help='RGL ROS2 QoS history depth (default: 5)')
     argparser.add_argument(
-        '--rgl_ros2_format', default='PointXYZIRCAEDT',
+        '--rgl_lidar_pointcloud_format', default='PointXYZIRCAEDT',
         choices=['minimal', 'pcl24', 'pcl48', 'PointXYZIRCAEDT'],
         help='RGL ROS2 point cloud format (default: PointXYZIRCAEDT)')
     argparser.add_argument(

@@ -84,7 +84,7 @@ private:
     /// Whether the RGL graph has been created.
     bool bGraphCreated = false;
 
-    /// Draw point cloud in UE5 viewport (controlled via "rgl_show_lidar_points" attribute).
+    /// Draw point cloud in UE5 viewport (controlled via "rgl_lidar_show_points" attribute).
     UPROPERTY()
     bool bRglShowLidarPoints = false;
 

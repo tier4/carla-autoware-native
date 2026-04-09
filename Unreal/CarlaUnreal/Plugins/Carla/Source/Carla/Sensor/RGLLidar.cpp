@@ -63,7 +63,7 @@ void ARGLLidar::Set(const FActorDescription& ActorDescription)
     UActorBlueprintFunctionLibrary::SetLidar(ActorDescription, Description);
 
     // Read optional visualization attributes
-    auto ShowAttr = GetAttribute(TEXT("rgl_show_lidar_points"));
+    auto ShowAttr = GetAttribute(TEXT("rgl_lidar_show_points"));
     if (ShowAttr.has_value())
     {
         bRglShowLidarPoints = ShowAttr->Value.ToBool();
@@ -202,25 +202,25 @@ void ARGLLidar::CreateRGLGraph()
     FRGLSessionConfig Config;
     Config.LidarDesc = Description;
 
-    auto TopicAttr = GetAttribute(TEXT("rgl_ros2_topic"));
+    auto TopicAttr = GetAttribute(TEXT("rgl_lidar_topic_name"));
     if (TopicAttr.has_value()) Config.Ros2Topic = TopicAttr->Value;
 
-    auto FrameAttr = GetAttribute(TEXT("rgl_ros2_frame_id"));
+    auto FrameAttr = GetAttribute(TEXT("rgl_lidar_topic_frame_id"));
     Config.Ros2FrameId = FrameAttr.has_value() ? FrameAttr->Value : TEXT("lidar");
 
-    auto RelAttr = GetAttribute(TEXT("rgl_ros2_reliability"));
+    auto RelAttr = GetAttribute(TEXT("rgl_lidar_topic_reliability"));
     Config.Ros2Reliability = RelAttr.has_value() ? RelAttr->Value : TEXT("best_effort");
 
-    auto DurAttr = GetAttribute(TEXT("rgl_ros2_durability"));
+    auto DurAttr = GetAttribute(TEXT("rgl_lidar_topic_durability"));
     Config.Ros2Durability = DurAttr.has_value() ? DurAttr->Value : TEXT("volatile");
 
-    auto HistAttr = GetAttribute(TEXT("rgl_ros2_history"));
+    auto HistAttr = GetAttribute(TEXT("rgl_lidar_topic_history"));
     Config.Ros2History = HistAttr.has_value() ? HistAttr->Value : TEXT("keep_last");
 
-    auto DepthAttr = GetAttribute(TEXT("rgl_ros2_history_depth"));
+    auto DepthAttr = GetAttribute(TEXT("rgl_lidar_topic_history_depth"));
     Config.Ros2HistoryDepth = DepthAttr.has_value() ? FCString::Atoi(*DepthAttr->Value) : 5;
 
-    auto FmtAttr = GetAttribute(TEXT("rgl_ros2_format"));
+    auto FmtAttr = GetAttribute(TEXT("rgl_lidar_pointcloud_format"));
     Config.Ros2Format = FmtAttr.has_value() ? FmtAttr->Value : TEXT("PointXYZIRCAEDT");
 
     RGLSessionHandle = Backend->CreateSession(Config, GetWorld());
