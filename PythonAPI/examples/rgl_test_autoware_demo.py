@@ -189,6 +189,7 @@ def chain_transforms(transforms):
 
 
 def generate_vlp16_blueprint(blueprint_library, lidar_type="rgl",
+                             lidar_model="",
                              carla_lidar_topic_name="/sensing/lidar/top/pointcloud_raw_ex",
                              lidar_frame_id="velodyne_top",
                              rgl_lidar_show_points=False,
@@ -220,14 +221,18 @@ def generate_vlp16_blueprint(blueprint_library, lidar_type="rgl",
     sensor_id = "sensor.lidar.rgl" if lidar_type != "ray_cast" else "sensor.lidar.ray_cast"
     blueprint = blueprint_library.find(sensor_id)
 
-    # The following values are taken from VLP16 datasheet
-    blueprint.set_attribute("channels", "16")
-    blueprint.set_attribute("range", "100.0")
-    blueprint.set_attribute("upper_fov", "10.0")
-    blueprint.set_attribute("lower_fov", "-20.0")
-
-    # Calculated as: horizontal_fov / horizontal_resolution / sensor_tick * channels
-    blueprint.set_attribute("points_per_second", "288000")
+    if lidar_model:
+        import sys as _sys
+        _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from rgl_lidar_models import apply_preset
+        apply_preset(blueprint, lidar_model)
+    else:
+        # Default VLP16 configuration
+        blueprint.set_attribute("channels", "16")
+        blueprint.set_attribute("range", "100.0")
+        blueprint.set_attribute("upper_fov", "10.0")
+        blueprint.set_attribute("lower_fov", "-20.0")
+        blueprint.set_attribute("points_per_second", "288000")
 
     blueprint.set_attribute("sensor_tick", "0.1")
 
@@ -331,6 +336,7 @@ def spawn_sensors(world, base_link, ego, args):
     sensor_kit_blueprint = blueprint_library.find("util.actor.empty")
     sensor_kit_blueprint.set_attribute("ros_name", "sensor_kit_base_link")
     lidar_kwargs = dict(
+        lidar_model=args.lidar_model,
         carla_lidar_topic_name=args.carla_lidar_topic_name,
         lidar_frame_id=args.lidar_frame_id,
         rgl_lidar_show_points=args.rgl_lidar_show_points,
@@ -789,7 +795,20 @@ def main():
     argparser.add_argument(
         '--lidar_spawn_delta_z', type=float, default=0.0,
         help='Spawn position delta Z per LiDAR in meters (default: 0.0)')
+    argparser.add_argument(
+        '--lidar_model', type=str, default='',
+        help='Apply a LiDAR preset (e.g. VelodyneVLP16, HesaiPandarXT32). '
+             'Overrides channels/range/fov. Use --lidar_model list to show available models.')
     args = argparser.parse_args()
+
+    # Handle --lidar_model list
+    if args.lidar_model == 'list':
+        import sys as _sys
+        _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from rgl_lidar_models import list_models
+        print("Available LiDAR presets:")
+        list_models()
+        raise SystemExit(0)
 
     # Deploy PostProcess profiles before connecting to server
     deploy_postprocess_profile("autoware_demo", AUTOWARE_POSTPROCESS_SETTINGS)

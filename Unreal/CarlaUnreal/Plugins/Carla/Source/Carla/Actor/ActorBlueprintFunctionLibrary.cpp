@@ -847,6 +847,31 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     RglRos2Format.RecommendedValues = { TEXT("PointXYZIRCAEDT") };
     RglRos2Format.bRestrictToRecommended = false;
 
+    // [RGL] Per-channel angle presets
+    FActorVariation VerticalAngles;
+    VerticalAngles.Id = TEXT("vertical_angles");
+    VerticalAngles.Type = EActorAttributeType::String;
+    VerticalAngles.RecommendedValues = { TEXT("") };
+    VerticalAngles.bRestrictToRecommended = false;
+
+    FActorVariation HorizontalAngleOffsets;
+    HorizontalAngleOffsets.Id = TEXT("horizontal_angle_offsets");
+    HorizontalAngleOffsets.Type = EActorAttributeType::String;
+    HorizontalAngleOffsets.RecommendedValues = { TEXT("") };
+    HorizontalAngleOffsets.bRestrictToRecommended = false;
+
+    FActorVariation RingIdsVar;
+    RingIdsVar.Id = TEXT("ring_ids");
+    RingIdsVar.Type = EActorAttributeType::String;
+    RingIdsVar.RecommendedValues = { TEXT("") };
+    RingIdsVar.bRestrictToRecommended = false;
+
+    FActorVariation MinRange;
+    MinRange.Id = TEXT("min_range");
+    MinRange.Type = EActorAttributeType::Float;
+    MinRange.RecommendedValues = { TEXT("0.0") };
+    MinRange.bRestrictToRecommended = false;
+
     Definition.Variations.Append({
       Channels,
       Range,
@@ -870,7 +895,11 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       RglRos2Durability,
       RglRos2HistoryDepth,
       RglRos2History,
-      RglRos2Format});
+      RglRos2Format,
+      VerticalAngles,
+      HorizontalAngleOffsets,
+      RingIdsVar,
+      MinRange});
   }
   else {
     DEBUG_ASSERT(false);
@@ -1556,6 +1585,49 @@ void UActorBlueprintFunctionLibrary::SetLidar(
       RetrieveActorAttributeToFloat("dropoff_zero_intensity", Description.Variations, Lidar.DropOffAtZeroIntensity);
   Lidar.NoiseStdDev =
       RetrieveActorAttributeToFloat("noise_stddev", Description.Variations, Lidar.NoiseStdDev);
+
+  // Parse per-channel arrays (comma-separated strings -> TArray)
+  FString VerticalAnglesStr = RetrieveActorAttributeToString(
+      "vertical_angles", Description.Variations, TEXT(""));
+  if (!VerticalAnglesStr.IsEmpty())
+  {
+    TArray<FString> Tokens;
+    VerticalAnglesStr.ParseIntoArray(Tokens, TEXT(","), true);
+    Lidar.VerticalAngles.Reserve(Tokens.Num());
+    for (const FString& Token : Tokens)
+    {
+      Lidar.VerticalAngles.Add(FCString::Atof(*Token.TrimStartAndEnd()));
+    }
+  }
+
+  FString HorizOffsetsStr = RetrieveActorAttributeToString(
+      "horizontal_angle_offsets", Description.Variations, TEXT(""));
+  if (!HorizOffsetsStr.IsEmpty())
+  {
+    TArray<FString> Tokens;
+    HorizOffsetsStr.ParseIntoArray(Tokens, TEXT(","), true);
+    Lidar.HorizontalAngleOffsets.Reserve(Tokens.Num());
+    for (const FString& Token : Tokens)
+    {
+      Lidar.HorizontalAngleOffsets.Add(FCString::Atof(*Token.TrimStartAndEnd()));
+    }
+  }
+
+  FString RingIdsStr = RetrieveActorAttributeToString(
+      "ring_ids", Description.Variations, TEXT(""));
+  if (!RingIdsStr.IsEmpty())
+  {
+    TArray<FString> Tokens;
+    RingIdsStr.ParseIntoArray(Tokens, TEXT(","), true);
+    Lidar.RingIds.Reserve(Tokens.Num());
+    for (const FString& Token : Tokens)
+    {
+      Lidar.RingIds.Add(FCString::Atoi(*Token.TrimStartAndEnd()));
+    }
+  }
+
+  Lidar.MinRange =
+      RetrieveActorAttributeToFloat("min_range", Description.Variations, 0.0f) * TO_CENTIMETERS;
 }
 
 void UActorBlueprintFunctionLibrary::SetGnss(

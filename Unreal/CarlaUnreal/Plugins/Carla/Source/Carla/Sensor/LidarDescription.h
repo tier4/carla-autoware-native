@@ -69,4 +69,21 @@ struct CARLA_API FLidarDescription
 
   UPROPERTY(EditAnywhere)
   float NoiseStdDev = 0.0f;
+
+  /// Per-channel vertical angles (degrees, sensor frame).
+  /// If non-empty, overrides uniform distribution from UpperFovLimit/LowerFovLimit.
+  /// Length determines effective channel count for RGL ray generation.
+  TArray<float> VerticalAngles;
+
+  /// Per-channel horizontal angle offsets (degrees).
+  /// Applied as azimuth offset for each channel. Empty = all zeros.
+  TArray<float> HorizontalAngleOffsets;
+
+  /// Per-channel ring IDs.
+  /// If non-empty, overrides sequential (0, 1, 2, ...) assignment.
+  TArray<int32> RingIds;
+
+  /// Minimum range in centimeters (default 0).
+  UPROPERTY(EditAnywhere)
+  float MinRange = 0.0f;
 };

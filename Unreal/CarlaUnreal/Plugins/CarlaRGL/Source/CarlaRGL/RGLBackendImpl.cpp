@@ -121,9 +121,10 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
     rgl_mat3x4f DummyRay = RGLCoord::Identity();
     RGL_CHECK_RETURN(rgl_node_rays_from_mat3x4f(&Session->UseRaysNode, &DummyRay, 1), nullptr);
 
-    // 1.5. Set ray range (min=0, max=Description.Range in meters)
-    const float RangeM = Desc.Range * RGLCoord::UE_TO_RGL;
-    rgl_vec2f RayRange = {{ 0.0f, RangeM }};
+    // 1.5. Set ray range (min/max in meters)
+    const float MinRangeM = Desc.MinRange * RGLCoord::UE_TO_RGL;
+    const float MaxRangeM = Desc.Range * RGLCoord::UE_TO_RGL;
+    rgl_vec2f RayRange = {{ MinRangeM, MaxRangeM }};
     RGL_CHECK_RETURN(rgl_node_rays_set_range(&Session->SetRangeNode, &RayRange, 1), nullptr);
 
     // 1.6. Set ring IDs (channel assignment for each ray)
@@ -136,7 +137,7 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
 
     // 3. Raytrace node
     RGL_CHECK_RETURN(rgl_node_raytrace(&Session->RaytraceNode, Scene), nullptr);
-    RGL_CHECK(rgl_node_raytrace_configure_non_hits(Session->RaytraceNode, 0.0f, RangeM));
+    RGL_CHECK(rgl_node_raytrace_configure_non_hits(Session->RaytraceNode, 0.0f, MaxRangeM));
 
     // 4. Compact node
     RGL_CHECK_RETURN(rgl_node_points_compact_by_field(&Session->CompactNode, RGL_FIELD_IS_HIT_I32), nullptr);
@@ -347,20 +348,32 @@ int32 FRGLBackendImpl::GenerateRayPattern(FRGLSession* Session, float DeltaSecon
 
     const float AngleDistanceOfLaserMeasure = AngleDistanceOfTick / PointsToScanWithOneLaser;
 
-    // Pre-compute vertical angles per channel
+    // Pre-compute vertical angles and horizontal offsets per channel
     TArray<float> VerticalAngles;
-    VerticalAngles.SetNum(ChannelCount);
-    if (ChannelCount == 1)
+    TArray<float> HorizOffsets;
+
+    if (Desc.VerticalAngles.Num() > 0)
     {
-        VerticalAngles[0] = (Desc.UpperFovLimit + Desc.LowerFovLimit) / 2.0f;
+        // Per-channel preset mode: use explicit angles
+        VerticalAngles = Desc.VerticalAngles;
+        HorizOffsets = Desc.HorizontalAngleOffsets;
     }
     else
     {
-        for (uint32 ch = 0; ch < ChannelCount; ++ch)
+        // Legacy uniform mode: distribute evenly between upper/lower FOV
+        VerticalAngles.SetNum(ChannelCount);
+        if (ChannelCount == 1)
         {
-            VerticalAngles[ch] = Desc.UpperFovLimit -
-                static_cast<float>(ch) * (Desc.UpperFovLimit - Desc.LowerFovLimit)
-                / static_cast<float>(ChannelCount - 1);
+            VerticalAngles[0] = (Desc.UpperFovLimit + Desc.LowerFovLimit) / 2.0f;
+        }
+        else
+        {
+            for (uint32 ch = 0; ch < ChannelCount; ++ch)
+            {
+                VerticalAngles[ch] = Desc.UpperFovLimit -
+                    static_cast<float>(ch) * (Desc.UpperFovLimit - Desc.LowerFovLimit)
+                    / static_cast<float>(ChannelCount - 1);
+            }
         }
     }
 
@@ -371,18 +384,25 @@ int32 FRGLBackendImpl::GenerateRayPattern(FRGLSession* Session, float DeltaSecon
     int32 RayIndex = 0;
     for (uint32 ch = 0; ch < ChannelCount; ++ch)
     {
+        const float ChVertAngle = (ch < static_cast<uint32>(VerticalAngles.Num()))
+            ? VerticalAngles[ch] : 0.0f;
+        const float ChHorizOffset = (ch < static_cast<uint32>(HorizOffsets.Num()))
+            ? HorizOffsets[ch] : 0.0f;
+        const int32 ChRingId = (ch < static_cast<uint32>(Desc.RingIds.Num()))
+            ? Desc.RingIds[ch] : static_cast<int32>(ch);
+
         for (uint32 pt = 0; pt < PointsToScanWithOneLaser; ++pt)
         {
             // Center angle range around 0 (same as CPU ray_cast: -HorizontalFov/2 offset)
             const float HorizAngle = std::fmod(
                 InOutHorizontalAngle + static_cast<float>(pt) * AngleDistanceOfLaserMeasure,
-                Desc.HorizontalFov) - Desc.HorizontalFov / 2.0f;
+                Desc.HorizontalFov) - Desc.HorizontalFov / 2.0f + ChHorizOffset;
 
             Session->RayTransforms[RayIndex] = RGLCoord::FromPitchYaw(
-                VerticalAngles[ch],
+                ChVertAngle,
                 HorizAngle
             );
-            Session->RingIds[RayIndex] = static_cast<int32>(ch);
+            Session->RingIds[RayIndex] = ChRingId;
             ++RayIndex;
         }
     }

@@ -1,0 +1,20 @@
+"""LiDAR preset: RangeMeter (extracted from AWSIM RGLUnityPlugin)."""
+
+MODEL = {
+    "name": "RangeMeter",
+    "channels": 1,
+    "range": 40.0,
+    "min_range": 0.0,
+    "upper_fov": 0.0,
+    "lower_fov": 0.0,
+    "horizontal_fov": 0.0,
+    "rotation_frequency": 10.0,
+    "points_per_second": 10,
+    "vertical_angles": [
+        0.0,
+    ],
+    "horizontal_angle_offsets": [],
+    "ring_ids": [
+        1,
+    ],
+}
