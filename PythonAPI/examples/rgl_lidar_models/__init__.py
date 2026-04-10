@@ -8,6 +8,10 @@ Usage:
     apply_preset(blueprint, "VelodyneVLP16")
 """
 
+import base64
+import struct
+import zlib
+
 from .range_meter import MODEL as _RangeMeter
 from .sick_mrs6000 import MODEL as _SickMRS6000
 from .velodyne_vlp16 import MODEL as _VelodyneVLP16
@@ -28,6 +32,40 @@ MODEL_REGISTRY = {m["name"]: m for m in [
     _HesaiAT128E2X, _HesaiQT128C2X, _HesaiPandar128E4X,
     _OusterOS1_64,
 ]}
+
+
+def _encode_float_array(floats):
+    """Encode float array as delta-int32(×1e6) + zlib + base64.
+
+    CARLA's actor attribute values pass through UE5's FName, which has a hard
+    limit of 1023 characters.  A plain comma-separated text representation of
+    128-channel float32 angles (e.g. HesaiQT128C2X) exceeds this limit at
+    ~1600 chars, making it impossible to transmit per-channel data at full
+    float32 precision without compression.
+
+    Encoding pipeline:
+      float × 1e6 → int32 (fixed-point, 0.000001° precision ≈ float32)
+      → delta encoding (exploits near-monotonic angle sequences)
+      → zlib level-9 compression
+      → base64 (ASCII-safe for attribute transport)
+
+    Result: 128ch worst case ≈ 572 chars, well within the 1023 char limit.
+    """
+    ints = [round(f * 1e6) for f in floats]
+    deltas = [ints[0]] + [ints[i] - ints[i - 1] for i in range(1, len(ints))]
+    raw = struct.pack(f">{len(deltas)}i", *deltas)
+    return base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
+
+
+def _encode_int_array(ints):
+    """Encode int array as delta-int32 + zlib + base64.
+
+    Same encoding as _encode_float_array but without the ×1e6 scaling.
+    See _encode_float_array docstring for rationale (FName 1023 char limit).
+    """
+    deltas = [ints[0]] + [ints[i] - ints[i - 1] for i in range(1, len(ints))]
+    raw = struct.pack(f">{len(deltas)}i", *deltas)
+    return base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
 
 
 def list_models():
@@ -69,14 +107,12 @@ def apply_preset(blueprint, model_name):
     if m.get("min_range", 0) > 0:
         _try_set("min_range", str(m["min_range"]))
 
+    # Encode arrays as delta+zlib+base64 to stay within UE5 FName 1023 char limit.
     if m["vertical_angles"]:
-        _try_set("vertical_angles",
-                 ",".join(str(a) for a in m["vertical_angles"]))
+        _try_set("vertical_angles", _encode_float_array(m["vertical_angles"]))
 
     if m["horizontal_angle_offsets"]:
-        _try_set("horizontal_angle_offsets",
-                 ",".join(str(a) for a in m["horizontal_angle_offsets"]))
+        _try_set("horizontal_angle_offsets", _encode_float_array(m["horizontal_angle_offsets"]))
 
     if m["ring_ids"]:
-        _try_set("ring_ids",
-                 ",".join(str(r) for r in m["ring_ids"]))
+        _try_set("ring_ids", _encode_int_array(m["ring_ids"]))

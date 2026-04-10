@@ -9,12 +9,25 @@ DEFINE_LOG_CATEGORY(LogCarlaRGL);
 #include "RGLBackendImpl.h"
 #endif
 
+static FString GetCarlaRGLBinDir()
+{
+    // In packaged builds: <ProjectDir>/Plugins/CarlaRGL/Binaries/Linux
+    // FPaths::ProjectPluginsDir() resolves correctly in both editor and package.
+    FString PluginBinDir = FPaths::Combine(
+        FPaths::ProjectPluginsDir(), TEXT("CarlaRGL"), TEXT("Binaries"), TEXT("Linux"));
+    if (FPaths::DirectoryExists(PluginBinDir))
+    {
+        return PluginBinDir;
+    }
+    // Fallback: __FILE__ based (editor with source tree, resolved at compile time)
+    FString PluginDir = FPaths::GetPath(FPaths::GetPath(FPaths::GetPath(FString(__FILE__))));
+    return FPaths::Combine(PluginDir, TEXT("Binaries"), TEXT("Linux"));
+}
+
 void FCarlaRGLModule::StartupModule()
 {
 #ifdef WITH_RGL
-    // __FILE__ is Source/CarlaRGL/CarlaRGLModule.cpp → go up to plugin root.
-    FString PluginDir = FPaths::GetPath(FPaths::GetPath(FPaths::GetPath(FString(__FILE__))));
-    FString BinDir = FPaths::Combine(PluginDir, TEXT("Binaries"), TEXT("Linux"));
+    FString BinDir = GetCarlaRGLBinDir();
 
     // 1. Load and init RclcppBridge FIRST (before RGL and before CARLA's DDS).
     //    This calls rclcpp::init() so RGL's Ros2InitGuard sees rclcpp::ok()==true.

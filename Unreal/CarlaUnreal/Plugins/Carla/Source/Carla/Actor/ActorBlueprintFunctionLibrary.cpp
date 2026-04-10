@@ -18,6 +18,8 @@
 #include "Engine/StaticMeshActor.h"
 
 #include <algorithm>
+#include "Misc/Base64.h"
+#include "Misc/Compression.h"
 #include <limits>
 #include <stack>
 
@@ -1586,43 +1588,90 @@ void UActorBlueprintFunctionLibrary::SetLidar(
   Lidar.NoiseStdDev =
       RetrieveActorAttributeToFloat("noise_stddev", Description.Variations, Lidar.NoiseStdDev);
 
-  // Parse per-channel arrays (comma-separated strings -> TArray)
+  // Decode per-channel arrays encoded as delta-int32 + zlib + base64.
+  //
+  // CARLA actor attribute values pass through UE5 FName, which has a hard
+  // limit of 1023 characters.  A plain comma-separated text representation
+  // of 128-channel float32 angles can exceed this (~1600 chars for
+  // HesaiQT128C2X), making it impossible to transmit per-channel data at
+  // full float32 precision without compression.
+  //
+  // Encoding (Python → C++):
+  //   float × 1e6 → int32 delta → zlib → base64   (encode, Python side)
+  //   base64 → zlib → int32 delta → cumulative sum  (decode, here)
+  auto DecodeDeltas = [](const FString& Encoded, TArray<int32>& OutInts) -> bool
+  {
+    if (Encoded.IsEmpty()) return false;
+    TArray<uint8> Compressed;
+    if (!FBase64::Decode(Encoded, Compressed) || Compressed.Num() == 0) return false;
+
+    // Decompress with zlib. Try increasing buffer sizes.
+    int32 DecompressedSize = Compressed.Num() * 10;
+    TArray<uint8> Decompressed;
+    Decompressed.SetNum(DecompressedSize);
+    while (!FCompression::UncompressMemory(
+        NAME_Zlib, Decompressed.GetData(), DecompressedSize,
+        Compressed.GetData(), Compressed.Num()))
+    {
+      DecompressedSize *= 2;
+      if (DecompressedSize > 1024 * 1024) return false; // safety limit
+      Decompressed.SetNum(DecompressedSize);
+    }
+
+    // Parse big-endian int32 deltas and reconstruct via cumulative sum
+    const int32 Count = DecompressedSize / 4;
+    OutInts.SetNum(Count);
+    const uint8* Ptr = Decompressed.GetData();
+    int32 Acc = 0;
+    for (int32 i = 0; i < Count; ++i)
+    {
+      // Big-endian to native
+      int32 Delta = (static_cast<int32>(Ptr[0]) << 24)
+                  | (static_cast<int32>(Ptr[1]) << 16)
+                  | (static_cast<int32>(Ptr[2]) << 8)
+                  | (static_cast<int32>(Ptr[3]));
+      Ptr += 4;
+      Acc += Delta;
+      OutInts[i] = Acc;
+    }
+    return true;
+  };
+
   FString VerticalAnglesStr = RetrieveActorAttributeToString(
       "vertical_angles", Description.Variations, TEXT(""));
-  if (!VerticalAnglesStr.IsEmpty())
   {
-    TArray<FString> Tokens;
-    VerticalAnglesStr.ParseIntoArray(Tokens, TEXT(","), true);
-    Lidar.VerticalAngles.Reserve(Tokens.Num());
-    for (const FString& Token : Tokens)
+    TArray<int32> IntValues;
+    if (DecodeDeltas(VerticalAnglesStr, IntValues))
     {
-      Lidar.VerticalAngles.Add(FCString::Atof(*Token.TrimStartAndEnd()));
+      Lidar.VerticalAngles.SetNum(IntValues.Num());
+      for (int32 i = 0; i < IntValues.Num(); ++i)
+      {
+        Lidar.VerticalAngles[i] = static_cast<float>(IntValues[i]) * 1e-6f;
+      }
     }
   }
 
   FString HorizOffsetsStr = RetrieveActorAttributeToString(
       "horizontal_angle_offsets", Description.Variations, TEXT(""));
-  if (!HorizOffsetsStr.IsEmpty())
   {
-    TArray<FString> Tokens;
-    HorizOffsetsStr.ParseIntoArray(Tokens, TEXT(","), true);
-    Lidar.HorizontalAngleOffsets.Reserve(Tokens.Num());
-    for (const FString& Token : Tokens)
+    TArray<int32> IntValues;
+    if (DecodeDeltas(HorizOffsetsStr, IntValues))
     {
-      Lidar.HorizontalAngleOffsets.Add(FCString::Atof(*Token.TrimStartAndEnd()));
+      Lidar.HorizontalAngleOffsets.SetNum(IntValues.Num());
+      for (int32 i = 0; i < IntValues.Num(); ++i)
+      {
+        Lidar.HorizontalAngleOffsets[i] = static_cast<float>(IntValues[i]) * 1e-6f;
+      }
     }
   }
 
   FString RingIdsStr = RetrieveActorAttributeToString(
       "ring_ids", Description.Variations, TEXT(""));
-  if (!RingIdsStr.IsEmpty())
   {
-    TArray<FString> Tokens;
-    RingIdsStr.ParseIntoArray(Tokens, TEXT(","), true);
-    Lidar.RingIds.Reserve(Tokens.Num());
-    for (const FString& Token : Tokens)
+    TArray<int32> IntValues;
+    if (DecodeDeltas(RingIdsStr, IntValues))
     {
-      Lidar.RingIds.Add(FCString::Atoi(*Token.TrimStartAndEnd()));
+      Lidar.RingIds = MoveTemp(IntValues);
     }
   }
 
