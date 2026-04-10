@@ -388,6 +388,8 @@ int32 FRGLBackendImpl::GenerateRayPattern(FRGLSession* Session, float DeltaSecon
             ? VerticalAngles[ch] : 0.0f;
         const float ChHorizOffset = (ch < static_cast<uint32>(HorizOffsets.Num()))
             ? HorizOffsets[ch] : 0.0f;
+        const float ChStepOffset = (ch < static_cast<uint32>(Desc.HorizontalStepOffsets.Num()))
+            ? Desc.HorizontalStepOffsets[ch] : 0.0f;
         const int32 ChRingId = (ch < static_cast<uint32>(Desc.RingIds.Num()))
             ? Desc.RingIds[ch] : static_cast<int32>(ch);
 
@@ -396,7 +398,7 @@ int32 FRGLBackendImpl::GenerateRayPattern(FRGLSession* Session, float DeltaSecon
             // Center angle range around 0 (same as CPU ray_cast: -HorizontalFov/2 offset)
             const float HorizAngle = std::fmod(
                 InOutHorizontalAngle + static_cast<float>(pt) * AngleDistanceOfLaserMeasure,
-                Desc.HorizontalFov) - Desc.HorizontalFov / 2.0f + ChHorizOffset;
+                Desc.HorizontalFov) - Desc.HorizontalFov / 2.0f + ChHorizOffset + ChStepOffset;
 
             Session->RayTransforms[RayIndex] = RGLCoord::FromPitchYaw(
                 ChVertAngle,
@@ -405,6 +407,35 @@ int32 FRGLBackendImpl::GenerateRayPattern(FRGLSession* Session, float DeltaSecon
             Session->RingIds[RayIndex] = ChRingId;
             ++RayIndex;
         }
+    }
+
+    // Generate per-ray range array if periodic range pattern is defined.
+    // Each channel cycles through (RangePatternPeriod) range pairs across horizontal steps.
+    // This is data-driven: model-specific knowledge lives in Python presets, not here.
+    if (Desc.PerChannelMinRanges.Num() > 0 && Desc.RangePatternPeriod > 0)
+    {
+        Session->RayRanges.SetNum(TotalRays);
+        const int32 Period = Desc.RangePatternPeriod;
+        const int32 MaxPatIdx = Desc.PerChannelMinRanges.Num() - 1;
+        int32 Idx = 0;
+        for (uint32 ch = 0; ch < ChannelCount; ++ch)
+        {
+            for (uint32 pt = 0; pt < PointsToScanWithOneLaser; ++pt)
+            {
+                const int32 PatIdx = FMath::Min(
+                    static_cast<int32>(ch) * Period + static_cast<int32>(pt % Period),
+                    MaxPatIdx);
+                Session->RayRanges[Idx] = {{
+                    Desc.PerChannelMinRanges[PatIdx],
+                    Desc.PerChannelMaxRanges[PatIdx]
+                }};
+                ++Idx;
+            }
+        }
+    }
+    else
+    {
+        Session->RayRanges.Empty();
     }
 
     // Advance starting angle. With capped angle, this properly wraps around.
@@ -466,6 +497,15 @@ FRGLTickResult FRGLBackendImpl::Tick(
             &Session->SetRingIdsNode,
             Session->RingIds.GetData(),
             TotalRays));
+
+        // Update per-ray ranges if periodic range pattern is active
+        if (Session->RayRanges.Num() == TotalRays)
+        {
+            RGL_CHECK(rgl_node_rays_set_range(
+                &Session->SetRangeNode,
+                Session->RayRanges.GetData(),
+                TotalRays));
+        }
 
         Session->CachedTotalRays = TotalRays;
         Session->bRayPatternCached = true;

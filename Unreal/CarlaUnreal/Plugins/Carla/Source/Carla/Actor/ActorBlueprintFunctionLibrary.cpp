@@ -874,6 +874,30 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     MinRange.RecommendedValues = { TEXT("0.0") };
     MinRange.bRestrictToRecommended = false;
 
+    FActorVariation PerChannelMinRanges;
+    PerChannelMinRanges.Id = TEXT("per_channel_min_ranges");
+    PerChannelMinRanges.Type = EActorAttributeType::String;
+    PerChannelMinRanges.RecommendedValues = { TEXT("") };
+    PerChannelMinRanges.bRestrictToRecommended = false;
+
+    FActorVariation PerChannelMaxRanges;
+    PerChannelMaxRanges.Id = TEXT("per_channel_max_ranges");
+    PerChannelMaxRanges.Type = EActorAttributeType::String;
+    PerChannelMaxRanges.RecommendedValues = { TEXT("") };
+    PerChannelMaxRanges.bRestrictToRecommended = false;
+
+    FActorVariation RangePatternPeriod;
+    RangePatternPeriod.Id = TEXT("range_pattern_period");
+    RangePatternPeriod.Type = EActorAttributeType::Int;
+    RangePatternPeriod.RecommendedValues = { TEXT("0") };
+    RangePatternPeriod.bRestrictToRecommended = false;
+
+    FActorVariation HorizontalStepOffsetsVar;
+    HorizontalStepOffsetsVar.Id = TEXT("horizontal_step_offsets");
+    HorizontalStepOffsetsVar.Type = EActorAttributeType::String;
+    HorizontalStepOffsetsVar.RecommendedValues = { TEXT("") };
+    HorizontalStepOffsetsVar.bRestrictToRecommended = false;
+
     Definition.Variations.Append({
       Channels,
       Range,
@@ -901,7 +925,11 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       VerticalAngles,
       HorizontalAngleOffsets,
       RingIdsVar,
-      MinRange});
+      MinRange,
+      PerChannelMinRanges,
+      PerChannelMaxRanges,
+      RangePatternPeriod,
+      HorizontalStepOffsetsVar});
   }
   else {
     DEBUG_ASSERT(false);
@@ -1677,6 +1705,52 @@ void UActorBlueprintFunctionLibrary::SetLidar(
 
   Lidar.MinRange =
       RetrieveActorAttributeToFloat("min_range", Description.Variations, 0.0f) * TO_CENTIMETERS;
+
+  // Per-channel range pattern (delta+zlib+base64 encoded, meters — no cm conversion)
+  FString PerChMinStr = RetrieveActorAttributeToString(
+      "per_channel_min_ranges", Description.Variations, TEXT(""));
+  {
+    TArray<int32> IntValues;
+    if (DecodeDeltas(PerChMinStr, IntValues))
+    {
+      Lidar.PerChannelMinRanges.SetNum(IntValues.Num());
+      for (int32 i = 0; i < IntValues.Num(); ++i)
+      {
+        Lidar.PerChannelMinRanges[i] = static_cast<float>(IntValues[i]) * 1e-6f;
+      }
+    }
+  }
+
+  FString PerChMaxStr = RetrieveActorAttributeToString(
+      "per_channel_max_ranges", Description.Variations, TEXT(""));
+  {
+    TArray<int32> IntValues;
+    if (DecodeDeltas(PerChMaxStr, IntValues))
+    {
+      Lidar.PerChannelMaxRanges.SetNum(IntValues.Num());
+      for (int32 i = 0; i < IntValues.Num(); ++i)
+      {
+        Lidar.PerChannelMaxRanges[i] = static_cast<float>(IntValues[i]) * 1e-6f;
+      }
+    }
+  }
+
+  Lidar.RangePatternPeriod =
+      RetrieveActorAttributeToInt("range_pattern_period", Description.Variations, 0);
+
+  FString HorizStepStr = RetrieveActorAttributeToString(
+      "horizontal_step_offsets", Description.Variations, TEXT(""));
+  {
+    TArray<int32> IntValues;
+    if (DecodeDeltas(HorizStepStr, IntValues))
+    {
+      Lidar.HorizontalStepOffsets.SetNum(IntValues.Num());
+      for (int32 i = 0; i < IntValues.Num(); ++i)
+      {
+        Lidar.HorizontalStepOffsets[i] = static_cast<float>(IntValues[i]) * 1e-6f;
+      }
+    }
+  }
 }
 
 void UActorBlueprintFunctionLibrary::SetGnss(

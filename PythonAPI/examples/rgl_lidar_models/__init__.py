@@ -23,6 +23,7 @@ from .hesai_pandarxt32 import MODEL as _HesaiPandarXT32
 from .hesai_at128e2x import MODEL as _HesaiAT128E2X
 from .hesai_qt128c2x import MODEL as _HesaiQT128C2X
 from .hesai_pandar128e4x import MODEL as _HesaiPandar128E4X
+from .hesai_pandar128e4x_highres import MODEL as _HesaiPandar128E4XHighRes
 from .ouster_os1_64 import MODEL as _OusterOS1_64
 
 MODEL_REGISTRY = {m["name"]: m for m in [
@@ -30,7 +31,7 @@ MODEL_REGISTRY = {m["name"]: m for m in [
     _VelodyneVLP16, _VelodyneVLP32C, _VelodyneVLS128,
     _HesaiPandar40P, _HesaiPandarQT, _HesaiPandarXT32,
     _HesaiAT128E2X, _HesaiQT128C2X, _HesaiPandar128E4X,
-    _OusterOS1_64,
+    _HesaiPandar128E4XHighRes, _OusterOS1_64,
 ]}
 
 
@@ -116,3 +117,15 @@ def apply_preset(blueprint, model_name):
 
     if m["ring_ids"]:
         _try_set("ring_ids", _encode_int_array(m["ring_ids"]))
+
+    if m.get("per_channel_min_ranges"):
+        _try_set("per_channel_min_ranges",
+                 _encode_float_array(m["per_channel_min_ranges"]))
+        _try_set("per_channel_max_ranges",
+                 _encode_float_array(m["per_channel_max_ranges"]))
+        _try_set("range_pattern_period",
+                 str(m.get("range_pattern_period", 0)))
+
+    if m.get("horizontal_step_offsets"):
+        _try_set("horizontal_step_offsets",
+                 _encode_float_array(m["horizontal_step_offsets"]))

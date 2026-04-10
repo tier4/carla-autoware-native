@@ -43,6 +43,7 @@ struct FRGLSession
     // ---- Ray pattern buffers ----
     TArray<rgl_mat3x4f> RayTransforms;
     TArray<int32> RingIds;
+    TArray<rgl_vec2f> RayRanges;  // per-ray range (min,max) in meters; empty = uniform
 
     // ---- Cache state ----
     bool bRayPatternCached = false;

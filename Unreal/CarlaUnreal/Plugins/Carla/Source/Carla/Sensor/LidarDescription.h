@@ -86,4 +86,21 @@ struct CARLA_API FLidarDescription
   /// Minimum range in centimeters (default 0).
   UPROPERTY(EditAnywhere)
   float MinRange = 0.0f;
+
+  /// Per-channel periodic range pattern (meters, NOT centimeters).
+  /// Array size = Channels × RangePatternPeriod.
+  /// Index: channel * RangePatternPeriod + (horizontalStep % RangePatternPeriod)
+  /// Empty = use uniform MinRange/Range for all rays.
+  TArray<float> PerChannelMinRanges;
+  TArray<float> PerChannelMaxRanges;
+
+  /// Range pattern period. 0 = unused (uniform range).
+  /// 2 = alternating (e.g. AT128E2X near/far field).
+  int32 RangePatternPeriod = 0;
+
+  /// Per-channel horizontal step offset (degrees).
+  /// Added to each ray's horizontal angle to enable half-resolution shift
+  /// for specific channels (e.g. QT128C2X Bank C/D, Pandar128E4X high-res).
+  /// Empty = no shift.
+  TArray<float> HorizontalStepOffsets;
 };
