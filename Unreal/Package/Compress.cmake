@@ -18,20 +18,14 @@ elseif (CARLA_PACKAGE_COMPRESSION STREQUAL "zstd")
   if (NOT PZSTD_EXECUTABLE)
     message (FATAL_ERROR "pzstd not found. Install zstd (apt install zstd) or use -DCARLA_PACKAGE_COMPRESSION=gzip")
   endif ()
-  # Two-step: tar (no compression) then pzstd (parallel, auto-detects CPU cores)
+  find_program (TAR_EXECUTABLE tar REQUIRED)
+  # Pipe tar stdout directly into pzstd to avoid writing a large intermediate
+  # .tar file to disk.  CMake execute_process does not support shell pipes,
+  # so we invoke bash -c.
+  cmake_path (GET CARLA_PACKAGE_ARCHIVE_PATH FILENAME _ARCHIVE_DIRNAME)
   set (
     COMPRESS_PACKAGE_COMMAND
-    ${CMAKE_COMMAND}
-      -E tar cvf
-      ${CARLA_CURRENT_PACKAGE_PATH}.tar
-    ${CARLA_PACKAGE_FILES}
-  )
-  set (
-    COMPRESS_PACKAGE_ZSTD_COMMAND
-    ${PZSTD_EXECUTABLE}
-      --rm
-      ${CARLA_CURRENT_PACKAGE_PATH}.tar
-      -o ${CARLA_CURRENT_PACKAGE_PATH}.tar.zst
+    bash -c "${TAR_EXECUTABLE} cf - -C '${CARLA_PACKAGE_PATH}' '${_ARCHIVE_DIRNAME}' | '${PZSTD_EXECUTABLE}' -o '${CARLA_CURRENT_PACKAGE_PATH}.tar.zst'"
   )
 else ()
   set (
