@@ -58,17 +58,25 @@ def apply_preset(blueprint, model_name):
     blueprint.set_attribute("rotation_frequency", str(m["rotation_frequency"]))
     blueprint.set_attribute("points_per_second", str(m["points_per_second"]))
 
+    # These attributes require the RGL preset C++ changes.
+    # Use try/except so presets degrade gracefully on older builds.
+    def _try_set(attr, val):
+        try:
+            blueprint.set_attribute(attr, val)
+        except RuntimeError:
+            pass  # attribute not available in this build
+
     if m.get("min_range", 0) > 0:
-        blueprint.set_attribute("min_range", str(m["min_range"]))
+        _try_set("min_range", str(m["min_range"]))
 
     if m["vertical_angles"]:
-        blueprint.set_attribute("vertical_angles",
-                                ",".join(str(a) for a in m["vertical_angles"]))
+        _try_set("vertical_angles",
+                 ",".join(str(a) for a in m["vertical_angles"]))
 
     if m["horizontal_angle_offsets"]:
-        blueprint.set_attribute("horizontal_angle_offsets",
-                                ",".join(str(a) for a in m["horizontal_angle_offsets"]))
+        _try_set("horizontal_angle_offsets",
+                 ",".join(str(a) for a in m["horizontal_angle_offsets"]))
 
     if m["ring_ids"]:
-        blueprint.set_attribute("ring_ids",
-                                ",".join(str(r) for r in m["ring_ids"]))
+        _try_set("ring_ids",
+                 ",".join(str(r) for r in m["ring_ids"]))
