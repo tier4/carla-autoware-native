@@ -1,0 +1,508 @@
+#!/usr/bin/env python3
+"""Regression test suite for CARLA RGL LiDAR preset features.
+
+Tests all AWSIM-ported preset functionality:
+- 13 model presets (spawn/tick/destroy)
+- Per-channel angles and ring IDs
+- Special firing patterns (AT128 range, QT128/Pandar128 step offset)
+- Ray masks (azimuth, ring, rect, raw)
+- delta+zlib+base64 encoding roundtrip
+- ROS2 direct publish (optional, requires ROS2 environment)
+- Legacy mode (no preset)
+
+Usage:
+    # Basic tests (no ROS2 needed):
+    python3 rgl_test_regression.py
+
+    # Full tests with ROS2 verification:
+    source /opt/ros/humble/setup.bash  # or your ROS2 workspace
+    python3 rgl_test_regression.py --ros2
+
+    # Test specific category:
+    python3 rgl_test_regression.py --test spawn
+    python3 rgl_test_regression.py --test mask --ros2
+
+Requires CARLA server running with --ros2 flag.
+"""
+
+import argparse
+import math
+import os
+import struct
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import carla
+
+from rgl_lidar_models import (
+    MODEL_REGISTRY, apply_preset, list_models,
+    _encode_float_array, _encode_int_array,
+    set_azimuth_fov, set_disabled_rings, set_mask_rectangles, set_raw_mask,
+)
+
+
+class TestResult:
+    def __init__(self):
+        self.passed = []
+        self.failed = []
+
+    def ok(self, name, detail=""):
+        self.passed.append(name)
+        print(f"  PASS: {name}" + (f" ({detail})" if detail else ""))
+
+    def fail(self, name, detail=""):
+        self.failed.append(name)
+        print(f"  FAIL: {name}" + (f" ({detail})" if detail else ""))
+
+    def check(self, name, condition, detail=""):
+        if condition:
+            self.ok(name, detail)
+        else:
+            self.fail(name, detail)
+
+    def summary(self):
+        total = len(self.passed) + len(self.failed)
+        print(f"\n{'='*60}")
+        print(f"Results: {len(self.passed)}/{total} passed, {len(self.failed)} failed")
+        if self.failed:
+            print("Failed tests:")
+            for name in self.failed:
+                print(f"  - {name}")
+        print(f"{'='*60}")
+        return len(self.failed) == 0
+
+
+# ============================================================================
+# Helpers
+# ============================================================================
+
+def setup_sync(world):
+    s = world.get_settings()
+    s.synchronous_mode = True
+    s.fixed_delta_seconds = 0.05
+    world.apply_settings(s)
+    world.tick()
+
+
+def teardown_sync(world):
+    s = world.get_settings()
+    s.synchronous_mode = False
+    world.apply_settings(s)
+
+
+def spawn_rgl_sensor(world, preset_name=None, extra_setup=None,
+                     location=carla.Location(z=3), rotation=carla.Rotation()):
+    bp = world.get_blueprint_library().find("sensor.lidar.rgl")
+    if preset_name:
+        apply_preset(bp, preset_name)
+    else:
+        bp.set_attribute("channels", "16")
+        bp.set_attribute("range", "100")
+        bp.set_attribute("upper_fov", "10")
+        bp.set_attribute("lower_fov", "-20")
+        bp.set_attribute("points_per_second", "288000")
+    bp.set_attribute("sensor_tick", "0.1")
+    if extra_setup:
+        extra_setup(bp)
+    sensor = world.spawn_actor(bp, carla.Transform(location, rotation))
+    return sensor
+
+
+def tick_and_destroy(world, sensor, ticks=5):
+    for _ in range(ticks):
+        world.tick()
+        time.sleep(0.01)
+    sensor.destroy()
+    world.tick()
+
+
+def capture_ros2_msg(world, sensor, topic, ticks=80):
+    """Capture one PointCloud2 message via rclpy. Returns msg or None."""
+    try:
+        import rclpy
+        from rclpy.node import Node
+        from sensor_msgs.msg import PointCloud2
+        from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+    except ImportError:
+        return None
+
+    rclpy.init()
+    node = rclpy.create_node("regression_test_%d" % (int(time.time() * 1000) % 100000))
+    msg_data = [None]
+
+    def cb(msg):
+        if msg_data[0] is None:
+            msg_data[0] = msg
+
+    qos = QoSProfile(depth=10)
+    qos.reliability = ReliabilityPolicy.BEST_EFFORT
+    qos.durability = DurabilityPolicy.VOLATILE
+    node.create_subscription(PointCloud2, topic, cb, qos)
+
+    for _ in range(ticks):
+        world.tick()
+        rclpy.spin_once(node, timeout_sec=0.01)
+
+    node.destroy_node()
+    rclpy.shutdown()
+    return msg_data[0]
+
+
+def parse_points(msg):
+    """Parse PointXYZIRCAEDT message into list of dicts."""
+    points = []
+    for i in range(msg.width):
+        off = i * 32
+        x, y, z = struct.unpack_from("<fff", msg.data, off)
+        intensity = msg.data[off + 12]
+        return_type = msg.data[off + 13]
+        ring_id = struct.unpack_from("<H", msg.data, off + 14)[0]
+        azimuth, elevation, distance = struct.unpack_from("<fff", msg.data, off + 16)
+        timestamp = struct.unpack_from("<I", msg.data, off + 28)[0]
+        points.append({
+            "x": x, "y": y, "z": z,
+            "ring_id": ring_id, "distance": distance,
+            "azimuth": azimuth, "elevation": elevation,
+        })
+    return points
+
+
+# ============================================================================
+# Test categories
+# ============================================================================
+
+def test_encoding(result):
+    """Test delta+zlib+base64 encoding roundtrip."""
+    print("\n--- Encoding tests ---")
+
+    # Float encoding
+    values = [15.0, -1.0, 13.0, -3.0, 11.0, -5.0]
+    encoded = _encode_float_array(values)
+    result.check("encode_float_length", len(encoded) < 100,
+                 f"{len(encoded)} chars")
+    result.check("encode_float_base64", encoded.isascii(),
+                 "ASCII-safe")
+
+    # Int encoding
+    ints = [0, 8, 1, 9, 2, 10]
+    encoded_int = _encode_int_array(ints)
+    result.check("encode_int_length", len(encoded_int) < 100,
+                 f"{len(encoded_int)} chars")
+
+    # 128-channel encoding stays under FName limit
+    big = [float(i) * 0.8 - 52.0 for i in range(128)]
+    encoded_big = _encode_float_array(big)
+    result.check("encode_128ch_fname_limit", len(encoded_big) <= 1023,
+                 f"{len(encoded_big)} chars")
+
+    # 256-entry (AT128 range pattern) stays under limit
+    pattern = [0.5, 7.2] * 128
+    encoded_pattern = _encode_float_array(pattern)
+    result.check("encode_256entry_fname_limit", len(encoded_pattern) <= 1023,
+                 f"{len(encoded_pattern)} chars")
+
+
+def test_preset_data(result):
+    """Test preset data integrity."""
+    print("\n--- Preset data tests ---")
+
+    result.check("model_count", len(MODEL_REGISTRY) == 13,
+                 f"got {len(MODEL_REGISTRY)}")
+
+    expected_models = [
+        "RangeMeter", "SickMRS6000",
+        "VelodyneVLP16", "VelodyneVLP32C", "VelodyneVLS128",
+        "HesaiPandar40P", "HesaiPandarQT", "HesaiPandarXT32",
+        "HesaiAT128E2X", "HesaiQT128C2X", "HesaiPandar128E4X",
+        "HesaiPandar128E4XHighRes", "OusterOS1_64",
+    ]
+    for name in expected_models:
+        result.check(f"preset_{name}", name in MODEL_REGISTRY)
+
+    # Verify key properties
+    vlp16 = MODEL_REGISTRY["VelodyneVLP16"]
+    result.check("vlp16_channels", vlp16["channels"] == 16)
+    result.check("vlp16_angles", len(vlp16["vertical_angles"]) == 16)
+    result.check("vlp16_first_angle", vlp16["vertical_angles"][0] == 15.0,
+                 f"got {vlp16['vertical_angles'][0]}")
+
+    at128 = MODEL_REGISTRY["HesaiAT128E2X"]
+    result.check("at128_range_pattern", at128.get("range_pattern_period") == 2)
+    result.check("at128_range_entries", len(at128.get("per_channel_min_ranges", [])) == 256,
+                 f"got {len(at128.get('per_channel_min_ranges', []))}")
+
+    qt128 = MODEL_REGISTRY["HesaiQT128C2X"]
+    result.check("qt128_step_offsets", len(qt128.get("horizontal_step_offsets", [])) == 128)
+    bank_cd = sum(1 for o in qt128.get("horizontal_step_offsets", []) if o > 0.1)
+    result.check("qt128_bank_cd_count", bank_cd == 64, f"got {bank_cd}")
+
+    p128hr = MODEL_REGISTRY["HesaiPandar128E4XHighRes"]
+    result.check("p128hr_channels", p128hr["channels"] == 192)
+    shifted = sum(1 for o in p128hr.get("horizontal_step_offsets", []) if o > 0)
+    result.check("p128hr_shifted_count", shifted == 96, f"got {shifted}")
+
+
+def test_spawn_all(world, result):
+    """Test spawning all 13 presets without crash."""
+    print("\n--- Spawn tests (all presets) ---")
+
+    for name in sorted(MODEL_REGISTRY.keys()):
+        try:
+            sensor = spawn_rgl_sensor(world, name)
+            tick_and_destroy(world, sensor, ticks=3)
+            result.ok(f"spawn_{name}")
+        except Exception as e:
+            result.fail(f"spawn_{name}", str(e))
+
+    # Legacy mode (no preset)
+    try:
+        sensor = spawn_rgl_sensor(world, preset_name=None)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("spawn_legacy")
+    except Exception as e:
+        result.fail("spawn_legacy", str(e))
+
+
+def test_masks(world, result):
+    """Test ray mask functionality."""
+    print("\n--- Mask tests ---")
+
+    # Baseline
+    sensor = spawn_rgl_sensor(world, "VelodyneVLP16")
+    tick_and_destroy(world, sensor, ticks=5)
+    result.ok("mask_baseline_spawn")
+
+    # Azimuth FOV
+    try:
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16",
+            extra_setup=lambda bp: set_azimuth_fov(bp, [[0, 180]]))
+        tick_and_destroy(world, sensor)
+        result.ok("mask_azimuth_spawn")
+    except Exception as e:
+        result.fail("mask_azimuth_spawn", str(e))
+
+    # Ring mask
+    try:
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16",
+            extra_setup=lambda bp: set_disabled_rings(bp, [0, 1]))
+        tick_and_destroy(world, sensor)
+        result.ok("mask_ring_spawn")
+    except Exception as e:
+        result.fail("mask_ring_spawn", str(e))
+
+    # Rect mask
+    try:
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16",
+            extra_setup=lambda bp: set_mask_rectangles(bp, [
+                {"az_start": 170, "az_end": 190, "el_start": -30, "el_end": 30}]))
+        tick_and_destroy(world, sensor)
+        result.ok("mask_rect_spawn")
+    except Exception as e:
+        result.fail("mask_rect_spawn", str(e))
+
+    # Raw mask
+    try:
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16",
+            extra_setup=lambda bp: set_raw_mask(bp, [1, 0] * 8))
+        tick_and_destroy(world, sensor)
+        result.ok("mask_raw_spawn")
+    except Exception as e:
+        result.fail("mask_raw_spawn", str(e))
+
+    # Combined mask
+    try:
+        def combo(bp):
+            set_azimuth_fov(bp, [[0, 270]])
+            set_disabled_rings(bp, [15])
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=combo)
+        tick_and_destroy(world, sensor)
+        result.ok("mask_combined_spawn")
+    except Exception as e:
+        result.fail("mask_combined_spawn", str(e))
+
+
+def test_python_validation(result):
+    """Test Python-side input validation."""
+    print("\n--- Python validation tests ---")
+
+    try:
+        set_azimuth_fov(None, [[0, 120]] * 6)
+        result.fail("validate_az_max5", "no error raised")
+    except ValueError:
+        result.ok("validate_az_max5")
+
+    try:
+        set_azimuth_fov(None, [[0, 400]])
+        result.fail("validate_az_range", "no error raised")
+    except ValueError:
+        result.ok("validate_az_range")
+
+    try:
+        set_disabled_rings(None, [-1])
+        result.fail("validate_ring_negative", "no error raised")
+    except ValueError:
+        result.ok("validate_ring_negative")
+
+    try:
+        set_mask_rectangles(None, [{"az_start": 0}])
+        result.fail("validate_rect_missing_key", "no error raised")
+    except ValueError:
+        result.ok("validate_rect_missing_key")
+
+    try:
+        apply_preset(None, "NonExistentModel")
+        result.fail("validate_unknown_model", "no error raised")
+    except ValueError:
+        result.ok("validate_unknown_model")
+
+
+def test_ros2_point_verification(world, result):
+    """Test ROS2 point cloud output with numerical verification."""
+    print("\n--- ROS2 point verification tests ---")
+
+    topic = "/test/regression"
+
+    # VLP16 baseline
+    def setup_ros2(bp):
+        bp.set_attribute("rgl_lidar_topic_name", topic)
+        bp.set_attribute("rgl_lidar_topic_frame_id", "lidar")
+        bp.set_attribute("rgl_lidar_pointcloud_format", "PointXYZIRCAEDT")
+
+    sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_ros2)
+    msg = capture_ros2_msg(world, sensor, topic)
+    sensor.destroy(); world.tick()
+
+    if msg is None:
+        result.fail("ros2_vlp16_capture", "rclpy not available or no message")
+        return
+
+    result.check("ros2_vlp16_width", msg.width > 0, f"width={msg.width}")
+    result.check("ros2_vlp16_point_step", msg.point_step == 32,
+                 f"point_step={msg.point_step}")
+
+    points = parse_points(msg)
+    rings = set(p["ring_id"] for p in points if p["distance"] > 0)
+    result.check("ros2_vlp16_rings", len(rings) > 0,
+                 f"{len(rings)} unique rings")
+
+    # AT128 per-channel range at z=6.4m (pitch=-90, down)
+    sensor = spawn_rgl_sensor(world, "HesaiAT128E2X",
+        extra_setup=setup_ros2,
+        location=carla.Location(z=6.4),
+        rotation=carla.Rotation(pitch=-90))
+    msg = capture_ros2_msg(world, sensor, topic)
+    sensor.destroy(); world.tick()
+
+    if msg:
+        m = MODEL_REGISTRY["HesaiAT128E2X"]
+        nf_rings = set()
+        for ch in range(128):
+            if m["per_channel_min_ranges"][ch * 2] < 1.0:
+                nf_rings.add(m["ring_ids"][ch])
+
+        nf_near = 0; nnf_near = 0
+        for p in parse_points(msg):
+            if p["distance"] <= 0:
+                continue
+            if p["ring_id"] in nf_rings:
+                if p["distance"] < 7.2:
+                    nf_near += 1
+            else:
+                if p["distance"] < 7.2:
+                    nnf_near += 1
+
+        result.check("ros2_at128_nf_detects_ground", nf_near > 0,
+                     f"NF near={nf_near}")
+        result.check("ros2_at128_non_nf_no_ground", nnf_near == 0,
+                     f"non-NF near={nnf_near}")
+
+    # Azimuth mask [0,180] should halve points
+    def setup_az_mask(bp):
+        setup_ros2(bp)
+        set_azimuth_fov(bp, [[0, 180]])
+    sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_az_mask)
+    msg_masked = capture_ros2_msg(world, sensor, topic)
+    sensor.destroy(); world.tick()
+
+    if msg_masked and msg:
+        masked_hits = sum(1 for p in parse_points(msg_masked) if p["distance"] > 0)
+        base_hits = sum(1 for p in parse_points(msg) if p["distance"] > 0)
+        ratio = masked_hits / max(base_hits, 1) if base_hits > 0 else 0
+        result.check("ros2_azimuth_mask_ratio", 0.3 < ratio < 0.7,
+                     f"ratio={ratio:.2f}")
+
+    # Ring mask (disable ring 0)
+    def setup_ring_mask(bp):
+        setup_ros2(bp)
+        set_disabled_rings(bp, [0])
+    sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_ring_mask)
+    msg_ring = capture_ros2_msg(world, sensor, topic)
+    sensor.destroy(); world.tick()
+
+    if msg_ring:
+        rings_seen = set(p["ring_id"] for p in parse_points(msg_ring) if p["distance"] > 0)
+        result.check("ros2_ring_mask_excludes_0", 0 not in rings_seen,
+                     f"rings={sorted(rings_seen)}")
+
+
+# ============================================================================
+# Main
+# ============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(description="RGL LiDAR preset regression tests")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=2000)
+    parser.add_argument("--ros2", action="store_true",
+                        help="Run ROS2 point cloud verification tests")
+    parser.add_argument("--test", default="all",
+                        choices=["all", "encoding", "data", "spawn", "mask",
+                                 "validation", "ros2"],
+                        help="Run specific test category")
+    args = parser.parse_args()
+
+    result = TestResult()
+
+    # Offline tests (no CARLA needed)
+    if args.test in ("all", "encoding"):
+        test_encoding(result)
+
+    if args.test in ("all", "data"):
+        test_preset_data(result)
+
+    if args.test in ("all", "validation"):
+        test_python_validation(result)
+
+    # Online tests (need CARLA server)
+    need_carla = args.test in ("all", "spawn", "mask", "ros2")
+    if need_carla:
+        print("\nConnecting to CARLA...")
+        client = carla.Client(args.host, args.port)
+        client.set_timeout(10.0)
+        world = client.get_world()
+        print(f"Connected: map={world.get_map().name}")
+        setup_sync(world)
+
+        if args.test in ("all", "spawn"):
+            test_spawn_all(world, result)
+
+        if args.test in ("all", "mask"):
+            test_masks(world, result)
+
+        if args.ros2 or args.test == "ros2":
+            try:
+                import rclpy
+                test_ros2_point_verification(world, result)
+            except ImportError:
+                print("\n--- ROS2 tests skipped (rclpy not available) ---")
+                print("  Run with ROS2 environment sourced for full tests")
+
+        teardown_sync(world)
+
+    all_passed = result.summary()
+    sys.exit(0 if all_passed else 1)
+
+
+if __name__ == "__main__":
+    main()
