@@ -49,7 +49,9 @@ endmacro ()
 
 
 macro (carla_string_option NAME DESCRIPTION VALUE)
-  set (${NAME} "${VALUE}")
+  if (NOT DEFINED ${NAME})
+    set (${NAME} "${VALUE}")
+  endif ()
   carla_message_verbose ("(option) ${NAME} : \"${${NAME}}\"")
   get_property (DOCS GLOBAL PROPERTY CARLA_OPTION_DOCS)
   string (
