@@ -122,4 +122,25 @@ struct CARLA_API FLidarDescription
   /// Ray mask: per-channel raw mask (1=enabled, 0=masked).
   /// Expanded to per-ray by repeating for each horizontal step.
   TArray<int8> RayMaskRaw;
+
+  /// Noise model: angular noise type ("ray" or "hitpoint"). Empty = no angular noise.
+  FString NoiseAngularType;
+
+  /// Noise model: angular noise mean (degrees).
+  float NoiseAngularMean = 0.0f;
+
+  /// Noise model: angular noise standard deviation (degrees).
+  float NoiseAngularStdDev = 0.0f;
+
+  /// Noise model: distance noise mean (meters).
+  float NoiseDistanceMean = 0.0f;
+
+  /// Noise model: distance noise standard deviation base (meters).
+  float NoiseDistanceStdDevBase = 0.0f;
+
+  /// Noise model: distance noise standard deviation rise per meter (m/m).
+  float NoiseDistanceStdDevRise = 0.0f;
+
+  /// Noise model: angular noise rotation axis ("X", "Y", or "Z").
+  FString NoiseAngularAxis;
 };

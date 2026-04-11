@@ -26,6 +26,20 @@ from .hesai_pandar128e4x import MODEL as _HesaiPandar128E4X
 from .hesai_pandar128e4x_highres import MODEL as _HesaiPandar128E4XHighRes
 from .ouster_os1_64 import MODEL as _OusterOS1_64
 
+from .range_meter import NOISE as _NoiseRangeMeter
+from .sick_mrs6000 import NOISE as _NoiseSickMRS6000
+from .velodyne_vlp16 import NOISE as _NoiseVelodyneVLP16
+from .velodyne_vlp32c import NOISE as _NoiseVelodyneVLP32C
+from .velodyne_vls128 import NOISE as _NoiseVelodyneVLS128
+from .hesai_pandar40p import NOISE as _NoiseHesaiPandar40P
+from .hesai_pandarqt import NOISE as _NoiseHesaiPandarQT
+from .hesai_pandarxt32 import NOISE as _NoiseHesaiPandarXT32
+from .hesai_at128e2x import NOISE as _NoiseHesaiAT128E2X
+from .hesai_qt128c2x import NOISE as _NoiseHesaiQT128C2X
+from .hesai_pandar128e4x import NOISE as _NoiseHesaiPandar128E4X
+from .hesai_pandar128e4x_highres import NOISE as _NoiseHesaiPandar128E4XHighRes
+from .ouster_os1_64 import NOISE as _NoiseOusterOS1_64
+
 MODEL_REGISTRY = {m["name"]: m for m in [
     _RangeMeter, _SickMRS6000,
     _VelodyneVLP16, _VelodyneVLP32C, _VelodyneVLS128,
@@ -33,6 +47,22 @@ MODEL_REGISTRY = {m["name"]: m for m in [
     _HesaiAT128E2X, _HesaiQT128C2X, _HesaiPandar128E4X,
     _HesaiPandar128E4XHighRes, _OusterOS1_64,
 ]}
+
+NOISE_REGISTRY = {
+    "RangeMeter": _NoiseRangeMeter,
+    "SickMRS6000": _NoiseSickMRS6000,
+    "VelodyneVLP16": _NoiseVelodyneVLP16,
+    "VelodyneVLP32C": _NoiseVelodyneVLP32C,
+    "VelodyneVLS128": _NoiseVelodyneVLS128,
+    "HesaiPandar40P": _NoiseHesaiPandar40P,
+    "HesaiPandarQT": _NoiseHesaiPandarQT,
+    "HesaiPandarXT32": _NoiseHesaiPandarXT32,
+    "HesaiAT128E2X": _NoiseHesaiAT128E2X,
+    "HesaiQT128C2X": _NoiseHesaiQT128C2X,
+    "HesaiPandar128E4X": _NoiseHesaiPandar128E4X,
+    "HesaiPandar128E4XHighRes": _NoiseHesaiPandar128E4XHighRes,
+    "OusterOS1_64": _NoiseOusterOS1_64,
+}
 
 
 def _encode_float_array(floats):
@@ -82,12 +112,14 @@ def list_models():
               f"H-FOV={m['horizontal_fov']}")
 
 
-def apply_preset(blueprint, model_name):
+def apply_preset(blueprint, model_name, apply_noise=True):
     """Apply a LiDAR preset to a CARLA blueprint.
 
     Args:
         blueprint: carla.ActorBlueprint for sensor.lidar.rgl
         model_name: one of the names from list_models() (e.g. "VelodyneVLP16")
+        apply_noise: if True (default), apply preset noise params.
+            Set to False for deterministic (noise-free) operation.
     """
     if model_name not in MODEL_REGISTRY:
         available = ", ".join(sorted(MODEL_REGISTRY.keys()))
@@ -135,6 +167,17 @@ def apply_preset(blueprint, model_name):
     if m.get("horizontal_step_offsets"):
         _try_set("horizontal_step_offsets",
                  _encode_float_array(m["horizontal_step_offsets"]))
+
+    # Noise parameters
+    if apply_noise and model_name in NOISE_REGISTRY:
+        noise = NOISE_REGISTRY[model_name]
+        _try_set("noise_angular_type", noise["angular_type"])
+        _try_set("noise_angular_mean", str(noise["angular_mean"]))
+        _try_set("noise_angular_stddev", str(noise["angular_stddev"]))
+        _try_set("noise_distance_mean", str(noise["distance_mean"]))
+        _try_set("noise_distance_stddev_base", str(noise["distance_stddev_base"]))
+        _try_set("noise_distance_stddev_rise", str(noise["distance_stddev_rise"]))
+        _try_set("noise_angular_axis", noise["angular_axis"])
 
 
 def set_azimuth_fov(blueprint, sections):
@@ -201,3 +244,55 @@ def set_raw_mask(blueprint, channel_mask):
             Applied to all horizontal steps of each channel.
     """
     blueprint.set_attribute("ray_mask_raw", _encode_int_array(channel_mask))
+
+
+def set_noise(blueprint, angular_type=None, angular_mean=None, angular_stddev=None,
+              distance_mean=None, distance_stddev_base=None, distance_stddev_rise=None,
+              angular_axis=None):
+    """Override individual noise parameters.
+
+    Args:
+        blueprint: carla.ActorBlueprint for sensor.lidar.rgl
+        angular_type: "ray" or "hitpoint" (None = don't change)
+        angular_mean: degrees (None = don't change)
+        angular_stddev: degrees (None = don't change)
+        distance_mean: meters (None = don't change)
+        distance_stddev_base: meters (None = don't change)
+        distance_stddev_rise: meters per meter (None = don't change)
+        angular_axis: "X", "Y", or "Z" (None = don't change)
+    """
+    if angular_type is not None:
+        if angular_type not in ("ray", "hitpoint"):
+            raise ValueError(f"angular_type must be 'ray' or 'hitpoint', got '{angular_type}'")
+        blueprint.set_attribute("noise_angular_type", angular_type)
+    if angular_mean is not None:
+        blueprint.set_attribute("noise_angular_mean", str(angular_mean))
+    if angular_stddev is not None:
+        if angular_stddev < 0:
+            raise ValueError(f"angular_stddev must be >= 0, got {angular_stddev}")
+        blueprint.set_attribute("noise_angular_stddev", str(angular_stddev))
+    if distance_mean is not None:
+        blueprint.set_attribute("noise_distance_mean", str(distance_mean))
+    if distance_stddev_base is not None:
+        if distance_stddev_base < 0:
+            raise ValueError(f"distance_stddev_base must be >= 0, got {distance_stddev_base}")
+        blueprint.set_attribute("noise_distance_stddev_base", str(distance_stddev_base))
+    if distance_stddev_rise is not None:
+        if distance_stddev_rise < 0:
+            raise ValueError(f"distance_stddev_rise must be >= 0, got {distance_stddev_rise}")
+        blueprint.set_attribute("noise_distance_stddev_rise", str(distance_stddev_rise))
+    if angular_axis is not None:
+        if angular_axis not in ("X", "Y", "Z"):
+            raise ValueError(f"angular_axis must be 'X', 'Y', or 'Z', got '{angular_axis}'")
+        blueprint.set_attribute("noise_angular_axis", angular_axis)
+
+
+def disable_noise(blueprint):
+    """Disable all noise (set all noise parameters to zero)."""
+    blueprint.set_attribute("noise_angular_type", "")
+    blueprint.set_attribute("noise_angular_mean", "0.0")
+    blueprint.set_attribute("noise_angular_stddev", "0.0")
+    blueprint.set_attribute("noise_distance_mean", "0.0")
+    blueprint.set_attribute("noise_distance_stddev_base", "0.0")
+    blueprint.set_attribute("noise_distance_stddev_rise", "0.0")
+    blueprint.set_attribute("noise_angular_axis", "Y")

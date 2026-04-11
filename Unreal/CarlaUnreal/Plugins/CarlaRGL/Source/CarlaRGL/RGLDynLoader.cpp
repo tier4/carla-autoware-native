@@ -120,6 +120,21 @@ typedef rgl_status_t (*fn_rgl_node_points_ros2_publish_with_qos_t)(
     rgl_qos_policy_history_t, int32_t);
 static fn_rgl_node_points_ros2_publish_with_qos_t fn_rgl_node_points_ros2_publish_with_qos = nullptr;
 
+// 24. rgl_node_gaussian_noise_angular_ray
+typedef rgl_status_t (*fn_rgl_node_gaussian_noise_angular_ray_t)(
+    rgl_node_t*, float, float, rgl_axis_t);
+static fn_rgl_node_gaussian_noise_angular_ray_t fn_rgl_node_gaussian_noise_angular_ray = nullptr;
+
+// 25. rgl_node_gaussian_noise_angular_hitpoint
+typedef rgl_status_t (*fn_rgl_node_gaussian_noise_angular_hitpoint_t)(
+    rgl_node_t*, float, float, rgl_axis_t);
+static fn_rgl_node_gaussian_noise_angular_hitpoint_t fn_rgl_node_gaussian_noise_angular_hitpoint = nullptr;
+
+// 26. rgl_node_gaussian_noise_distance
+typedef rgl_status_t (*fn_rgl_node_gaussian_noise_distance_t)(
+    rgl_node_t*, float, float, float);
+static fn_rgl_node_gaussian_noise_distance_t fn_rgl_node_gaussian_noise_distance = nullptr;
+
 // ---------------------------------------------------------------------------
 // Wrapper function definitions
 // These provide the symbols the linker resolves to, replacing the .so linkage.
@@ -307,6 +322,30 @@ rgl_status_t rgl_node_points_ros2_publish_with_qos(
         qos_history, qos_history_depth);
 }
 
+// 24. rgl_node_gaussian_noise_angular_ray
+rgl_status_t rgl_node_gaussian_noise_angular_ray(
+    rgl_node_t* node, float mean, float st_dev, rgl_axis_t rotation_axis)
+{
+    if (!fn_rgl_node_gaussian_noise_angular_ray) return RGL_INVALID_STATE;
+    return fn_rgl_node_gaussian_noise_angular_ray(node, mean, st_dev, rotation_axis);
+}
+
+// 25. rgl_node_gaussian_noise_angular_hitpoint
+rgl_status_t rgl_node_gaussian_noise_angular_hitpoint(
+    rgl_node_t* node, float mean, float st_dev, rgl_axis_t rotation_axis)
+{
+    if (!fn_rgl_node_gaussian_noise_angular_hitpoint) return RGL_INVALID_STATE;
+    return fn_rgl_node_gaussian_noise_angular_hitpoint(node, mean, st_dev, rotation_axis);
+}
+
+// 26. rgl_node_gaussian_noise_distance
+rgl_status_t rgl_node_gaussian_noise_distance(
+    rgl_node_t* node, float mean, float st_dev_base, float st_dev_rise_per_meter)
+{
+    if (!fn_rgl_node_gaussian_noise_distance) return RGL_INVALID_STATE;
+    return fn_rgl_node_gaussian_noise_distance(node, mean, st_dev_base, st_dev_rise_per_meter);
+}
+
 // ---------------------------------------------------------------------------
 // RGLDynLoader implementation
 // ---------------------------------------------------------------------------
@@ -355,6 +394,9 @@ bool RGLDynLoader::Load(const char* LibPath)
     LOAD_FN(rgl_graph_get_result_data)
     LOAD_FN(rgl_graph_node_add_child)
     LOAD_FN(rgl_node_points_ros2_publish_with_qos)
+    LOAD_FN(rgl_node_gaussian_noise_angular_ray)
+    LOAD_FN(rgl_node_gaussian_noise_angular_hitpoint)
+    LOAD_FN(rgl_node_gaussian_noise_distance)
 
     if (!allResolved)
     {
@@ -399,6 +441,9 @@ void RGLDynLoader::Unload()
     fn_rgl_graph_get_result_data = nullptr;
     fn_rgl_graph_node_add_child = nullptr;
     fn_rgl_node_points_ros2_publish_with_qos = nullptr;
+    fn_rgl_node_gaussian_noise_angular_ray = nullptr;
+    fn_rgl_node_gaussian_noise_angular_hitpoint = nullptr;
+    fn_rgl_node_gaussian_noise_distance = nullptr;
 }
 
 bool RGLDynLoader::IsLoaded()

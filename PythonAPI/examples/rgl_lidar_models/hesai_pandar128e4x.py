@@ -57,3 +57,13 @@ MODEL = {
         113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
     ],
 }
+
+NOISE = {
+    "angular_type": "ray",
+    "angular_mean": 0.0,
+    "angular_stddev": 0.05730,    # degrees (= 0.001 rad)
+    "distance_mean": 0.0,
+    "distance_stddev_base": 0.02,
+    "distance_stddev_rise": 0.0,
+    "angular_axis": "Y",
+}

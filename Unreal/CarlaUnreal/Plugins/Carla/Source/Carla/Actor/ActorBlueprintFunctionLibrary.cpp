@@ -922,6 +922,48 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     RayMaskRawVar.RecommendedValues = { TEXT("") };
     RayMaskRawVar.bRestrictToRecommended = false;
 
+    FActorVariation NoiseAngularType;
+    NoiseAngularType.Id = TEXT("noise_angular_type");
+    NoiseAngularType.Type = EActorAttributeType::String;
+    NoiseAngularType.RecommendedValues = { TEXT("") };
+    NoiseAngularType.bRestrictToRecommended = false;
+
+    FActorVariation NoiseAngularMean;
+    NoiseAngularMean.Id = TEXT("noise_angular_mean");
+    NoiseAngularMean.Type = EActorAttributeType::Float;
+    NoiseAngularMean.RecommendedValues = { TEXT("0.0") };
+    NoiseAngularMean.bRestrictToRecommended = false;
+
+    FActorVariation NoiseAngularStdDev;
+    NoiseAngularStdDev.Id = TEXT("noise_angular_stddev");
+    NoiseAngularStdDev.Type = EActorAttributeType::Float;
+    NoiseAngularStdDev.RecommendedValues = { TEXT("0.0") };
+    NoiseAngularStdDev.bRestrictToRecommended = false;
+
+    FActorVariation NoiseDistanceMean;
+    NoiseDistanceMean.Id = TEXT("noise_distance_mean");
+    NoiseDistanceMean.Type = EActorAttributeType::Float;
+    NoiseDistanceMean.RecommendedValues = { TEXT("0.0") };
+    NoiseDistanceMean.bRestrictToRecommended = false;
+
+    FActorVariation NoiseDistanceStdDevBase;
+    NoiseDistanceStdDevBase.Id = TEXT("noise_distance_stddev_base");
+    NoiseDistanceStdDevBase.Type = EActorAttributeType::Float;
+    NoiseDistanceStdDevBase.RecommendedValues = { TEXT("0.0") };
+    NoiseDistanceStdDevBase.bRestrictToRecommended = false;
+
+    FActorVariation NoiseDistanceStdDevRise;
+    NoiseDistanceStdDevRise.Id = TEXT("noise_distance_stddev_rise");
+    NoiseDistanceStdDevRise.Type = EActorAttributeType::Float;
+    NoiseDistanceStdDevRise.RecommendedValues = { TEXT("0.0") };
+    NoiseDistanceStdDevRise.bRestrictToRecommended = false;
+
+    FActorVariation NoiseAngularAxis;
+    NoiseAngularAxis.Id = TEXT("noise_angular_axis");
+    NoiseAngularAxis.Type = EActorAttributeType::String;
+    NoiseAngularAxis.RecommendedValues = { TEXT("Y") };
+    NoiseAngularAxis.bRestrictToRecommended = false;
+
     Definition.Variations.Append({
       Channels,
       Range,
@@ -957,7 +999,14 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       RayMaskAzimuth,
       RayMaskRings,
       RayMaskRects,
-      RayMaskRawVar});
+      RayMaskRawVar,
+      NoiseAngularType,
+      NoiseAngularMean,
+      NoiseAngularStdDev,
+      NoiseDistanceMean,
+      NoiseDistanceStdDevBase,
+      NoiseDistanceStdDevRise,
+      NoiseAngularAxis});
   }
   else {
     DEBUG_ASSERT(false);
@@ -1813,6 +1862,22 @@ void UActorBlueprintFunctionLibrary::SetLidar(
       }
     }
   }
+
+  // Noise model (RGL only — separate from ray_cast noise_stddev)
+  Lidar.NoiseAngularType = RetrieveActorAttributeToString(
+      "noise_angular_type", Description.Variations, TEXT(""));
+  Lidar.NoiseAngularMean =
+      RetrieveActorAttributeToFloat("noise_angular_mean", Description.Variations, 0.0f);
+  Lidar.NoiseAngularStdDev =
+      RetrieveActorAttributeToFloat("noise_angular_stddev", Description.Variations, 0.0f);
+  Lidar.NoiseDistanceMean =
+      RetrieveActorAttributeToFloat("noise_distance_mean", Description.Variations, 0.0f);
+  Lidar.NoiseDistanceStdDevBase =
+      RetrieveActorAttributeToFloat("noise_distance_stddev_base", Description.Variations, 0.0f);
+  Lidar.NoiseDistanceStdDevRise =
+      RetrieveActorAttributeToFloat("noise_distance_stddev_rise", Description.Variations, 0.0f);
+  Lidar.NoiseAngularAxis = RetrieveActorAttributeToString(
+      "noise_angular_axis", Description.Variations, TEXT("Y"));
 }
 
 void UActorBlueprintFunctionLibrary::SetGnss(

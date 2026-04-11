@@ -246,12 +246,72 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
                      "history:", HistoryStr, "depth:", HistoryDepth);
     }
 
-    // Connect graph: UseRays -> SetRange -> SetRingIds -> RaysTransform -> Raytrace -> Compact -> ToSensor -> Yield
+    // --- Noise nodes (conditional) ---
+    const FString& AngularType = Desc.NoiseAngularType;
+    const float AngStdDevRad = FMath::DegreesToRadians(Desc.NoiseAngularStdDev);
+    const float AngMeanRad = FMath::DegreesToRadians(Desc.NoiseAngularMean);
+
+    // Parse rotation axis
+    rgl_axis_t RotAxis = RGL_AXIS_Y;  // default
+    if (Desc.NoiseAngularAxis.Equals(TEXT("X"), ESearchCase::IgnoreCase))
+        RotAxis = RGL_AXIS_X;
+    else if (Desc.NoiseAngularAxis.Equals(TEXT("Z"), ESearchCase::IgnoreCase))
+        RotAxis = RGL_AXIS_Z;
+
+    if (AngularType.Equals(TEXT("ray"), ESearchCase::IgnoreCase) && AngStdDevRad > 0.0f)
+    {
+        RGL_CHECK(rgl_node_gaussian_noise_angular_ray(
+            &Session->AngularNoiseRayNode, AngMeanRad, AngStdDevRad, RotAxis));
+    }
+
+    if (AngularType.Equals(TEXT("hitpoint"), ESearchCase::IgnoreCase) && AngStdDevRad > 0.0f)
+    {
+        RGL_CHECK(rgl_node_gaussian_noise_angular_hitpoint(
+            &Session->AngularNoiseHitpointNode, AngMeanRad, AngStdDevRad, RotAxis));
+    }
+
+    if (Desc.NoiseDistanceStdDevBase > 0.0f || Desc.NoiseDistanceStdDevRise > 0.0f)
+    {
+        RGL_CHECK(rgl_node_gaussian_noise_distance(
+            &Session->DistanceNoiseNode,
+            Desc.NoiseDistanceMean,
+            Desc.NoiseDistanceStdDevBase,
+            Desc.NoiseDistanceStdDevRise));
+    }
+
+    // Connect graph with optional noise nodes:
+    // UseRays -> SetRange -> SetRingIds -> RaysTransform
+    //   -> [AngularNoiseRay] -> Raytrace -> [AngularNoiseHitpoint] -> [DistanceNoise]
+    //   -> Compact -> ToSensor -> Yield
     RGL_CHECK(rgl_graph_node_add_child(Session->UseRaysNode, Session->SetRangeNode));
     RGL_CHECK(rgl_graph_node_add_child(Session->SetRangeNode, Session->SetRingIdsNode));
     RGL_CHECK(rgl_graph_node_add_child(Session->SetRingIdsNode, Session->RaysTransformNode));
-    RGL_CHECK(rgl_graph_node_add_child(Session->RaysTransformNode, Session->RaytraceNode));
-    RGL_CHECK(rgl_graph_node_add_child(Session->RaytraceNode, Session->CompactNode));
+
+    // RaysTransform -> [AngularNoiseRay] -> Raytrace
+    if (Session->AngularNoiseRayNode)
+    {
+        RGL_CHECK(rgl_graph_node_add_child(Session->RaysTransformNode, Session->AngularNoiseRayNode));
+        RGL_CHECK(rgl_graph_node_add_child(Session->AngularNoiseRayNode, Session->RaytraceNode));
+    }
+    else
+    {
+        RGL_CHECK(rgl_graph_node_add_child(Session->RaysTransformNode, Session->RaytraceNode));
+    }
+
+    // Raytrace -> [AngularNoiseHitpoint] -> [DistanceNoise] -> Compact
+    rgl_node_t PostRaytraceNode = Session->RaytraceNode;
+    if (Session->AngularNoiseHitpointNode)
+    {
+        RGL_CHECK(rgl_graph_node_add_child(PostRaytraceNode, Session->AngularNoiseHitpointNode));
+        PostRaytraceNode = Session->AngularNoiseHitpointNode;
+    }
+    if (Session->DistanceNoiseNode)
+    {
+        RGL_CHECK(rgl_graph_node_add_child(PostRaytraceNode, Session->DistanceNoiseNode));
+        PostRaytraceNode = Session->DistanceNoiseNode;
+    }
+    RGL_CHECK(rgl_graph_node_add_child(PostRaytraceNode, Session->CompactNode));
+
     RGL_CHECK(rgl_graph_node_add_child(Session->CompactNode, Session->ToSensorNode));
     RGL_CHECK(rgl_graph_node_add_child(Session->ToSensorNode, Session->YieldNode));
 

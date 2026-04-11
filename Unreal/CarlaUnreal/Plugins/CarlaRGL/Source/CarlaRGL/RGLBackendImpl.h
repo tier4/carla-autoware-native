@@ -39,6 +39,9 @@ struct FRGLSession
     rgl_node_t Ue5ToRos2Node = nullptr;
     rgl_node_t FormatNode = nullptr;
     rgl_node_t Ros2PublishNode = nullptr;
+    rgl_node_t AngularNoiseRayNode = nullptr;
+    rgl_node_t AngularNoiseHitpointNode = nullptr;
+    rgl_node_t DistanceNoiseNode = nullptr;
 
     // ---- Ray pattern buffers ----
     TArray<rgl_mat3x4f> RayTransforms;
