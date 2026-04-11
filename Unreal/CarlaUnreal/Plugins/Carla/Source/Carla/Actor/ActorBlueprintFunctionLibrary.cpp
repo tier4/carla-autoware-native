@@ -1630,20 +1630,31 @@ void UActorBlueprintFunctionLibrary::SetLidar(
   auto DecodeDeltas = [](const FString& Encoded, TArray<int32>& OutInts) -> bool
   {
     if (Encoded.IsEmpty()) return false;
-    TArray<uint8> Compressed;
-    if (!FBase64::Decode(Encoded, Compressed) || Compressed.Num() == 0) return false;
+    TArray<uint8> Payload;
+    if (!FBase64::Decode(Encoded, Payload) || Payload.Num() < 5)
+    {
+      return false;
+    }
 
-    // Decompress with zlib. Try increasing buffer sizes.
-    int32 DecompressedSize = Compressed.Num() * 10;
+    // First 4 bytes: big-endian uint32 = uncompressed size
+    // (FCompression::UncompressMemory requires the exact output size)
+    const int32 DecompressedSize =
+        (static_cast<int32>(Payload[0]) << 24) |
+        (static_cast<int32>(Payload[1]) << 16) |
+        (static_cast<int32>(Payload[2]) << 8) |
+        (static_cast<int32>(Payload[3]));
+    const uint8* CompressedData = Payload.GetData() + 4;
+    const int32 CompressedSize = Payload.Num() - 4;
+
     TArray<uint8> Decompressed;
     Decompressed.SetNum(DecompressedSize);
-    while (!FCompression::UncompressMemory(
+    if (!FCompression::UncompressMemory(
         NAME_Zlib, Decompressed.GetData(), DecompressedSize,
-        Compressed.GetData(), Compressed.Num()))
+        CompressedData, CompressedSize))
     {
-      DecompressedSize *= 2;
-      if (DecompressedSize > 1024 * 1024) return false; // safety limit
-      Decompressed.SetNum(DecompressedSize);
+      UE_LOG(LogCarla, Warning, TEXT("DecodeDeltas: zlib decompress failed, compressed=%d expected_decompressed=%d"),
+          CompressedSize, DecompressedSize);
+      return false;
     }
 
     // Parse big-endian int32 deltas and reconstruct via cumulative sum

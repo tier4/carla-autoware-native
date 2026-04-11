@@ -55,7 +55,11 @@ def _encode_float_array(floats):
     ints = [round(f * 1e6) for f in floats]
     deltas = [ints[0]] + [ints[i] - ints[i - 1] for i in range(1, len(ints))]
     raw = struct.pack(f">{len(deltas)}i", *deltas)
-    return base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
+    compressed = zlib.compress(raw, 9)
+    # Prepend 4-byte big-endian uncompressed size for C++ FCompression::UncompressMemory
+    # which requires the exact output size.
+    payload = struct.pack(">I", len(raw)) + compressed
+    return base64.b64encode(payload).decode("ascii")
 
 
 def _encode_int_array(ints):
@@ -66,7 +70,9 @@ def _encode_int_array(ints):
     """
     deltas = [ints[0]] + [ints[i] - ints[i - 1] for i in range(1, len(ints))]
     raw = struct.pack(f">{len(deltas)}i", *deltas)
-    return base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
+    compressed = zlib.compress(raw, 9)
+    payload = struct.pack(">I", len(raw)) + compressed
+    return base64.b64encode(payload).decode("ascii")
 
 
 def list_models():
