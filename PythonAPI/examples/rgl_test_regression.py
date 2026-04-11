@@ -357,6 +357,89 @@ def test_python_validation(result):
         result.ok("validate_unknown_model")
 
 
+def test_resilience_bad_mask(world, result):
+    """Test that invalid mask strings don't crash the server."""
+    print("\n--- Resilience: invalid mask strings ---")
+
+    bad_cases = [
+        ("bad_az_garbage",    {"ray_mask_azimuth": "garbage"}),
+        ("bad_az_3values",    {"ray_mask_azimuth": "0,120,240"}),
+        ("bad_az_negative",   {"ray_mask_azimuth": "-10,50"}),
+        ("bad_ring_letters",  {"ray_mask_rings": "abc,def"}),
+        ("bad_ring_float",    {"ray_mask_rings": "1.5,2.5"}),
+        ("bad_rect_2values",  {"ray_mask_rects": "0,120"}),
+        ("bad_rect_garbage",  {"ray_mask_rects": "a,b,c,d"}),
+        ("bad_rect_semicol",  {"ray_mask_rects": ";;;"}),
+        ("bad_combo",         {"ray_mask_azimuth": "xxx", "ray_mask_rings": "yyy",
+                               "ray_mask_rects": "zzz"}),
+    ]
+
+    for name, attrs in bad_cases:
+        try:
+            def setup(bp, a=attrs):
+                for k, v in a.items():
+                    bp.set_attribute(k, v)
+            sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup)
+            tick_and_destroy(world, sensor, ticks=3)
+            result.ok(f"resilience_{name}", "no crash")
+        except Exception as e:
+            result.fail(f"resilience_{name}", str(e))
+
+
+def test_resilience_bad_encoding(world, result):
+    """Test that corrupted delta+zlib+base64 data doesn't crash."""
+    print("\n--- Resilience: corrupted encoded data ---")
+
+    bad_cases = [
+        ("bad_b64_garbage",     {"vertical_angles": "not_valid!!!"}),
+        ("bad_b64_short",       {"vertical_angles": "AAAA"}),
+        ("bad_b64_empty",       {"vertical_angles": ""}),
+        ("bad_horiz_garbage",   {"horizontal_angle_offsets": "corrupt"}),
+        ("bad_ringids_garbage",  {"ring_ids": "broken_data"}),
+        ("bad_raw_mask",        {"ray_mask_raw": "invalid_base64"}),
+    ]
+
+    for name, attrs in bad_cases:
+        try:
+            def setup(bp, a=attrs):
+                for k, v in a.items():
+                    try:
+                        bp.set_attribute(k, v)
+                    except RuntimeError:
+                        pass  # attribute may reject value
+            sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup)
+            tick_and_destroy(world, sensor, ticks=3)
+            result.ok(f"resilience_{name}", "no crash, fallback OK")
+        except Exception as e:
+            result.fail(f"resilience_{name}", str(e))
+
+
+def test_resilience_edge_params(world, result):
+    """Test edge-case parameters don't crash."""
+    print("\n--- Resilience: edge-case parameters ---")
+
+    edge_cases = [
+        ("zero_range",     {"range": "0.001"}),
+        ("huge_range",     {"range": "99999"}),
+        ("one_channel",    {"channels": "1", "upper_fov": "0", "lower_fov": "0"}),
+        ("high_pps",       {"points_per_second": "10000000"}),
+        ("low_pps",        {"points_per_second": "1"}),
+        ("tiny_fov",       {"horizontal_fov": "1.0"}),
+        ("zero_freq",      {"rotation_frequency": "0.001"}),
+    ]
+
+    for name, attrs in edge_cases:
+        try:
+            def setup(bp, a=attrs):
+                for k, v in a.items():
+                    bp.set_attribute(k, v)
+            sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup)
+            tick_and_destroy(world, sensor, ticks=3)
+            result.ok(f"edge_{name}", "no crash")
+        except Exception as e:
+            result.fail(f"edge_{name}", str(e))
+
+
 def test_ros2_point_verification(world, result):
     """Test ROS2 point cloud output with numerical verification."""
     print("\n--- ROS2 point verification tests ---")
@@ -458,7 +541,7 @@ def main():
                         help="Run ROS2 point cloud verification tests")
     parser.add_argument("--test", default="all",
                         choices=["all", "encoding", "data", "spawn", "mask",
-                                 "validation", "ros2"],
+                                 "validation", "resilience", "ros2"],
                         help="Run specific test category")
     args = parser.parse_args()
 
@@ -475,7 +558,7 @@ def main():
         test_python_validation(result)
 
     # Online tests (need CARLA server)
-    need_carla = args.test in ("all", "spawn", "mask", "ros2")
+    need_carla = args.test in ("all", "spawn", "mask", "resilience", "ros2")
     if need_carla:
         print("\nConnecting to CARLA...")
         client = carla.Client(args.host, args.port)
@@ -489,6 +572,11 @@ def main():
 
         if args.test in ("all", "mask"):
             test_masks(world, result)
+
+        if args.test in ("all", "resilience"):
+            test_resilience_bad_mask(world, result)
+            test_resilience_bad_encoding(world, result)
+            test_resilience_edge_params(world, result)
 
         if args.ros2 or args.test == "ros2":
             try:
