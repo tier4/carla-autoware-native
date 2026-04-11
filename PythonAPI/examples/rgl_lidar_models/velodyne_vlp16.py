@@ -29,3 +29,8 @@ NOISE = {
     "distance_stddev_rise": 0.0,
     "angular_axis": "Y",
 }
+
+BEAM_DIVERGENCE = {
+    "horizontal": 0.171887,   # degrees (from manufacturer manual)
+    "vertical": 0.0859435,    # degrees (from manufacturer manual)
+}

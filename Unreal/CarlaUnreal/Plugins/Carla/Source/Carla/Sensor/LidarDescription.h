@@ -143,4 +143,10 @@ struct CARLA_API FLidarDescription
 
   /// Noise model: angular noise rotation axis ("X", "Y", or "Z").
   FString NoiseAngularAxis;
+
+  /// Beam divergence: horizontal (degrees). 0 = disabled.
+  float BeamDivergenceH = 0.0f;
+
+  /// Beam divergence: vertical (degrees). 0 = disabled.
+  float BeamDivergenceV = 0.0f;
 };

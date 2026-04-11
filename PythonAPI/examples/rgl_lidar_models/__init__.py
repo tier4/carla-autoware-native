@@ -40,6 +40,20 @@ from .hesai_pandar128e4x import NOISE as _NoiseHesaiPandar128E4X
 from .hesai_pandar128e4x_highres import NOISE as _NoiseHesaiPandar128E4XHighRes
 from .ouster_os1_64 import NOISE as _NoiseOusterOS1_64
 
+from .range_meter import BEAM_DIVERGENCE as _BDRangeMeter
+from .sick_mrs6000 import BEAM_DIVERGENCE as _BDSickMRS6000
+from .velodyne_vlp16 import BEAM_DIVERGENCE as _BDVelodyneVLP16
+from .velodyne_vlp32c import BEAM_DIVERGENCE as _BDVelodyneVLP32C
+from .velodyne_vls128 import BEAM_DIVERGENCE as _BDVelodyneVLS128
+from .hesai_pandar40p import BEAM_DIVERGENCE as _BDHesaiPandar40P
+from .hesai_pandarqt import BEAM_DIVERGENCE as _BDHesaiPandarQT
+from .hesai_pandarxt32 import BEAM_DIVERGENCE as _BDHesaiPandarXT32
+from .hesai_at128e2x import BEAM_DIVERGENCE as _BDHesaiAT128E2X
+from .hesai_qt128c2x import BEAM_DIVERGENCE as _BDHesaiQT128C2X
+from .hesai_pandar128e4x import BEAM_DIVERGENCE as _BDHesaiPandar128E4X
+from .hesai_pandar128e4x_highres import BEAM_DIVERGENCE as _BDHesaiPandar128E4XHighRes
+from .ouster_os1_64 import BEAM_DIVERGENCE as _BDOusterOS1_64
+
 MODEL_REGISTRY = {m["name"]: m for m in [
     _RangeMeter, _SickMRS6000,
     _VelodyneVLP16, _VelodyneVLP32C, _VelodyneVLS128,
@@ -62,6 +76,22 @@ NOISE_REGISTRY = {
     "HesaiPandar128E4X": _NoiseHesaiPandar128E4X,
     "HesaiPandar128E4XHighRes": _NoiseHesaiPandar128E4XHighRes,
     "OusterOS1_64": _NoiseOusterOS1_64,
+}
+
+BEAM_DIVERGENCE_REGISTRY = {
+    "RangeMeter": _BDRangeMeter,
+    "SickMRS6000": _BDSickMRS6000,
+    "VelodyneVLP16": _BDVelodyneVLP16,
+    "VelodyneVLP32C": _BDVelodyneVLP32C,
+    "VelodyneVLS128": _BDVelodyneVLS128,
+    "HesaiPandar40P": _BDHesaiPandar40P,
+    "HesaiPandarQT": _BDHesaiPandarQT,
+    "HesaiPandarXT32": _BDHesaiPandarXT32,
+    "HesaiAT128E2X": _BDHesaiAT128E2X,
+    "HesaiQT128C2X": _BDHesaiQT128C2X,
+    "HesaiPandar128E4X": _BDHesaiPandar128E4X,
+    "HesaiPandar128E4XHighRes": _BDHesaiPandar128E4XHighRes,
+    "OusterOS1_64": _BDOusterOS1_64,
 }
 
 
@@ -112,7 +142,7 @@ def list_models():
               f"H-FOV={m['horizontal_fov']}")
 
 
-def apply_preset(blueprint, model_name, apply_noise=True):
+def apply_preset(blueprint, model_name, apply_noise=True, apply_beam_divergence=False):
     """Apply a LiDAR preset to a CARLA blueprint.
 
     Args:
@@ -120,6 +150,8 @@ def apply_preset(blueprint, model_name, apply_noise=True):
         model_name: one of the names from list_models() (e.g. "VelodyneVLP16")
         apply_noise: if True (default), apply preset noise params.
             Set to False for deterministic (noise-free) operation.
+        apply_beam_divergence: if True, apply preset beam divergence params.
+            Default False (58x ray cost when enabled).
     """
     if model_name not in MODEL_REGISTRY:
         available = ", ".join(sorted(MODEL_REGISTRY.keys()))
@@ -178,6 +210,12 @@ def apply_preset(blueprint, model_name, apply_noise=True):
         _try_set("noise_distance_stddev_base", str(noise["distance_stddev_base"]))
         _try_set("noise_distance_stddev_rise", str(noise["distance_stddev_rise"]))
         _try_set("noise_angular_axis", noise["angular_axis"])
+
+    # Beam divergence
+    if apply_beam_divergence and model_name in BEAM_DIVERGENCE_REGISTRY:
+        bd = BEAM_DIVERGENCE_REGISTRY[model_name]
+        _try_set("beam_divergence_h", str(bd["horizontal"]))
+        _try_set("beam_divergence_v", str(bd["vertical"]))
 
 
 def set_azimuth_fov(blueprint, sections):
@@ -296,3 +334,27 @@ def disable_noise(blueprint):
     blueprint.set_attribute("noise_distance_stddev_base", "0.0")
     blueprint.set_attribute("noise_distance_stddev_rise", "0.0")
     blueprint.set_attribute("noise_angular_axis", "Y")
+
+
+def set_beam_divergence(blueprint, horizontal, vertical):
+    """Set beam divergence (degrees). Both must be >0 or both 0.
+
+    Args:
+        blueprint: carla.ActorBlueprint for sensor.lidar.rgl
+        horizontal: horizontal beam divergence in degrees
+        vertical: vertical beam divergence in degrees
+    """
+    if (horizontal > 0) != (vertical > 0):
+        raise ValueError(
+            f"Both horizontal and vertical must be >0 or both 0, got h={horizontal} v={vertical}")
+    if horizontal < 0 or vertical < 0:
+        raise ValueError(
+            f"Beam divergence must be >= 0, got h={horizontal} v={vertical}")
+    blueprint.set_attribute("beam_divergence_h", str(horizontal))
+    blueprint.set_attribute("beam_divergence_v", str(vertical))
+
+
+def disable_beam_divergence(blueprint):
+    """Disable beam divergence (set both to 0)."""
+    blueprint.set_attribute("beam_divergence_h", "0.0")
+    blueprint.set_attribute("beam_divergence_v", "0.0")

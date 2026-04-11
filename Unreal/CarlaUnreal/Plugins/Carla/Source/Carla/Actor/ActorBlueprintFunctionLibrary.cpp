@@ -964,6 +964,18 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     NoiseAngularAxis.RecommendedValues = { TEXT("Y") };
     NoiseAngularAxis.bRestrictToRecommended = false;
 
+    FActorVariation BeamDivergenceH;
+    BeamDivergenceH.Id = TEXT("beam_divergence_h");
+    BeamDivergenceH.Type = EActorAttributeType::Float;
+    BeamDivergenceH.RecommendedValues = { TEXT("0.0") };
+    BeamDivergenceH.bRestrictToRecommended = false;
+
+    FActorVariation BeamDivergenceV;
+    BeamDivergenceV.Id = TEXT("beam_divergence_v");
+    BeamDivergenceV.Type = EActorAttributeType::Float;
+    BeamDivergenceV.RecommendedValues = { TEXT("0.0") };
+    BeamDivergenceV.bRestrictToRecommended = false;
+
     Definition.Variations.Append({
       Channels,
       Range,
@@ -1006,7 +1018,9 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       NoiseDistanceMean,
       NoiseDistanceStdDevBase,
       NoiseDistanceStdDevRise,
-      NoiseAngularAxis});
+      NoiseAngularAxis,
+      BeamDivergenceH,
+      BeamDivergenceV});
   }
   else {
     DEBUG_ASSERT(false);
@@ -1878,6 +1892,11 @@ void UActorBlueprintFunctionLibrary::SetLidar(
       RetrieveActorAttributeToFloat("noise_distance_stddev_rise", Description.Variations, 0.0f);
   Lidar.NoiseAngularAxis = RetrieveActorAttributeToString(
       "noise_angular_axis", Description.Variations, TEXT("Y"));
+  // Beam divergence
+  Lidar.BeamDivergenceH =
+      RetrieveActorAttributeToFloat("beam_divergence_h", Description.Variations, 0.0f);
+  Lidar.BeamDivergenceV =
+      RetrieveActorAttributeToFloat("beam_divergence_v", Description.Variations, 0.0f);
 }
 
 void UActorBlueprintFunctionLibrary::SetGnss(

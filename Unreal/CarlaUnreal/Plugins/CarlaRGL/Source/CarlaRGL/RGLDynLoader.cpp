@@ -135,6 +135,11 @@ typedef rgl_status_t (*fn_rgl_node_gaussian_noise_distance_t)(
     rgl_node_t*, float, float, float);
 static fn_rgl_node_gaussian_noise_distance_t fn_rgl_node_gaussian_noise_distance = nullptr;
 
+// 27. rgl_node_raytrace_configure_beam_divergence
+typedef rgl_status_t (*fn_rgl_node_raytrace_configure_beam_divergence_t)(
+    rgl_node_t, float, float);
+static fn_rgl_node_raytrace_configure_beam_divergence_t fn_rgl_node_raytrace_configure_beam_divergence = nullptr;
+
 // ---------------------------------------------------------------------------
 // Wrapper function definitions
 // These provide the symbols the linker resolves to, replacing the .so linkage.
@@ -346,6 +351,14 @@ rgl_status_t rgl_node_gaussian_noise_distance(
     return fn_rgl_node_gaussian_noise_distance(node, mean, st_dev_base, st_dev_rise_per_meter);
 }
 
+// 27. rgl_node_raytrace_configure_beam_divergence
+rgl_status_t rgl_node_raytrace_configure_beam_divergence(
+    rgl_node_t node, float horizontal_beam_divergence, float vertical_beam_divergence)
+{
+    if (!fn_rgl_node_raytrace_configure_beam_divergence) return RGL_INVALID_STATE;
+    return fn_rgl_node_raytrace_configure_beam_divergence(node, horizontal_beam_divergence, vertical_beam_divergence);
+}
+
 // ---------------------------------------------------------------------------
 // RGLDynLoader implementation
 // ---------------------------------------------------------------------------
@@ -397,6 +410,7 @@ bool RGLDynLoader::Load(const char* LibPath)
     LOAD_FN(rgl_node_gaussian_noise_angular_ray)
     LOAD_FN(rgl_node_gaussian_noise_angular_hitpoint)
     LOAD_FN(rgl_node_gaussian_noise_distance)
+    LOAD_FN(rgl_node_raytrace_configure_beam_divergence)
 
     if (!allResolved)
     {
@@ -444,6 +458,7 @@ void RGLDynLoader::Unload()
     fn_rgl_node_gaussian_noise_angular_ray = nullptr;
     fn_rgl_node_gaussian_noise_angular_hitpoint = nullptr;
     fn_rgl_node_gaussian_noise_distance = nullptr;
+    fn_rgl_node_raytrace_configure_beam_divergence = nullptr;
 }
 
 bool RGLDynLoader::IsLoaded()

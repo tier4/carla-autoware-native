@@ -279,6 +279,22 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
             Desc.NoiseDistanceStdDevRise));
     }
 
+    // --- Beam divergence (configure existing RaytraceNode) ---
+    const float HDiv = FMath::DegreesToRadians(Desc.BeamDivergenceH);
+    const float VDiv = FMath::DegreesToRadians(Desc.BeamDivergenceV);
+    if (HDiv > 0.0f && VDiv > 0.0f)
+    {
+        RGL_CHECK(rgl_node_raytrace_configure_beam_divergence(
+            Session->RaytraceNode, HDiv, VDiv));
+        RGLLog::Info("RGLBackendImpl: Beam divergence enabled: H=",
+            Desc.BeamDivergenceH, "deg V=", Desc.BeamDivergenceV, "deg");
+    }
+    else if (!(HDiv == 0.0f && VDiv == 0.0f))
+    {
+        UE_LOG(LogTemp, Warning,
+            TEXT("RGL: beam_divergence_h and beam_divergence_v must both be >0 or both be 0. Ignoring beam divergence."));
+    }
+
     // Connect graph with optional noise nodes:
     // UseRays -> SetRange -> SetRingIds -> RaysTransform
     //   -> [AngularNoiseRay] -> Raytrace -> [AngularNoiseHitpoint] -> [DistanceNoise]

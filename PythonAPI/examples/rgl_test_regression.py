@@ -6,6 +6,8 @@ Tests all AWSIM-ported preset functionality:
 - Per-channel angles and ring IDs
 - Special firing patterns (AT128 range, QT128/Pandar128 step offset)
 - Ray masks (azimuth, ring, rect, raw)
+- Noise model (angular ray/hitpoint, distance, disable)
+- Beam divergence (on/off, manual, disable, invalid input)
 - delta+zlib+base64 encoding roundtrip
 - ROS2 direct publish (optional, requires ROS2 environment)
 - Legacy mode (no preset)
@@ -36,9 +38,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import carla
 
 from rgl_lidar_models import (
-    MODEL_REGISTRY, apply_preset, list_models,
+    MODEL_REGISTRY, NOISE_REGISTRY, BEAM_DIVERGENCE_REGISTRY,
+    apply_preset, list_models,
     _encode_float_array, _encode_int_array,
     set_azimuth_fov, set_disabled_rings, set_mask_rectangles, set_raw_mask,
+    set_noise, disable_noise,
+    set_beam_divergence, disable_beam_divergence,
 )
 
 
@@ -242,6 +247,32 @@ def test_preset_data(result):
     shifted = sum(1 for o in p128hr.get("horizontal_step_offsets", []) if o > 0)
     result.check("p128hr_shifted_count", shifted == 96, f"got {shifted}")
 
+    # Noise preset data
+    result.check("noise_registry_count", len(NOISE_REGISTRY) == 13,
+                 f"got {len(NOISE_REGISTRY)}")
+    for name in expected_models:
+        result.check(f"noise_{name}", name in NOISE_REGISTRY)
+    vlp16_noise = NOISE_REGISTRY["VelodyneVLP16"]
+    result.check("noise_vlp16_type", vlp16_noise["angular_type"] == "ray")
+    result.check("noise_vlp16_angular_stddev",
+                 abs(vlp16_noise["angular_stddev"] - 0.05730) < 0.001,
+                 f"got {vlp16_noise['angular_stddev']}")
+    result.check("noise_vlp16_distance_base", vlp16_noise["distance_stddev_base"] == 0.02)
+
+    # Beam divergence preset data
+    result.check("bd_registry_count", len(BEAM_DIVERGENCE_REGISTRY) == 13,
+                 f"got {len(BEAM_DIVERGENCE_REGISTRY)}")
+    for name in expected_models:
+        result.check(f"bd_{name}", name in BEAM_DIVERGENCE_REGISTRY)
+    vlp16_bd = BEAM_DIVERGENCE_REGISTRY["VelodyneVLP16"]
+    result.check("bd_vlp16_horizontal",
+                 abs(vlp16_bd["horizontal"] - 0.171887) < 0.001,
+                 f"got {vlp16_bd['horizontal']}")
+    hesai_bd = BEAM_DIVERGENCE_REGISTRY["HesaiPandarQT"]
+    result.check("bd_hesai_default",
+                 abs(hesai_bd["horizontal"] - 0.13) < 0.001,
+                 f"got {hesai_bd['horizontal']}")
+
 
 def test_spawn_all(world, result):
     """Test spawning all 13 presets without crash."""
@@ -356,8 +387,161 @@ def test_python_validation(result):
     except ValueError:
         result.ok("validate_unknown_model")
 
+    # Noise validation
+    try:
+        set_noise(None, angular_type="invalid")
+        result.fail("validate_noise_type", "no error raised")
+    except ValueError:
+        result.ok("validate_noise_type")
 
-def test_resilience_bad_mask(world, result):
+    try:
+        set_noise(None, angular_stddev=-1)
+        result.fail("validate_noise_neg_stddev", "no error raised")
+    except ValueError:
+        result.ok("validate_noise_neg_stddev")
+
+    try:
+        set_noise(None, distance_stddev_base=-0.1)
+        result.fail("validate_noise_neg_dist", "no error raised")
+    except ValueError:
+        result.ok("validate_noise_neg_dist")
+
+    # Beam divergence validation
+    try:
+        set_beam_divergence(None, 0.1, 0)
+        result.fail("validate_bd_asymmetric", "no error raised")
+    except ValueError:
+        result.ok("validate_bd_asymmetric")
+
+    try:
+        set_beam_divergence(None, -0.1, -0.1)
+        result.fail("validate_bd_negative", "no error raised")
+    except ValueError:
+        result.ok("validate_bd_negative")
+
+
+def test_noise(world, result):
+    """Test noise model spawn/tick/destroy."""
+    print("\n--- Noise model tests ---")
+
+    # Noise ON (preset default)
+    try:
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16")
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("noise_on_default")
+    except Exception as e:
+        result.fail("noise_on_default", str(e))
+
+    # Noise OFF (apply_noise=False)
+    try:
+        bp = world.get_blueprint_library().find("sensor.lidar.rgl")
+        apply_preset(bp, "VelodyneVLP16", apply_noise=False)
+        bp.set_attribute("sensor_tick", "0.1")
+        sensor = world.spawn_actor(bp, carla.Transform(carla.Location(z=3)))
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("noise_off")
+    except Exception as e:
+        result.fail("noise_off", str(e))
+
+    # HitpointBased angular noise
+    try:
+        def setup_hp(bp):
+            set_noise(bp, angular_type="hitpoint")
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_hp)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("noise_hitpoint")
+    except Exception as e:
+        result.fail("noise_hitpoint", str(e))
+
+    # disable_noise
+    try:
+        def setup_dis(bp):
+            disable_noise(bp)
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_dis)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("noise_disabled")
+    except Exception as e:
+        result.fail("noise_disabled", str(e))
+
+    # Distance noise only
+    try:
+        def setup_dist(bp):
+            disable_noise(bp)
+            set_noise(bp, distance_stddev_base=0.05)
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_dist)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("noise_distance_only")
+    except Exception as e:
+        result.fail("noise_distance_only", str(e))
+
+    # X-axis angular noise
+    try:
+        def setup_axis(bp):
+            set_noise(bp, angular_axis="X")
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_axis)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("noise_axis_x")
+    except Exception as e:
+        result.fail("noise_axis_x", str(e))
+
+
+def test_beam_divergence(world, result):
+    """Test beam divergence spawn/tick/destroy."""
+    print("\n--- Beam divergence tests ---")
+
+    # BD OFF (default)
+    try:
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16")
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("bd_off_default")
+    except Exception as e:
+        result.fail("bd_off_default", str(e))
+
+    # BD ON via preset
+    try:
+        bp = world.get_blueprint_library().find("sensor.lidar.rgl")
+        apply_preset(bp, "VelodyneVLP16", apply_beam_divergence=True)
+        bp.set_attribute("sensor_tick", "0.1")
+        sensor = world.spawn_actor(bp, carla.Transform(carla.Location(z=3)))
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("bd_on_preset")
+    except Exception as e:
+        result.fail("bd_on_preset", str(e))
+
+    # BD manual set
+    try:
+        def setup_manual(bp):
+            set_beam_divergence(bp, 0.2, 0.1)
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_manual)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("bd_manual")
+    except Exception as e:
+        result.fail("bd_manual", str(e))
+
+    # disable_beam_divergence
+    try:
+        def setup_dis(bp):
+            set_beam_divergence(bp, 0.2, 0.1)
+            disable_beam_divergence(bp)
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_dis)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("bd_disabled")
+    except Exception as e:
+        result.fail("bd_disabled", str(e))
+
+    # Asymmetric input (server should warn, not crash)
+    try:
+        def setup_bad(bp):
+            bp.set_attribute("beam_divergence_h", "0.1")
+            bp.set_attribute("beam_divergence_v", "0.0")
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_bad)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("bd_invalid_asymmetric", "no crash")
+    except Exception as e:
+        result.fail("bd_invalid_asymmetric", str(e))
+
+
+
     """Test that invalid mask strings don't crash the server."""
     print("\n--- Resilience: invalid mask strings ---")
 
@@ -541,6 +725,7 @@ def main():
                         help="Run ROS2 point cloud verification tests")
     parser.add_argument("--test", default="all",
                         choices=["all", "encoding", "data", "spawn", "mask",
+                                 "noise", "beam_divergence",
                                  "validation", "resilience", "ros2"],
                         help="Run specific test category")
     args = parser.parse_args()
@@ -558,7 +743,8 @@ def main():
         test_python_validation(result)
 
     # Online tests (need CARLA server)
-    need_carla = args.test in ("all", "spawn", "mask", "resilience", "ros2")
+    need_carla = args.test in ("all", "spawn", "mask", "noise", "beam_divergence",
+                                "resilience", "ros2")
     if need_carla:
         print("\nConnecting to CARLA...")
         client = carla.Client(args.host, args.port)
@@ -572,6 +758,12 @@ def main():
 
         if args.test in ("all", "mask"):
             test_masks(world, result)
+
+        if args.test in ("all", "noise"):
+            test_noise(world, result)
+
+        if args.test in ("all", "beam_divergence"):
+            test_beam_divergence(world, result)
 
         if args.test in ("all", "resilience"):
             test_resilience_bad_mask(world, result)

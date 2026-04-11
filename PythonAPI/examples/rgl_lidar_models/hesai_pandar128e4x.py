@@ -67,3 +67,8 @@ NOISE = {
     "distance_stddev_rise": 0.0,
     "angular_axis": "Y",
 }
+
+BEAM_DIVERGENCE = {
+    "horizontal": 0.13,   # degrees (AWSIM default)
+    "vertical": 0.13,     # degrees (AWSIM default)
+}
