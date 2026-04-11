@@ -44,6 +44,7 @@ from rgl_lidar_models import (
     set_azimuth_fov, set_disabled_rings, set_mask_rectangles, set_raw_mask,
     set_noise, disable_noise,
     set_beam_divergence, disable_beam_divergence,
+    set_return_mode,
 )
 
 
@@ -169,6 +170,7 @@ def parse_points(msg):
             "x": x, "y": y, "z": z,
             "ring_id": ring_id, "distance": distance,
             "azimuth": azimuth, "elevation": elevation,
+            "return_type": return_type,
         })
     return points
 
@@ -419,6 +421,13 @@ def test_python_validation(result):
     except ValueError:
         result.ok("validate_bd_negative")
 
+    # Return mode validation
+    try:
+        set_return_mode(None, "invalid_mode")
+        result.fail("validate_return_mode", "no error raised")
+    except ValueError:
+        result.ok("validate_return_mode")
+
 
 def test_noise(world, result):
     """Test noise model spawn/tick/destroy."""
@@ -541,7 +550,54 @@ def test_beam_divergence(world, result):
         result.fail("bd_invalid_asymmetric", str(e))
 
 
+def test_return_mode(world, result):
+    """Test return mode spawn/tick/destroy."""
+    print("\n--- Return mode tests ---")
 
+    # Single return modes
+    for mode in ["first", "second", "last", "strongest"]:
+        try:
+            def setup(bp, m=mode):
+                set_return_mode(bp, m)
+            sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup)
+            tick_and_destroy(world, sensor, ticks=3)
+            result.ok(f"return_{mode}")
+        except Exception as e:
+            result.fail(f"return_{mode}", str(e))
+
+    # Dual return with beam divergence enabled
+    try:
+        def setup_dual(bp):
+            set_beam_divergence(bp, 0.13, 0.13)
+            set_return_mode(bp, "first_last")
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_dual)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("return_first_last_with_bd")
+    except Exception as e:
+        result.fail("return_first_last_with_bd", str(e))
+
+    # Dual return WITHOUT beam divergence (should fallback, not crash)
+    try:
+        def setup_dual_no_bd(bp):
+            set_return_mode(bp, "first_last")
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_dual_no_bd)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("return_dual_no_bd_fallback", "no crash")
+    except Exception as e:
+        result.fail("return_dual_no_bd_fallback", str(e))
+
+    # Invalid return mode string (should fallback, not crash)
+    try:
+        def setup_bad(bp):
+            bp.set_attribute("return_mode", "garbage")
+        sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_bad)
+        tick_and_destroy(world, sensor, ticks=3)
+        result.ok("return_invalid_string", "no crash")
+    except Exception as e:
+        result.fail("return_invalid_string", str(e))
+
+
+def test_resilience_bad_mask(world, result):
     """Test that invalid mask strings don't crash the server."""
     print("\n--- Resilience: invalid mask strings ---")
 
@@ -712,6 +768,45 @@ def test_ros2_point_verification(world, result):
         result.check("ros2_ring_mask_excludes_0", 0 not in rings_seen,
                      f"rings={sorted(rings_seen)}")
 
+    # Dual return: point count and return_type verification
+    def setup_single_ros2(bp):
+        setup_ros2(bp)
+        set_beam_divergence(bp, 0.13, 0.13)
+        set_return_mode(bp, "first")
+    sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_single_ros2)
+    msg_single = capture_ros2_msg(world, sensor, topic)
+    sensor.destroy(); world.tick()
+
+    def setup_dual_ros2(bp):
+        setup_ros2(bp)
+        set_beam_divergence(bp, 0.13, 0.13)
+        set_return_mode(bp, "first_last")
+    sensor = spawn_rgl_sensor(world, "VelodyneVLP16", extra_setup=setup_dual_ros2)
+    msg_dual = capture_ros2_msg(world, sensor, topic)
+    sensor.destroy(); world.tick()
+
+    if msg_single and msg_dual:
+        single_hits = sum(1 for p in parse_points(msg_single) if p["distance"] > 0)
+        dual_hits = sum(1 for p in parse_points(msg_dual) if p["distance"] > 0)
+        if single_hits > 0:
+            ratio = dual_hits / single_hits
+            result.check("ros2_dual_point_ratio", 1.3 < ratio < 2.1,
+                         f"dual={dual_hits} single={single_hits} ratio={ratio:.2f}")
+        else:
+            result.fail("ros2_dual_point_ratio", "single_hits=0")
+
+        dual_points = parse_points(msg_dual)
+        return_types = set(p["return_type"] for p in dual_points if p["distance"] > 0)
+        # RGL_RETURN_TYPE_FIRST=4, RGL_RETURN_TYPE_LAST=2
+        result.check("ros2_dual_has_first", 4 in return_types,
+                     f"return_types={return_types}")
+        result.check("ros2_dual_has_last", 2 in return_types,
+                     f"return_types={return_types}")
+    elif msg_single is None:
+        result.fail("ros2_dual_point_ratio", "rclpy not available or no single message")
+    else:
+        result.fail("ros2_dual_point_ratio", "no dual message received")
+
 
 # ============================================================================
 # Main
@@ -725,7 +820,7 @@ def main():
                         help="Run ROS2 point cloud verification tests")
     parser.add_argument("--test", default="all",
                         choices=["all", "encoding", "data", "spawn", "mask",
-                                 "noise", "beam_divergence",
+                                 "noise", "beam_divergence", "return_mode",
                                  "validation", "resilience", "ros2"],
                         help="Run specific test category")
     args = parser.parse_args()
@@ -744,7 +839,7 @@ def main():
 
     # Online tests (need CARLA server)
     need_carla = args.test in ("all", "spawn", "mask", "noise", "beam_divergence",
-                                "resilience", "ros2")
+                                "return_mode", "resilience", "ros2")
     if need_carla:
         print("\nConnecting to CARLA...")
         client = carla.Client(args.host, args.port)
@@ -764,6 +859,9 @@ def main():
 
         if args.test in ("all", "beam_divergence"):
             test_beam_divergence(world, result)
+
+        if args.test in ("all", "return_mode"):
+            test_return_mode(world, result)
 
         if args.test in ("all", "resilience"):
             test_resilience_bad_mask(world, result)

@@ -149,4 +149,9 @@ struct CARLA_API FLidarDescription
 
   /// Beam divergence: vertical (degrees). 0 = disabled.
   float BeamDivergenceV = 0.0f;
+
+  /// Return mode: "first", "second", "last", "strongest" (single),
+  /// "first_last", "first_strongest", "first_second", "last_strongest",
+  /// "strongest_second_strongest" (dual, requires beam_divergence > 0).
+  FString ReturnMode;
 };

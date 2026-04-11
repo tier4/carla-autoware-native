@@ -976,6 +976,12 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     BeamDivergenceV.RecommendedValues = { TEXT("0.0") };
     BeamDivergenceV.bRestrictToRecommended = false;
 
+    FActorVariation ReturnMode;
+    ReturnMode.Id = TEXT("return_mode");
+    ReturnMode.Type = EActorAttributeType::String;
+    ReturnMode.RecommendedValues = { TEXT("first") };
+    ReturnMode.bRestrictToRecommended = false;
+
     Definition.Variations.Append({
       Channels,
       Range,
@@ -1020,7 +1026,8 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       NoiseDistanceStdDevRise,
       NoiseAngularAxis,
       BeamDivergenceH,
-      BeamDivergenceV});
+      BeamDivergenceV,
+      ReturnMode});
   }
   else {
     DEBUG_ASSERT(false);
@@ -1897,6 +1904,9 @@ void UActorBlueprintFunctionLibrary::SetLidar(
       RetrieveActorAttributeToFloat("beam_divergence_h", Description.Variations, 0.0f);
   Lidar.BeamDivergenceV =
       RetrieveActorAttributeToFloat("beam_divergence_v", Description.Variations, 0.0f);
+  // Return mode
+  Lidar.ReturnMode = RetrieveActorAttributeToString(
+      "return_mode", Description.Variations, TEXT("first"));
 }
 
 void UActorBlueprintFunctionLibrary::SetGnss(

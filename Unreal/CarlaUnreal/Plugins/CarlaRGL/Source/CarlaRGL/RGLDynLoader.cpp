@@ -140,6 +140,11 @@ typedef rgl_status_t (*fn_rgl_node_raytrace_configure_beam_divergence_t)(
     rgl_node_t, float, float);
 static fn_rgl_node_raytrace_configure_beam_divergence_t fn_rgl_node_raytrace_configure_beam_divergence = nullptr;
 
+// 28. rgl_node_raytrace_configure_return_mode
+typedef rgl_status_t (*fn_rgl_node_raytrace_configure_return_mode_t)(
+    rgl_node_t, rgl_return_mode_t);
+static fn_rgl_node_raytrace_configure_return_mode_t fn_rgl_node_raytrace_configure_return_mode = nullptr;
+
 // ---------------------------------------------------------------------------
 // Wrapper function definitions
 // These provide the symbols the linker resolves to, replacing the .so linkage.
@@ -359,6 +364,14 @@ rgl_status_t rgl_node_raytrace_configure_beam_divergence(
     return fn_rgl_node_raytrace_configure_beam_divergence(node, horizontal_beam_divergence, vertical_beam_divergence);
 }
 
+// 28. rgl_node_raytrace_configure_return_mode
+rgl_status_t rgl_node_raytrace_configure_return_mode(
+    rgl_node_t node, rgl_return_mode_t return_mode)
+{
+    if (!fn_rgl_node_raytrace_configure_return_mode) return RGL_INVALID_STATE;
+    return fn_rgl_node_raytrace_configure_return_mode(node, return_mode);
+}
+
 // ---------------------------------------------------------------------------
 // RGLDynLoader implementation
 // ---------------------------------------------------------------------------
@@ -411,6 +424,7 @@ bool RGLDynLoader::Load(const char* LibPath)
     LOAD_FN(rgl_node_gaussian_noise_angular_hitpoint)
     LOAD_FN(rgl_node_gaussian_noise_distance)
     LOAD_FN(rgl_node_raytrace_configure_beam_divergence)
+    LOAD_FN(rgl_node_raytrace_configure_return_mode)
 
     if (!allResolved)
     {
@@ -459,6 +473,7 @@ void RGLDynLoader::Unload()
     fn_rgl_node_gaussian_noise_angular_hitpoint = nullptr;
     fn_rgl_node_gaussian_noise_distance = nullptr;
     fn_rgl_node_raytrace_configure_beam_divergence = nullptr;
+    fn_rgl_node_raytrace_configure_return_mode = nullptr;
 }
 
 bool RGLDynLoader::IsLoaded()

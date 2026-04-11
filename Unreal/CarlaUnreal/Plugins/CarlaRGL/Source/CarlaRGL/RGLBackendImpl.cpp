@@ -295,6 +295,53 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
             TEXT("RGL: beam_divergence_h and beam_divergence_v must both be >0 or both be 0. Ignoring beam divergence."));
     }
 
+    // --- Return mode (configure existing RaytraceNode) ---
+    static const TMap<FString, rgl_return_mode_t> ReturnModeMap = {
+        {TEXT("first"), RGL_RETURN_FIRST},
+        {TEXT("second"), RGL_RETURN_SECOND},
+        {TEXT("last"), RGL_RETURN_LAST},
+        {TEXT("strongest"), RGL_RETURN_STRONGEST},
+        {TEXT("first_last"), RGL_RETURN_FIRST_LAST},
+        {TEXT("first_strongest"), RGL_RETURN_FIRST_STRONGEST},
+        {TEXT("first_second"), RGL_RETURN_FIRST_SECOND},
+        {TEXT("last_strongest"), RGL_RETURN_LAST_STRONGEST},
+        {TEXT("strongest_second_strongest"), RGL_RETURN_STRONGEST_SECOND_STRONGEST},
+    };
+
+    if (!Desc.ReturnMode.IsEmpty())
+    {
+        const FString ModeLower = Desc.ReturnMode.ToLower();
+        const rgl_return_mode_t* FoundMode = ReturnModeMap.Find(ModeLower);
+        if (FoundMode)
+        {
+            rgl_return_mode_t Mode = *FoundMode;
+            // Dual mode requires beam divergence > 0
+            const bool bIsDual = (static_cast<int32>(Mode) >> 24) == 2;
+            if (bIsDual && !(HDiv > 0.0f && VDiv > 0.0f))
+            {
+                // Extract first return type and fall back to single
+                const rgl_return_type_t FirstType = static_cast<rgl_return_type_t>(
+                    static_cast<int32>(Mode) & 0xFF);
+                Mode = static_cast<rgl_return_mode_t>(
+                    (1 << 24) | static_cast<int32>(FirstType));
+                UE_LOG(LogTemp, Warning,
+                    TEXT("RGL: Dual return mode '%s' requires beam_divergence > 0. "
+                         "Falling back to single return."), *Desc.ReturnMode);
+            }
+            RGL_CHECK(rgl_node_raytrace_configure_return_mode(
+                Session->RaytraceNode, Mode));
+            if (Mode != RGL_RETURN_FIRST)
+            {
+                RGLLog::Info("RGLBackendImpl: Return mode set to:", TCHAR_TO_ANSI(*Desc.ReturnMode));
+            }
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("RGL: Unknown return_mode '%s'. Using default 'first'."), *Desc.ReturnMode);
+        }
+    }
+
     // Connect graph with optional noise nodes:
     // UseRays -> SetRange -> SetRingIds -> RaysTransform
     //   -> [AngularNoiseRay] -> Raytrace -> [AngularNoiseHitpoint] -> [DistanceNoise]

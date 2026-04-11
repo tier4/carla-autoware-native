@@ -358,3 +358,24 @@ def disable_beam_divergence(blueprint):
     """Disable beam divergence (set both to 0)."""
     blueprint.set_attribute("beam_divergence_h", "0.0")
     blueprint.set_attribute("beam_divergence_v", "0.0")
+
+
+def set_return_mode(blueprint, mode):
+    """Set return mode.
+
+    Single return modes (no beam divergence required):
+        "first", "second", "last", "strongest"
+    Dual return modes (require beam_divergence > 0):
+        "first_last", "first_strongest", "first_second",
+        "last_strongest", "strongest_second_strongest"
+
+    Args:
+        blueprint: carla.ActorBlueprint for sensor.lidar.rgl
+        mode: return mode string
+    """
+    valid = {"first", "second", "last", "strongest",
+             "first_last", "first_strongest", "first_second",
+             "last_strongest", "strongest_second_strongest"}
+    if mode not in valid:
+        raise ValueError(f"Invalid return mode '{mode}'. Valid: {sorted(valid)}")
+    blueprint.set_attribute("return_mode", mode)
