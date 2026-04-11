@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Package compression
     zstd \
     # Misc
-    sudo locales \
+    vim sudo locales \
     && rm -rf /var/lib/apt/lists/*
 
 # Locale (UE5 needs UTF-8)

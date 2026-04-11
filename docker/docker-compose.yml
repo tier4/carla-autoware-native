@@ -29,9 +29,8 @@ services:
     volumes:
       # Mount at same absolute path as host so symlinks (e.g. Content
       # created by carla-env.sh) resolve correctly inside the container.
-      - ${UE5_PATH:?Set UE5_PATH in .env}:${UE5_PATH}
-      - ${CARLA_PATH:?Set CARLA_PATH in .env}:${CARLA_PATH}
-      - ${RGL_PATH:?Set RGL_PATH in .env}:${RGL_PATH}:ro
+      # WORK_PATH covers UE5, CarlaUE5, RGL (all under one parent dir).
+      - ${WORK_PATH:?Set WORK_PATH in .env}:${WORK_PATH}
       # Claude Code config
       - ${CLAUDE_CONFIG:-~/.claude}:/home/carla/.claude
       # Optional mounts (comment out if not needed)
@@ -39,9 +38,9 @@ services:
       - ${AUTOWARE_PATH:-/dev/null}:${AUTOWARE_PATH:-/autoware}:ro
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - CARLA_UNREAL_ENGINE_PATH=${UE5_PATH}
+      - CARLA_UNREAL_ENGINE_PATH=${WORK_PATH}/${UE5_SUBDIR:-UnrealEngine5_carla}
       - DISPLAY=${DISPLAY:-}
       - SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-x11}
-    working_dir: ${CARLA_PATH}
+    working_dir: ${WORK_PATH}/${CARLA_SUBDIR:-CarlaUE5}
     stdin_open: true
     tty: true
