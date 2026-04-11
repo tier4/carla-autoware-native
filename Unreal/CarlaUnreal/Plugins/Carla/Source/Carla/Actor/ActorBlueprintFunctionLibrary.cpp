@@ -898,6 +898,30 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     HorizontalStepOffsetsVar.RecommendedValues = { TEXT("") };
     HorizontalStepOffsetsVar.bRestrictToRecommended = false;
 
+    FActorVariation RayMaskAzimuth;
+    RayMaskAzimuth.Id = TEXT("ray_mask_azimuth");
+    RayMaskAzimuth.Type = EActorAttributeType::String;
+    RayMaskAzimuth.RecommendedValues = { TEXT("") };
+    RayMaskAzimuth.bRestrictToRecommended = false;
+
+    FActorVariation RayMaskRings;
+    RayMaskRings.Id = TEXT("ray_mask_rings");
+    RayMaskRings.Type = EActorAttributeType::String;
+    RayMaskRings.RecommendedValues = { TEXT("") };
+    RayMaskRings.bRestrictToRecommended = false;
+
+    FActorVariation RayMaskRects;
+    RayMaskRects.Id = TEXT("ray_mask_rects");
+    RayMaskRects.Type = EActorAttributeType::String;
+    RayMaskRects.RecommendedValues = { TEXT("") };
+    RayMaskRects.bRestrictToRecommended = false;
+
+    FActorVariation RayMaskRawVar;
+    RayMaskRawVar.Id = TEXT("ray_mask_raw");
+    RayMaskRawVar.Type = EActorAttributeType::String;
+    RayMaskRawVar.RecommendedValues = { TEXT("") };
+    RayMaskRawVar.bRestrictToRecommended = false;
+
     Definition.Variations.Append({
       Channels,
       Range,
@@ -929,7 +953,11 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       PerChannelMinRanges,
       PerChannelMaxRanges,
       RangePatternPeriod,
-      HorizontalStepOffsetsVar});
+      HorizontalStepOffsetsVar,
+      RayMaskAzimuth,
+      RayMaskRings,
+      RayMaskRects,
+      RayMaskRawVar});
   }
   else {
     DEBUG_ASSERT(false);
@@ -1759,6 +1787,29 @@ void UActorBlueprintFunctionLibrary::SetLidar(
       for (int32 i = 0; i < IntValues.Num(); ++i)
       {
         Lidar.HorizontalStepOffsets[i] = static_cast<float>(IntValues[i]) * 1e-6f;
+      }
+    }
+  }
+
+  // Ray mask conditions (stored as-is, parsed in GenerateRayPattern)
+  Lidar.RayMaskAzimuth = RetrieveActorAttributeToString(
+      "ray_mask_azimuth", Description.Variations, TEXT(""));
+  Lidar.RayMaskRings = RetrieveActorAttributeToString(
+      "ray_mask_rings", Description.Variations, TEXT(""));
+  Lidar.RayMaskRects = RetrieveActorAttributeToString(
+      "ray_mask_rects", Description.Variations, TEXT(""));
+
+  // Raw mask: delta+zlib+base64 encoded int array → int8
+  FString RayMaskRawStr = RetrieveActorAttributeToString(
+      "ray_mask_raw", Description.Variations, TEXT(""));
+  {
+    TArray<int32> IntValues;
+    if (DecodeDeltas(RayMaskRawStr, IntValues))
+    {
+      Lidar.RayMaskRaw.SetNum(IntValues.Num());
+      for (int32 i = 0; i < IntValues.Num(); ++i)
+      {
+        Lidar.RayMaskRaw[i] = static_cast<int8>(IntValues[i] != 0 ? 1 : 0);
       }
     }
   }

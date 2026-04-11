@@ -73,6 +73,10 @@ static fn_rgl_node_raytrace_t fn_rgl_node_raytrace = nullptr;
 typedef rgl_status_t (*fn_rgl_node_raytrace_configure_non_hits_t)(rgl_node_t, float, float);
 static fn_rgl_node_raytrace_configure_non_hits_t fn_rgl_node_raytrace_configure_non_hits = nullptr;
 
+// 13b. rgl_node_raytrace_configure_mask
+typedef rgl_status_t (*fn_rgl_node_raytrace_configure_mask_t)(rgl_node_t, const int8_t*, int32_t);
+static fn_rgl_node_raytrace_configure_mask_t fn_rgl_node_raytrace_configure_mask = nullptr;
+
 // 14. rgl_node_points_compact_by_field
 typedef rgl_status_t (*fn_rgl_node_points_compact_by_field_t)(rgl_node_t*, rgl_field_t);
 static fn_rgl_node_points_compact_by_field_t fn_rgl_node_points_compact_by_field = nullptr;
@@ -219,6 +223,13 @@ rgl_status_t rgl_node_raytrace_configure_non_hits(rgl_node_t node, float nearDis
     return fn_rgl_node_raytrace_configure_non_hits(node, nearDistance, farDistance);
 }
 
+// 13b. rgl_node_raytrace_configure_mask
+rgl_status_t rgl_node_raytrace_configure_mask(rgl_node_t node, const int8_t* rays_mask, int32_t rays_count)
+{
+    if (!fn_rgl_node_raytrace_configure_mask) return RGL_INVALID_STATE;
+    return fn_rgl_node_raytrace_configure_mask(node, rays_mask, rays_count);
+}
+
 // 14. rgl_node_points_compact_by_field
 rgl_status_t rgl_node_points_compact_by_field(rgl_node_t* node, rgl_field_t field)
 {
@@ -333,6 +344,7 @@ bool RGLDynLoader::Load(const char* LibPath)
     LOAD_FN(rgl_node_rays_transform)
     LOAD_FN(rgl_node_raytrace)
     LOAD_FN(rgl_node_raytrace_configure_non_hits)
+    LOAD_FN(rgl_node_raytrace_configure_mask)
     LOAD_FN(rgl_node_points_compact_by_field)
     LOAD_FN(rgl_node_points_transform)
     LOAD_FN(rgl_node_points_yield)
@@ -376,6 +388,7 @@ void RGLDynLoader::Unload()
     fn_rgl_node_rays_transform = nullptr;
     fn_rgl_node_raytrace = nullptr;
     fn_rgl_node_raytrace_configure_non_hits = nullptr;
+    fn_rgl_node_raytrace_configure_mask = nullptr;
     fn_rgl_node_points_compact_by_field = nullptr;
     fn_rgl_node_points_transform = nullptr;
     fn_rgl_node_points_yield = nullptr;

@@ -44,6 +44,7 @@ struct FRGLSession
     TArray<rgl_mat3x4f> RayTransforms;
     TArray<int32> RingIds;
     TArray<rgl_vec2f> RayRanges;  // per-ray range (min,max) in meters; empty = uniform
+    TArray<int8> RayMask;  // per-ray mask (1=enabled, 0=masked); empty = no mask
 
     // ---- Cache state ----
     bool bRayPatternCached = false;

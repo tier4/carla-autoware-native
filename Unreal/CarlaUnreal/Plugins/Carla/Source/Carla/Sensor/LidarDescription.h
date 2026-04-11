@@ -103,4 +103,23 @@ struct CARLA_API FLidarDescription
   /// for specific channels (e.g. QT128C2X Bank C/D, Pandar128E4X high-res).
   /// Empty = no shift.
   TArray<float> HorizontalStepOffsets;
+
+  /// Ray mask: azimuth FOV sections (whitelist).
+  /// Format: "start,end;start,end;..." (degrees, 0-360, max 5 sections)
+  /// Rays outside all sections are masked. Empty = no azimuth mask.
+  FString RayMaskAzimuth;
+
+  /// Ray mask: disabled ring IDs (blacklist).
+  /// Format: "ring1,ring2,ring3,..." (integers)
+  /// Rays with matching ring_id are masked. Empty = no ring mask.
+  FString RayMaskRings;
+
+  /// Ray mask: rectangular regions (blacklist).
+  /// Format: "az_start,az_end,el_start,el_end;..." (degrees)
+  /// azimuth: 0-360, elevation: -90 to 90. Rays inside any rectangle are masked.
+  FString RayMaskRects;
+
+  /// Ray mask: per-channel raw mask (1=enabled, 0=masked).
+  /// Expanded to per-ray by repeating for each horizontal step.
+  TArray<int8> RayMaskRaw;
 };

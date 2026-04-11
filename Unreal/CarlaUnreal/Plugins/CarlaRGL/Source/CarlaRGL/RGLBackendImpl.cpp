@@ -381,6 +381,80 @@ int32 FRGLBackendImpl::GenerateRayPattern(FRGLSession* Session, float DeltaSecon
     Session->RayTransforms.SetNum(TotalRays);
     Session->RingIds.SetNum(TotalRays);
 
+    // ================================================================
+    // Parse ray mask conditions (all ANDed together)
+    // ================================================================
+    const bool bHasAzMask = !Desc.RayMaskAzimuth.IsEmpty();
+    const bool bHasRingMask = !Desc.RayMaskRings.IsEmpty();
+    const bool bHasRectMask = !Desc.RayMaskRects.IsEmpty();
+    const bool bHasRawMask = Desc.RayMaskRaw.Num() > 0;
+    const bool bHasAnyMask = bHasAzMask || bHasRingMask || bHasRectMask || bHasRawMask;
+
+    // Azimuth sections (whitelist)
+    struct FAzSec { float S; float E; };
+    TArray<FAzSec> AzSections;
+    if (bHasAzMask)
+    {
+        TArray<FString> SecStrs;
+        Desc.RayMaskAzimuth.ParseIntoArray(SecStrs, TEXT(";"), true);
+        for (const FString& Str : SecStrs)
+        {
+            TArray<FString> P;
+            Str.ParseIntoArray(P, TEXT(","), true);
+            if (P.Num() == 2 && AzSections.Num() < 5)
+            {
+                float S = FCString::Atof(*P[0]), E = FCString::Atof(*P[1]);
+                if (S >= 0.f && S <= 360.f && E >= 0.f && E <= 360.f)
+                    AzSections.Add({S, E});
+                else
+                    UE_LOG(LogTemp, Warning, TEXT("RGL mask: invalid azimuth range: %s"), *Str);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("RGL mask: malformed azimuth section: %s"), *Str);
+            }
+        }
+    }
+
+    // Disabled rings (blacklist)
+    TSet<int32> DisabledRings;
+    if (bHasRingMask)
+    {
+        TArray<FString> RStrs;
+        Desc.RayMaskRings.ParseIntoArray(RStrs, TEXT(","), true);
+        for (const FString& R : RStrs)
+        {
+            int32 Id = FCString::Atoi(*R.TrimStartAndEnd());
+            if (Id >= 0) DisabledRings.Add(Id);
+            else UE_LOG(LogTemp, Warning, TEXT("RGL mask: invalid ring ID: %s"), *R);
+        }
+    }
+
+    // Rectangular masks (blacklist)
+    struct FMaskRect { float AzS; float AzE; float ElS; float ElE; };
+    TArray<FMaskRect> MaskRects;
+    if (bHasRectMask)
+    {
+        TArray<FString> RStrs;
+        Desc.RayMaskRects.ParseIntoArray(RStrs, TEXT(";"), true);
+        for (const FString& Str : RStrs)
+        {
+            TArray<FString> P;
+            Str.ParseIntoArray(P, TEXT(","), true);
+            if (P.Num() == 4)
+                MaskRects.Add({FCString::Atof(*P[0]), FCString::Atof(*P[1]),
+                               FCString::Atof(*P[2]), FCString::Atof(*P[3])});
+            else
+                UE_LOG(LogTemp, Warning, TEXT("RGL mask: malformed rect (need 4 values): %s"), *Str);
+        }
+    }
+
+    if (bHasAnyMask)
+    {
+        Session->RayMask.SetNum(TotalRays);
+        FMemory::Memset(Session->RayMask.GetData(), 1, TotalRays);
+    }
+
     int32 RayIndex = 0;
     for (uint32 ch = 0; ch < ChannelCount; ++ch)
     {
@@ -405,8 +479,54 @@ int32 FRGLBackendImpl::GenerateRayPattern(FRGLSession* Session, float DeltaSecon
                 HorizAngle
             );
             Session->RingIds[RayIndex] = ChRingId;
+
+            // Apply ray mask conditions (AND logic)
+            if (bHasAnyMask)
+            {
+                int8& Mask = Session->RayMask[RayIndex];
+                const float NormAz = FMath::Fmod(HorizAngle + 360.0f, 360.0f);
+
+                // 1. Azimuth whitelist
+                if (Mask && AzSections.Num() > 0)
+                {
+                    bool bIn = false;
+                    for (const auto& Sec : AzSections)
+                    {
+                        if (Sec.S <= Sec.E ? (NormAz >= Sec.S && NormAz <= Sec.E)
+                                           : (NormAz >= Sec.S || NormAz <= Sec.E))
+                        { bIn = true; break; }
+                    }
+                    if (!bIn) Mask = 0;
+                }
+                // 2. Ring blacklist
+                if (Mask && DisabledRings.Num() > 0 && DisabledRings.Contains(ChRingId))
+                    Mask = 0;
+                // 3. Rectangular blacklist
+                if (Mask && MaskRects.Num() > 0)
+                {
+                    for (const auto& R : MaskRects)
+                    {
+                        bool bAz = R.AzS <= R.AzE
+                            ? (NormAz >= R.AzS && NormAz <= R.AzE)
+                            : (NormAz >= R.AzS || NormAz <= R.AzE);
+                        if (bAz && ChVertAngle >= R.ElS && ChVertAngle <= R.ElE)
+                        { Mask = 0; break; }
+                    }
+                }
+                // 4. Raw per-channel mask
+                if (Mask && bHasRawMask && ch < static_cast<uint32>(Desc.RayMaskRaw.Num())
+                    && Desc.RayMaskRaw[ch] == 0)
+                    Mask = 0;
+            }
+
             ++RayIndex;
         }
+    }
+
+    // Clear mask if no mask conditions were active
+    if (!bHasAnyMask)
+    {
+        Session->RayMask.Empty();
     }
 
     // Generate per-ray range array if periodic range pattern is defined.
@@ -504,6 +624,15 @@ FRGLTickResult FRGLBackendImpl::Tick(
             RGL_CHECK(rgl_node_rays_set_range(
                 &Session->SetRangeNode,
                 Session->RayRanges.GetData(),
+                TotalRays));
+        }
+
+        // Apply ray mask
+        if (Session->RayMask.Num() == TotalRays)
+        {
+            RGL_CHECK(rgl_node_raytrace_configure_mask(
+                Session->RaytraceNode,
+                Session->RayMask.GetData(),
                 TotalRays));
         }
 

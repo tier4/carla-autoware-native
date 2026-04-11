@@ -135,3 +135,69 @@ def apply_preset(blueprint, model_name):
     if m.get("horizontal_step_offsets"):
         _try_set("horizontal_step_offsets",
                  _encode_float_array(m["horizontal_step_offsets"]))
+
+
+def set_azimuth_fov(blueprint, sections):
+    """Set azimuth FOV sections (whitelist). Rays outside all sections are masked.
+
+    Args:
+        blueprint: carla.ActorBlueprint for sensor.lidar.rgl
+        sections: list of [start, end] pairs (degrees, 0-360).
+            Max 5 sections. Wrap-around supported (start > end).
+    Example:
+        set_azimuth_fov(bp, [[0, 120], [240, 360]])
+    """
+    if len(sections) > 5:
+        raise ValueError("Maximum 5 azimuth sections supported")
+    for s, e in sections:
+        if not (0 <= s <= 360 and 0 <= e <= 360):
+            raise ValueError(f"Azimuth must be 0-360, got ({s}, {e})")
+    blueprint.set_attribute("ray_mask_azimuth",
+                            ";".join(f"{s},{e}" for s, e in sections))
+
+
+def set_disabled_rings(blueprint, ring_ids):
+    """Disable specific ring IDs (fault injection).
+
+    Args:
+        blueprint: carla.ActorBlueprint for sensor.lidar.rgl
+        ring_ids: list of ring IDs to disable
+    """
+    for r in ring_ids:
+        if not isinstance(r, int) or r < 0:
+            raise ValueError(f"Ring ID must be non-negative integer, got {r}")
+    blueprint.set_attribute("ray_mask_rings",
+                            ",".join(str(r) for r in ring_ids))
+
+
+def set_mask_rectangles(blueprint, rects):
+    """Mask rectangular regions (self-occlusion).
+
+    Args:
+        blueprint: carla.ActorBlueprint for sensor.lidar.rgl
+        rects: list of dicts with keys: az_start, az_end, el_start, el_end
+            azimuth: 0-360 degrees, elevation: -90 to 90 degrees.
+            Rays inside any rectangle are masked.
+    Example:
+        set_mask_rectangles(bp, [
+            {"az_start": 150, "az_end": 210, "el_start": -25, "el_end": 5},
+        ])
+    """
+    parts = []
+    for r in rects:
+        for key in ("az_start", "az_end", "el_start", "el_end"):
+            if key not in r:
+                raise ValueError(f"Rectangle missing key: {key}")
+        parts.append(f"{r['az_start']},{r['az_end']},{r['el_start']},{r['el_end']}")
+    blueprint.set_attribute("ray_mask_rects", ";".join(parts))
+
+
+def set_raw_mask(blueprint, channel_mask):
+    """Set per-channel raw mask (advanced/fault injection).
+
+    Args:
+        blueprint: carla.ActorBlueprint for sensor.lidar.rgl
+        channel_mask: list of int (1=enabled, 0=masked), one per channel.
+            Applied to all horizontal steps of each channel.
+    """
+    blueprint.set_attribute("ray_mask_raw", _encode_int_array(channel_mask))
