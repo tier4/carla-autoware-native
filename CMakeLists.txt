@@ -102,7 +102,7 @@ endif()
 # environment is required for non-RGL builds.
 if (ENABLE_RGL)
   include (ExternalProject)
-  set (RCLCPP_BRIDGE_SRC "${CMAKE_SOURCE_DIR}/RclcppBridge")
+  set (RCLCPP_BRIDGE_SRC "${CMAKE_SOURCE_DIR}/Unreal/CarlaUnreal/Plugins/CarlaRGL/ThirdParty/RclcppBridge")
   if (IS_DIRECTORY "${RCLCPP_BRIDGE_SRC}")
     # RclcppBridge needs `source /opt/ros/humble/setup.bash` equivalent:
     #   - CMAKE_PREFIX_PATH for find_package(rclcpp)
