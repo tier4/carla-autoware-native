@@ -37,7 +37,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import carla
 
-from rgl_lidar_models import (
+from lidar_models import (
     MODEL_REGISTRY, NOISE_REGISTRY, BEAM_DIVERGENCE_REGISTRY,
     apply_preset, list_models,
     _encode_float_array, _encode_int_array,

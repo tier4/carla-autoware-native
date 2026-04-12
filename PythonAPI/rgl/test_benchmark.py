@@ -28,8 +28,7 @@ CARLA_CLIENT_SCRIPT = (
     "rgl_test_autoware_demo.py --load_map NishishinjukuMap --lidar_spawn_delta_x 0.1"
 )
 TEST_TOPIC_HZ_CMD = (
-    "/mnt/dsk0/wk0/CARLA/T4ForkWithRGL/CarlaUE5/PythonAPI/examples/"
-    "rgl_test_topic_hz.sh"
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_topic_hz.sh")
 )
 CLIENT_LAUNCH_WAIT         = 20   # seconds to wait for CARLA to become ready after launch
 EGO_SPAWN_TIMEOUT          = 30   # seconds to wait for "[INFO]: Ego spawned!" in client output

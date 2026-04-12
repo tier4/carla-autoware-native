@@ -223,8 +223,8 @@ def generate_vlp16_blueprint(blueprint_library, lidar_type="rgl",
 
     if lidar_model:
         import sys as _sys
-        _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from rgl_lidar_models import apply_preset
+        _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rgl"))
+        from lidar_models import apply_preset
         apply_preset(blueprint, lidar_model)
     else:
         # Default VLP16 configuration
@@ -804,8 +804,8 @@ def main():
     # Handle --lidar_model list
     if args.lidar_model == 'list':
         import sys as _sys
-        _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from rgl_lidar_models import list_models
+        _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rgl"))
+        from lidar_models import list_models
         print("Available LiDAR presets:")
         list_models()
         raise SystemExit(0)

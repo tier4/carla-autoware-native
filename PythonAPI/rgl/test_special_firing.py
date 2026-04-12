@@ -33,7 +33,7 @@ ROS2_SETUP = "/mnt/dsk0/wk0/ROS2/humble/AW-OSS/1.7.1/autoware/install/setup.bash
 
 def spawn_sensor(world, model_name):
     """Spawn RGL LiDAR with given preset, direct ROS2 publish enabled."""
-    from rgl_lidar_models import apply_preset
+    from lidar_models import apply_preset
 
     s = world.get_settings()
     s.synchronous_mode = True
@@ -189,7 +189,7 @@ def test_at128e2x(client):
     # - NOT detected by non-NF channels (min_range=7.2m > 3m) for downward rays
     # But horizontal rays to distant buildings are detected by all channels.
     # So we just verify we got a reasonable point count.
-    from rgl_lidar_models import MODEL_REGISTRY
+    from lidar_models import MODEL_REGISTRY
     m = MODEL_REGISTRY["HesaiAT128E2X"]
     nf_channels = sum(1 for i in range(0, len(m["per_channel_min_ranges"]), 2)
                        if m["per_channel_min_ranges"][i] == 0.5)
