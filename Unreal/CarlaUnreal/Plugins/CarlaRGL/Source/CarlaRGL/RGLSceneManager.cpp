@@ -72,6 +72,19 @@ FRGLSceneManager::~FRGLSceneManager()
     }
     EntityMap.Empty();
 
+    // Destroy all ISMC entities
+    for (auto& Pair : ISMCEntityMap)
+    {
+        for (rgl_entity_t Entity : Pair.Value.Entities)
+        {
+            if (Entity)
+            {
+                rgl_entity_destroy(Entity);
+            }
+        }
+    }
+    ISMCEntityMap.Empty();
+
     // Destroy all cached meshes
     for (auto& Pair : MeshCache)
     {
@@ -147,12 +160,12 @@ void FRGLSceneManager::Update(UWorld* World)
         bInitialized = true;
     }
 
-    // Periodic full scan for new/removed actors
-    ++FrameCounter;
-    if (FrameCounter >= FULL_SCAN_INTERVAL)
+    // Periodic full scan for new/removed actors (time-based)
+    TimeSinceLastSync += World->GetDeltaSeconds();
+    if (TimeSinceLastSync >= SyncIntervalSeconds)
     {
         SyncWorldComponents(World);
-        FrameCounter = 0;
+        TimeSinceLastSync = 0.0f;
     }
 
     // Update scene time for velocity computation
@@ -280,6 +293,15 @@ void FRGLSceneManager::InitializeFromWorld(UWorld* World)
                  "mesh components. Uploaded", MeshCount, "unique meshes, created",
                  EntityCount, "entities (skipped", SkippedCount, ")");
 
+    const int32 ISMCCompCount = ISMCEntityMap.Num();
+    int32 ISMCEntityTotal = 0;
+    for (const auto& Pair : ISMCEntityMap)
+    {
+        ISMCEntityTotal += Pair.Value.Entities.Num();
+    }
+    RGLLog::Info("RGLSceneManager: ISMC components=", ISMCCompCount,
+                 " total ISMC instances=", ISMCEntityTotal);
+
 #if !UE_BUILD_SHIPPING
     // Print extraction path statistics
     {
@@ -297,6 +319,7 @@ void FRGLSceneManager::InitializeFromWorld(UWorld* World)
             if (Pair.Value.bIsStatic) ++StaticCount; else ++DynamicCount;
         }
         RGLLog::Info("[DEBUG] Entity mobility: Static=", StaticCount, "Dynamic=", DynamicCount);
+        RGLLog::Info("[DEBUG] ISMC entity map: components=", ISMCEntityMap.Num());
     }
 #endif
 }
@@ -835,6 +858,16 @@ bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
         return false;
     }
 
+    // ISMC branch: expand all instances into separate RGL entities
+    if (UInstancedStaticMeshComponent* ISMComp = Cast<UInstancedStaticMeshComponent>(Component))
+    {
+        if (ISMCEntityMap.Contains(ISMComp))
+        {
+            return false;
+        }
+        return RegisterISMComponent(ISMComp);
+    }
+
     UStaticMesh* StaticMesh = Component->GetStaticMesh();
     if (!StaticMesh)
     {
@@ -909,6 +942,100 @@ void FRGLSceneManager::UnregisterComponent(UStaticMeshComponent* Component)
     EntityMap.Remove(Component);
 }
 
+bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Component)
+{
+    if (!IsValid(Component))
+    {
+        return false;
+    }
+
+    UStaticMesh* StaticMesh = Component->GetStaticMesh();
+    if (!StaticMesh)
+    {
+        return false;
+    }
+
+    rgl_mesh_t RGLMesh = UploadMesh(StaticMesh);
+    if (!RGLMesh)
+    {
+        return false;
+    }
+
+    const int32 NumInstances = Component->GetInstanceCount();
+    if (NumInstances <= 0)
+    {
+        return false;
+    }
+
+    FISMCEntityGroup Group;
+    Group.Component = Component;
+    Group.InstanceCount = NumInstances;
+    Group.Entities.Reserve(NumInstances);
+
+    int32 SuccessCount = 0;
+    for (int32 i = 0; i < NumInstances; ++i)
+    {
+        FTransform InstanceTransform;
+        if (!Component->GetInstanceTransform(i, InstanceTransform, /*bWorldSpace=*/true))
+        {
+            continue;
+        }
+
+        // Skip instances with zero/near-zero scale
+        const FVector Scale = InstanceTransform.GetScale3D();
+        if (FMath::IsNearlyZero(Scale.X) || FMath::IsNearlyZero(Scale.Y) || FMath::IsNearlyZero(Scale.Z))
+        {
+            continue;
+        }
+
+        rgl_entity_t Entity = nullptr;
+        rgl_status_t Status = rgl_entity_create(&Entity, Scene, RGLMesh);
+        if (Status != RGL_SUCCESS || !Entity)
+        {
+            continue;
+        }
+
+        rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(InstanceTransform);
+        RGL_CHECK(rgl_entity_set_transform(Entity, &RGLTransform));
+
+        Group.Entities.Add(Entity);
+        ++SuccessCount;
+    }
+
+    if (SuccessCount == 0)
+    {
+        return false;
+    }
+
+    ISMCEntityMap.Add(Component, MoveTemp(Group));
+
+    RGLLog::Info("RGLSceneManager: Registered ISMC '",
+                 TCHAR_TO_UTF8(*Component->GetName()),
+                 "' instances=", NumInstances,
+                 " entities=", SuccessCount,
+                 " mesh='", TCHAR_TO_UTF8(*StaticMesh->GetName()), "'");
+
+    return true;
+}
+
+void FRGLSceneManager::UnregisterISMComponent(UInstancedStaticMeshComponent* Component)
+{
+    FISMCEntityGroup* Group = ISMCEntityMap.Find(Component);
+    if (!Group)
+    {
+        return;
+    }
+
+    for (rgl_entity_t Entity : Group->Entities)
+    {
+        if (Entity)
+        {
+            rgl_entity_destroy(Entity);
+        }
+    }
+    ISMCEntityMap.Remove(Component);
+}
+
 // ============================================================================
 // Transform update
 // ============================================================================
@@ -976,6 +1103,7 @@ void FRGLSceneManager::UpdateTransforms()
 void FRGLSceneManager::SyncWorldComponents(UWorld* World)
 {
     TSet<UStaticMeshComponent*> CurrentComponents;
+    TSet<UInstancedStaticMeshComponent*> CurrentISMComponents;
 
     for (TActorIterator<AActor> It(World); It; ++It)
     {
@@ -995,16 +1123,27 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World)
                 continue;
             }
 
-            CurrentComponents.Add(Comp);
-
-            if (!EntityMap.Contains(Comp))
+            // Classify: ISMC or regular
+            if (UInstancedStaticMeshComponent* ISMComp = Cast<UInstancedStaticMeshComponent>(Comp))
             {
-                RegisterComponent(Comp);
+                CurrentISMComponents.Add(ISMComp);
+                if (!ISMCEntityMap.Contains(ISMComp))
+                {
+                    RegisterISMComponent(ISMComp);
+                }
+            }
+            else
+            {
+                CurrentComponents.Add(Comp);
+                if (!EntityMap.Contains(Comp))
+                {
+                    RegisterComponent(Comp);
+                }
             }
         }
     }
 
-    // Remove entities for components that no longer exist
+    // Remove regular entities for components that no longer exist
     TArray<UStaticMeshComponent*> ToRemove;
     for (auto& Pair : EntityMap)
     {
@@ -1016,6 +1155,20 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World)
     for (UStaticMeshComponent* Comp : ToRemove)
     {
         UnregisterComponent(Comp);
+    }
+
+    // Remove ISMC entities for components that no longer exist
+    TArray<UInstancedStaticMeshComponent*> ISMCToRemove;
+    for (auto& Pair : ISMCEntityMap)
+    {
+        if (!CurrentISMComponents.Contains(Pair.Key))
+        {
+            ISMCToRemove.Add(Pair.Key);
+        }
+    }
+    for (UInstancedStaticMeshComponent* Comp : ISMCToRemove)
+    {
+        UnregisterISMComponent(Comp);
     }
 }
 
