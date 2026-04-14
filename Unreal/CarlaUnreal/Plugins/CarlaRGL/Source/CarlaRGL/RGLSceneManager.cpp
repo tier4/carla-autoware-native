@@ -969,7 +969,7 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
 
     FISMCEntityGroup Group;
     Group.Component = Component;
-    Group.InstanceCount = NumInstances;
+    Group.OriginalInstanceCount = NumInstances;
     Group.Entities.Reserve(NumInstances);
 
     int32 SuccessCount = 0;

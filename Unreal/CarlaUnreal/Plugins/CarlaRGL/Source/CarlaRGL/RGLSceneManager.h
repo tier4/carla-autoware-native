@@ -58,8 +58,8 @@ public:
     /// Set sensor position for distance culling. Call before Update().
     void SetSensorPosition(const FVector& Position) { SensorPosition = Position; }
 
-    /// Set the world sync interval in simulation seconds. Default: 1.0s.
-    void SetSyncInterval(float Seconds) { SyncIntervalSeconds = Seconds; }
+    /// Set the world sync interval in simulation seconds. Default: 1.0s. Minimum: 0.1s.
+    void SetSyncInterval(float Seconds) { SyncIntervalSeconds = FMath::Max(0.1f, Seconds); }
 
     /// Check if the scene manager has been initialized.
     bool IsInitialized() const { return bInitialized; }
@@ -125,7 +125,7 @@ private:
     {
         TArray<rgl_entity_t> Entities;
         TWeakObjectPtr<UInstancedStaticMeshComponent> Component;
-        int32 InstanceCount = 0;  // Instance count at registration time (for future C-plan extension)
+        int32 OriginalInstanceCount = 0;  // Instance count at registration time (may differ from Entities.Num() due to skipped instances)
     };
     TMap<UInstancedStaticMeshComponent*, FISMCEntityGroup> ISMCEntityMap;
 
