@@ -22,6 +22,7 @@
 #include "UObject/WeakObjectPtrTemplates.h"
 #include "Engine/StaticMesh.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include <util/ue-header-guard-end.h>
 
 // Forward declarations
@@ -57,6 +58,9 @@ public:
     /// Set sensor position for distance culling. Call before Update().
     void SetSensorPosition(const FVector& Position) { SensorPosition = Position; }
 
+    /// Set the world sync interval in simulation seconds. Default: 1.0s.
+    void SetSyncInterval(float Seconds) { SyncIntervalSeconds = Seconds; }
+
     /// Check if the scene manager has been initialized.
     bool IsInitialized() const { return bInitialized; }
 
@@ -79,6 +83,12 @@ private:
 
     /// Remove an RGL entity for a destroyed component.
     void UnregisterComponent(UStaticMeshComponent* Component);
+
+    /// Register all instances of an ISMC as separate RGL entities.
+    bool RegisterISMComponent(UInstancedStaticMeshComponent* Component);
+
+    /// Remove all RGL entities for an ISMC.
+    void UnregisterISMComponent(UInstancedStaticMeshComponent* Component);
 
     /// Update all entity transforms to match current UE5 state.
     void UpdateTransforms();
@@ -110,6 +120,15 @@ private:
     };
     TMap<UStaticMeshComponent*, FEntityInfo> EntityMap;
 
+    /// ISMC entity group: one ISMC component -> N RGL entities (one per instance).
+    struct FISMCEntityGroup
+    {
+        TArray<rgl_entity_t> Entities;
+        TWeakObjectPtr<UInstancedStaticMeshComponent> Component;
+        int32 InstanceCount = 0;  // Instance count at registration time (for future C-plan extension)
+    };
+    TMap<UInstancedStaticMeshComponent*, FISMCEntityGroup> ISMCEntityMap;
+
     bool bInitialized = false;
 
     /// Frame tracking — skip Update if already done this frame
@@ -125,9 +144,9 @@ private:
     rgl_mesh_t GroundMesh = nullptr;
     rgl_entity_t GroundEntity = nullptr;
 
-    /// Frame counter for periodic full scans (every N frames).
-    uint32 FrameCounter = 0;
-    static constexpr uint32 FULL_SCAN_INTERVAL = 60;
+    /// Time-based periodic sync interval (simulation seconds).
+    float SyncIntervalSeconds = 1.0f;
+    float TimeSinceLastSync = 0.0f;
 
     // ---- Static singleton storage ----
     static TMap<UWorld*, FRGLSceneManager*> Instances;
