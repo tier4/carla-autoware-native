@@ -13,6 +13,17 @@ if (WIN32)
       --format=zip
     ${CARLA_PACKAGE_FILES}
   )
+elseif (CARLA_PACKAGE_COMPRESSION STREQUAL "pigz")
+  find_program (PIGZ_EXECUTABLE pigz)
+  if (NOT PIGZ_EXECUTABLE)
+    message (FATAL_ERROR "pigz not found. Install pigz (apt install pigz) or use -DCARLA_PACKAGE_COMPRESSION=gzip")
+  endif ()
+  find_program (TAR_EXECUTABLE tar REQUIRED)
+  cmake_path (GET CARLA_PACKAGE_ARCHIVE_PATH FILENAME _ARCHIVE_DIRNAME)
+  set (
+    COMPRESS_PACKAGE_COMMAND
+    bash -c "${TAR_EXECUTABLE} cf - -C '${CARLA_PACKAGE_PATH}' '${_ARCHIVE_DIRNAME}' | '${PIGZ_EXECUTABLE}' > '${CARLA_CURRENT_PACKAGE_PATH}.tar.gz'"
+  )
 elseif (CARLA_PACKAGE_COMPRESSION STREQUAL "zstd")
   find_program (PZSTD_EXECUTABLE pzstd)
   if (NOT PZSTD_EXECUTABLE)

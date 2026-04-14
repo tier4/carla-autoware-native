@@ -265,7 +265,7 @@ carla_option (
 
 carla_string_option (
   CARLA_PACKAGE_COMPRESSION
-  "Package compression method: gzip (default, compatible), zstd (parallel via pzstd)."
+  "Package compression method: gzip (default), pigz (parallel gzip), zstd (parallel via pzstd)."
   "gzip"
 )
 
