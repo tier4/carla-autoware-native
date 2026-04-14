@@ -328,9 +328,9 @@ void FRGLSceneManager::InitializeFromWorld(UWorld* World)
 // Mesh upload: extract vertex/index data from UStaticMesh
 // ============================================================================
 
-/// Try to extract geometry from Chaos physics collision mesh (always CPU-accessible).
-/// This is the primary path for Shipping builds where render vertex data is GPU-only.
-static bool ExtractFromChaosCollision(UStaticMesh* StaticMesh,
+/// Try to extract geometry from Chaos TriMeshes (complex collision, full triangle detail).
+/// This is the primary path — preserves concave geometry unlike ConvexElems.
+static bool ExtractFromChaosTriMeshes(UStaticMesh* StaticMesh,
                                       TArray<rgl_vec3f>& OutVertices,
                                       TArray<rgl_vec3i>& OutIndices)
 {
@@ -340,7 +340,6 @@ static bool ExtractFromChaosCollision(UStaticMesh* StaticMesh,
         return false;
     }
 
-    // Try Chaos triangle meshes (complex collision)
     if (BodySetup->ChaosTriMeshes.Num() > 0)
     {
         // Merge all tri-meshes into one vertex/index set
@@ -412,7 +411,21 @@ static bool ExtractFromChaosCollision(UStaticMesh* StaticMesh,
         return OutVertices.Num() > 0 && OutIndices.Num() > 0;
     }
 
-    // Fallback: try simple convex collision hulls
+    return false;
+}
+
+/// Fallback: extract from ConvexElems or BoxElems (simplified convex geometry).
+/// Only used as last resort — convex hulls lose concave features.
+static bool ExtractFromChaosConvexOrBox(UStaticMesh* StaticMesh,
+                                        TArray<rgl_vec3f>& OutVertices,
+                                        TArray<rgl_vec3i>& OutIndices)
+{
+    UBodySetup* BodySetup = StaticMesh->GetBodySetup();
+    if (!BodySetup)
+    {
+        return false;
+    }
+
     const FKAggregateGeom& AggGeom = BodySetup->AggGeom;
     if (AggGeom.ConvexElems.Num() > 0)
     {
@@ -751,13 +764,16 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
     TArray<rgl_vec3f> Vertices;
     TArray<rgl_vec3i> Indices;
 
-    // Strategy: Chaos collision first (AWSIM-equivalent, low poly, fast raytrace),
-    // fall back to GPU buffer readback (render mesh, high fidelity but heavy).
     // Extraction priority:
-    // 1. Chaos collision — physics-grade simplified geometry (AWSIM approach)
+    // 1. Chaos TriMeshes — complex collision with full triangle detail (fast raytrace)
     // 2. Render data (CPU access) — if bAllowCPUAccess is set
-    // 3. GPU buffer readback — render mesh from GPU (heavy, last resort)
-    if (ExtractFromChaosCollision(StaticMesh, Vertices, Indices))
+    // 3. GPU buffer readback — render mesh from GPU (full fidelity, heavy)
+    // 4. Chaos ConvexElems/BoxElems — simplified convex hulls (last resort)
+    //
+    // Note: AWSIM uses render meshes or direct collision trimeshes, never convex hulls.
+    // ConvexElems lose concave features (e.g., spiral towers become simple polyhedra).
+    // GPU readback preserves full visual fidelity, so it is preferred over ConvexElems.
+    if (ExtractFromChaosTriMeshes(StaticMesh, Vertices, Indices))
     {
 #if !UE_BUILD_SHIPPING
         ++GRGLExtractChaos;
@@ -773,6 +789,12 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
     {
 #if !UE_BUILD_SHIPPING
         ++GRGLExtractGPU;
+#endif
+    }
+    else if (ExtractFromChaosConvexOrBox(StaticMesh, Vertices, Indices))
+    {
+#if !UE_BUILD_SHIPPING
+        ++GRGLExtractChaos;  // Still count as Chaos path
 #endif
     }
     else
