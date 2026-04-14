@@ -575,6 +575,9 @@ def apply_world_settings(client, time_step_info, map_name=None, force_map_reload
     # Get Settings
     settings = world.get_settings()
 
+    # Enable CARLA built-in ROS2 (required for GNSS, IMU, camera, etc.)
+    settings.ROS2 = True
+
     # Set synchronous mode
     settings.synchronous_mode = time_step_info.synchronous_mode
     settings.fixed_delta_seconds = time_step_info.get_sim_dt()
