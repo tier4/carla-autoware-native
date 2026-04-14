@@ -201,6 +201,10 @@ if (BUILD_CARLA_SERVER)
     ${LIBCARLA_SOURCE_PATH}/third-party/pugixml/*.hpp
   )
 
+  # glibc 2.38+ compat shim (compiled as C11 to avoid __isoc23_strtol redirect)
+  set (GLIBC_COMPAT_SOURCE ${LIBCARLA_SOURCE_PATH}/carla/GlibcCompat.c)
+  set_source_files_properties (${GLIBC_COMPAT_SOURCE} PROPERTIES LANGUAGE C)
+
   carla_add_library (
     carla-server
     "Build the CARLA server."
@@ -208,6 +212,7 @@ if (BUILD_CARLA_SERVER)
     ${LIBCARLA_SERVER_SOURCES}
     ${LIBCARLA_SERVER_HEADERS_THIRD_PARTY}
     ${LIBCARLA_SERVER_SOURCES_THIRD_PARTY}
+    ${GLIBC_COMPAT_SOURCE}
   )
 
   target_link_libraries (
