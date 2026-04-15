@@ -231,7 +231,7 @@ cmd_prepare() {
     echo ""
     echo "  1. Set up CARLA (Content, UE5, standard build):"
     echo "     bash CarlaSetup.sh -i"
-    echo "     (see bash CarlaSetup.sh --help for other options)"
+    echo "     (options: -i interactive, -p skip prerequisites, -l launch editor)"
     echo ""
     echo "  2. Reconfigure CARLA with RGL and rebuild:"
     echo "     bash RglSetup.sh build"
