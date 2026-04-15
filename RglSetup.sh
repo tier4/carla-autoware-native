@@ -119,6 +119,15 @@ cmd_prepare() {
         errors=1
     fi
 
+    # vcstool (for cloning RGL extension repos)
+    if command -v vcs &>/dev/null; then
+        echo "[OK] vcstool: $(vcs --version 2>/dev/null || echo 'installed')"
+    else
+        echo "[INFO] Installing vcstool..."
+        sudo apt-get install -y python3-vcstool
+        echo "[OK] vcstool: installed"
+    fi
+
     if [ $errors -ne 0 ]; then
         echo ""
         echo "Prerequisites check failed. Fix the errors above and re-run."
@@ -152,6 +161,13 @@ cmd_prepare() {
     fi
 
     pushd "$rgl_dir" > /dev/null
+
+    # Clone extension repos defined in extensions.repos (weather, udp)
+    # These are separate repos listed in .gitignore, not included in the main RGL repo.
+    if [ -f extensions.repos ] && { [ $ext_weather -eq 1 ] || [ $ext_udp -eq 1 ]; }; then
+        echo "Importing RGL extension repositories (vcs import)..."
+        vcs import < extensions.repos
+    fi
 
     # Source ROS2
     source /opt/ros/humble/setup.bash
