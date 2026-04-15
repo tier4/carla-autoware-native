@@ -737,6 +737,72 @@ cmd_check_update() {
         _log_warn "  Cannot check for updates."
     fi
     echo ""
+
+    # --- RGL (optional) ---
+    local rgl_dir="$(dirname "$PROJECT_ROOT")/RobotecGPULidar"
+    if [ -L "$rgl_dir" ]; then
+        rgl_dir="$(readlink -f "$rgl_dir")"
+    fi
+    if [ -d "$rgl_dir" ] && [ -d "$rgl_dir/.git" ]; then
+        echo "----------------------------------------"
+        echo "[RGL] Checking for updates..."
+        echo "----------------------------------------"
+        (
+            cd "$rgl_dir"
+            git fetch --quiet 2>/dev/null || {
+                _log_warn "git fetch failed for RGL"
+                exit 0
+            }
+            local new_commits
+            new_commits="$(git log HEAD..@{upstream} --oneline 2>/dev/null || true)"
+            if [ -n "$new_commits" ]; then
+                local count
+                count="$(echo "$new_commits" | wc -l)"
+                _log_info "$count new commit(s) on upstream:"
+                echo "$new_commits" | sed 's/^/  /' >&2
+                echo "" >&2
+                echo "  RGL is shared via symlink — updates affect all environments." >&2
+                echo "  To update:" >&2
+                echo "    cd $rgl_dir && git pull" >&2
+                echo "  Then rebuild RGL:" >&2
+                echo "    bash RglSetup.sh prepare --skip-rgl-build  # or full rebuild" >&2
+            else
+                _log_info "Up to date."
+            fi
+        )
+        echo ""
+
+        # Check RGL extensions (weather, udp, etc.)
+        for ext_dir in "$rgl_dir"/extensions/*/; do
+            [ -d "$ext_dir/.git" ] || continue
+            local ext_name
+            ext_name="$(basename "$ext_dir")"
+            echo "----------------------------------------"
+            echo "[RGL/$ext_name] Checking for updates..."
+            echo "----------------------------------------"
+            (
+                cd "$ext_dir"
+                git fetch --quiet 2>/dev/null || {
+                    _log_warn "git fetch failed for RGL/$ext_name"
+                    exit 0
+                }
+                local new_commits
+                new_commits="$(git log HEAD..@{upstream} --oneline 2>/dev/null || true)"
+                if [ -n "$new_commits" ]; then
+                    local count
+                    count="$(echo "$new_commits" | wc -l)"
+                    _log_info "$count new commit(s) on upstream:"
+                    echo "$new_commits" | sed 's/^/  /' >&2
+                    echo "" >&2
+                    echo "  To update:" >&2
+                    echo "    cd $ext_dir && git pull" >&2
+                else
+                    _log_info "Up to date."
+                fi
+            )
+            echo ""
+        done
+    fi
 }
 
 # ---------------------------------------------------------------------------
