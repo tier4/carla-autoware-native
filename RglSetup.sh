@@ -22,7 +22,7 @@
 #   --with-udp                Enable UDP extension (disabled by default)
 #
 # Options for 'build':
-#   --package=TYPE            Build package: shipping, development, none (default: none)
+#   --package=TYPE            shipping, development, launch, none (default: none)
 
 set -e
 
@@ -227,8 +227,25 @@ cmd_prepare() {
     echo "  RglSetup.sh prepare completed!"
     echo "========================================================================"
     echo ""
-    echo "Next step: run CarlaSetup.sh"
-    echo "  bash CarlaSetup.sh -i"
+    echo "Next steps:"
+    echo ""
+    echo "  1. Set up CARLA (Content, UE5, standard build):"
+    echo "     bash CarlaSetup.sh -i"
+    echo "     (see bash CarlaSetup.sh --help for other options)"
+    echo ""
+    echo "  2. Reconfigure CARLA with RGL and rebuild:"
+    echo "     bash RglSetup.sh build"
+    echo "     bash RglSetup.sh build --package=shipping      # with Shipping package"
+    echo "     bash RglSetup.sh build --package=development   # with Development package"
+    echo "     bash RglSetup.sh build --package=launch        # open UE5 editor"
+    echo ""
+    echo "  Manual cmake build (after step 2):"
+    echo "     export CARLA_UNREAL_ENGINE_PATH=\$(realpath ../UnrealEngine5_carla)"
+    echo "     cmake --build Build                              # rebuild"
+    echo "     cmake --build Build --target package             # Shipping package"
+    echo "     cmake --build Build --target package-development # Development package"
+    echo "     cmake --build Build --target launch              # UE5 editor"
+    echo ""
 }
 
 # ============================================================================
@@ -298,11 +315,15 @@ cmd_build() {
             cmake --build Build --target package-development
             echo "[OK] Development package built."
             ;;
+        launch)
+            echo "Launching UE5 editor..."
+            cmake --build Build --target launch
+            ;;
         none)
             echo "[SKIP] Package build (--package=none)"
             ;;
         *)
-            echo "[ERROR] Unknown package type: $package_type (expected: shipping, development, none)"
+            echo "[ERROR] Unknown package type: $package_type (expected: shipping, development, launch, none)"
             exit 1
             ;;
     esac
