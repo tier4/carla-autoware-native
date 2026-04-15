@@ -119,15 +119,6 @@ cmd_prepare() {
         errors=1
     fi
 
-    # vcstool (for cloning RGL extension repos)
-    if command -v vcs &>/dev/null; then
-        echo "[OK] vcstool: $(vcs --version 2>/dev/null || echo 'installed')"
-    else
-        echo "[INFO] Installing vcstool..."
-        sudo apt-get install -y python3-vcstool
-        echo "[OK] vcstool: installed"
-    fi
-
     # patchelf (required by RGL ros2_standalone build)
     if command -v patchelf &>/dev/null; then
         echo "[OK] patchelf: installed"
@@ -171,11 +162,21 @@ cmd_prepare() {
 
     pushd "$rgl_dir" > /dev/null
 
-    # Clone extension repos defined in extensions.repos (weather, udp)
-    # These are separate repos listed in .gitignore, not included in the main RGL repo.
-    if [ -f extensions.repos ] && { [ $ext_weather -eq 1 ] || [ $ext_udp -eq 1 ]; }; then
-        echo "Importing RGL extension repositories (vcs import)..."
-        vcs import < extensions.repos
+    # Clone extension repos (separate repos, .gitignored in main RGL repo).
+    # URLs and branches are parsed from extensions.repos to stay in sync with RGL upstream.
+    if [ $ext_weather -eq 1 ] && [ ! -d "extensions/weather" ]; then
+        local weather_url weather_branch
+        weather_url=$(python3 -c "import yaml; d=yaml.safe_load(open('extensions.repos')); print(d['repositories']['extensions/weather']['url'])")
+        weather_branch=$(python3 -c "import yaml; d=yaml.safe_load(open('extensions.repos')); print(d['repositories']['extensions/weather']['version'])")
+        echo "Cloning RGL weather extension ($weather_branch)..."
+        git clone -b "$weather_branch" "$weather_url" extensions/weather
+    fi
+    if [ $ext_udp -eq 1 ] && [ ! -d "extensions/udp" ]; then
+        local udp_url udp_branch
+        udp_url=$(python3 -c "import yaml; d=yaml.safe_load(open('extensions.repos')); print(d['repositories']['extensions/udp']['url'])")
+        udp_branch=$(python3 -c "import yaml; d=yaml.safe_load(open('extensions.repos')); print(d['repositories']['extensions/udp']['version'])")
+        echo "Cloning RGL UDP extension ($udp_branch)..."
+        git clone -b "$udp_branch" "$udp_url" extensions/udp
     fi
 
     # Source ROS2
