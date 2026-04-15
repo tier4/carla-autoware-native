@@ -152,6 +152,22 @@ cmd_prepare() {
         return
     fi
 
+    # Detect symlink (shared via build-share.sh) — skip to avoid modifying shared RGL
+    if [ -L "$rgl_dir" ]; then
+        local rgl_target
+        rgl_target="$(readlink -f "$rgl_dir")"
+        echo "[INFO] RGL is a symlink to a shared environment:"
+        echo "  $rgl_dir → $rgl_target"
+        if [ -f "$rgl_dir/build/lib/libRobotecGPULidar.so" ]; then
+            echo "[OK] Shared RGL is already built. Skipping prepare."
+        else
+            echo "[WARNING] Shared RGL has no build artifacts."
+            echo "  Build RGL in the original environment first:"
+            echo "    cd $rgl_target && bash ../CarlaUE5/RglSetup.sh prepare --optix-dir=..."
+        fi
+        return
+    fi
+
     # Clone if not present
     if [ -d "$rgl_dir" ]; then
         echo "[OK] RGL repository found: $rgl_dir"

@@ -739,14 +739,20 @@ cmd_check_update() {
     echo ""
 
     # --- RGL (optional) ---
-    local rgl_dir="$(dirname "$PROJECT_ROOT")/RobotecGPULidar"
-    if [ -L "$rgl_dir" ]; then
-        rgl_dir="$(readlink -f "$rgl_dir")"
+    local rgl_link="$(dirname "$PROJECT_ROOT")/RobotecGPULidar"
+    local rgl_is_symlink=0
+    local rgl_dir="$rgl_link"
+    if [ -L "$rgl_link" ]; then
+        rgl_is_symlink=1
+        rgl_dir="$(readlink -f "$rgl_link")"
     fi
     if [ -d "$rgl_dir" ] && [ -d "$rgl_dir/.git" ]; then
         echo "----------------------------------------"
         echo "[RGL] Checking for updates..."
         echo "----------------------------------------"
+        if [ $rgl_is_symlink -eq 1 ]; then
+            _log_info "RGL is a symlink: $rgl_link → $rgl_dir"
+        fi
         (
             cd "$rgl_dir"
             git fetch --quiet 2>/dev/null || {
@@ -761,11 +767,19 @@ cmd_check_update() {
                 _log_info "$count new commit(s) on upstream:"
                 echo "$new_commits" | sed 's/^/  /' >&2
                 echo "" >&2
-                echo "  RGL is shared via symlink — updates affect all environments." >&2
-                echo "  To update:" >&2
-                echo "    cd $rgl_dir && git pull" >&2
-                echo "  Then rebuild RGL:" >&2
-                echo "    bash RglSetup.sh prepare --skip-rgl-build  # or full rebuild" >&2
+                if [ $rgl_is_symlink -eq 1 ]; then
+                    echo "  This RGL is a symlink to: $rgl_dir" >&2
+                    echo "  Update and rebuild in the original environment:" >&2
+                    echo "    cd $rgl_dir && git pull" >&2
+                    echo "  Changes will be reflected here via symlink." >&2
+                else
+                    echo "  To update:" >&2
+                    echo "    cd $rgl_dir && git pull" >&2
+                    echo "  Then rebuild RGL (in this directory):" >&2
+                    echo "    bash RglSetup.sh prepare --optix-dir=..." >&2
+                    echo "  NOTE: This RGL may be shared by other environments via symlink." >&2
+                    echo "        Rebuilding may affect all linked environments." >&2
+                fi
             else
                 _log_info "Up to date."
             fi
