@@ -128,6 +128,15 @@ cmd_prepare() {
         echo "[OK] vcstool: installed"
     fi
 
+    # patchelf (required by RGL ros2_standalone build)
+    if command -v patchelf &>/dev/null; then
+        echo "[OK] patchelf: installed"
+    else
+        echo "[INFO] Installing patchelf..."
+        sudo apt-get install -y patchelf
+        echo "[OK] patchelf: installed"
+    fi
+
     if [ $errors -ne 0 ]; then
         echo ""
         echo "Prerequisites check failed. Fix the errors above and re-run."
