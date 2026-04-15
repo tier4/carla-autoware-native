@@ -32,6 +32,8 @@ public:
     virtual ~IRGLBackend() = default;
     virtual FRGLSessionHandle CreateSession(const FRGLSessionConfig& Config, UWorld* World) = 0;
     virtual void DestroySession(FRGLSessionHandle Handle) = 0;
+    /// Set simulation time (elapsed since episode start) for ROS2 timestamp synchronization.
+    virtual void SetSimulationTime(double InSimulationTime) = 0;
     virtual FRGLTickResult Tick(
         FRGLSessionHandle Handle,
         const FTransform& SensorWorldTransform,

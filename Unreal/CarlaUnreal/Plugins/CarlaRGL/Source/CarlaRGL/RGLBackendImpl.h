@@ -78,6 +78,7 @@ public:
 
     virtual FRGLSessionHandle CreateSession(const FRGLSessionConfig& Config, UWorld* World) override;
     virtual void DestroySession(FRGLSessionHandle Handle) override;
+    virtual void SetSimulationTime(double InSimulationTime) override { SimulationTime = InSimulationTime; }
     virtual FRGLTickResult Tick(
         FRGLSessionHandle Handle,
         const FTransform& SensorWorldTransform,
@@ -87,6 +88,8 @@ public:
         bool bNeedWorldPoints) override;
 
 private:
+    double SimulationTime = -1.0;  // Elapsed since episode start; -1 = not set
+
     /// Generate ray pattern transforms for the given session.
     /// Returns the total number of rays generated.
     int32 GenerateRayPattern(FRGLSession* Session, float DeltaSeconds, float& InOutHorizontalAngle);
@@ -110,6 +113,7 @@ public:
     }
 
     virtual void DestroySession(FRGLSessionHandle /*Handle*/) override {}
+    virtual void SetSimulationTime(double /*InSimulationTime*/) override {}
 
     virtual FRGLTickResult Tick(
         FRGLSessionHandle /*Handle*/,

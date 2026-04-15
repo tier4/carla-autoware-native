@@ -123,6 +123,15 @@ void ARGLLidar::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeco
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(ARGLLidar::PostPhysTick);
 
+    // Synchronize RGL scene time with CARLA episode time (same as /clock topic).
+    if (IRGLBackend* RGLBackend = FRGLBackendRegistry::Get())
+    {
+        if (UCarlaEpisode* Episode = UCarlaStatics::GetCurrentEpisode(World))
+        {
+            RGLBackend->SetSimulationTime(Episode->GetElapsedGameTime());
+        }
+    }
+
     // Use the sensor tick interval instead of the physics step delta.
     // PostPhysTick receives the physics step (e.g., 0.01s at 100Hz), but
     // the LiDAR should simulate the full sensor_tick period (e.g., 0.1s at 10Hz)

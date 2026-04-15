@@ -719,7 +719,7 @@ FRGLTickResult FRGLBackendImpl::Tick(
     if (World)
     {
         FRGLSceneManager& SceneMgr = FRGLSceneManager::GetInstance(World);
-        SceneMgr.Update(World);
+        SceneMgr.Update(World, SimulationTime);
     }
 
     // 2. Ray pattern: generate once, then cache (same DeltaSeconds = same pattern)

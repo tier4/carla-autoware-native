@@ -49,7 +49,10 @@ public:
 
     /// Synchronize UE5 world geometry with RGL scene.
     /// Should be called each frame before raytrace.
-    void Update(UWorld* World);
+    /// @param SimulationTime Elapsed simulation time in seconds (from episode start).
+    ///        Used for RGL scene time and ROS2 timestamp synchronization.
+    ///        Pass -1.0 to fall back to World->GetTimeSeconds().
+    void Update(UWorld* World, double SimulationTime = -1.0);
 
     /// Update ground plane position to follow the sensor.
     /// Uses a UE5 line trace to detect actual ground level.

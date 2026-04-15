@@ -139,7 +139,7 @@ void FRGLSceneManager::DestroyInstance(UWorld* World)
 // Update: called each frame before raytrace
 // ============================================================================
 
-void FRGLSceneManager::Update(UWorld* World)
+void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
 {
     if (!World)
     {
@@ -168,9 +168,11 @@ void FRGLSceneManager::Update(UWorld* World)
         TimeSinceLastSync = 0.0f;
     }
 
-    // Update scene time for velocity computation
-    const double GameTime = World->GetTimeSeconds();
-    const uint64 TimeNs = static_cast<uint64>(GameTime * 1e9);
+    // Update scene time for velocity computation and ROS2 timestamp synchronization.
+    // Use SimulationTime (elapsed since episode start) if provided, otherwise fall back
+    // to World->GetTimeSeconds() which includes UE5 engine startup time (~7s offset).
+    const double SceneTime = (SimulationTime >= 0.0) ? SimulationTime : World->GetTimeSeconds();
+    const uint64 TimeNs = static_cast<uint64>(SceneTime * 1e9);
     RGL_CHECK(rgl_scene_set_time(Scene, TimeNs));
 
     // Update only dynamic entity transforms (static entities skip after first set)
