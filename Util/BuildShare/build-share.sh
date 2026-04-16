@@ -404,14 +404,14 @@ _do_rgl_link() {
 # Config file generation
 # ---------------------------------------------------------------------------
 
-# Write .carla-env.conf to the current project root.
+# Write build-share.conf to the BuildShare directory.
 # Empty arguments preserve existing values (merge semantics).
 _write_config() {
     local source_project="$1"
     local engine_source="$2"
     local engine_clone="$3"
     local content_source="$4"
-    local conf_file="$PROJECT_ROOT/.carla-env.conf"
+    local conf_file="$SCRIPT_DIR/build-share.conf"
 
     # Merge with existing config if present
     if [ -f "$conf_file" ]; then
@@ -432,12 +432,12 @@ EOF
     _log_info "Config written: $conf_file"
 }
 
-# Read .carla-env.conf. Sets global variables:
+# Read build-share.conf. Sets global variables:
 #   CONF_SOURCE_PROJECT, CONF_ENGINE_SOURCE, CONF_ENGINE_CLONE, CONF_CONTENT_SOURCE
 _read_config() {
-    local conf_file="$PROJECT_ROOT/.carla-env.conf"
+    local conf_file="$SCRIPT_DIR/build-share.conf"
     if [ ! -f "$conf_file" ]; then
-        _log_error "No .carla-env.conf found in $PROJECT_ROOT"
+        _log_error "No build-share.conf found in $SCRIPT_DIR"
         _log_error "  Run 'build-share.sh setup' first."
         return 1
     fi
