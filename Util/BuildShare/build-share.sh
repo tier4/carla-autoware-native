@@ -434,11 +434,14 @@ EOF
 
 # Read build-share.conf. Sets global variables:
 #   CONF_SOURCE_PROJECT, CONF_ENGINE_SOURCE, CONF_ENGINE_CLONE, CONF_CONTENT_SOURCE
+# Read build-share.conf if it exists. Returns 1 if not found (non-fatal).
 _read_config() {
     local conf_file="$SCRIPT_DIR/build-share.conf"
+    CONF_SOURCE_PROJECT=""
+    CONF_ENGINE_SOURCE=""
+    CONF_ENGINE_CLONE=""
+    CONF_CONTENT_SOURCE=""
     if [ ! -f "$conf_file" ]; then
-        _log_error "No build-share.conf found in $SCRIPT_DIR"
-        _log_error "  Run 'build-share.sh setup' first."
         return 1
     fi
     CONF_SOURCE_PROJECT="$(grep '^source_project=' "$conf_file" | cut -d= -f2-)"
@@ -638,7 +641,8 @@ cmd_setup() {
 }
 
 cmd_check_update() {
-    _read_config
+    local has_config=1
+    _read_config || has_config=0
 
     # --- Content ---
     echo "----------------------------------------"
@@ -698,9 +702,16 @@ cmd_check_update() {
     elif [ -n "${CONF_ENGINE_SOURCE:-}" ]; then
         engine_origin="$CONF_ENGINE_SOURCE"
     fi
+    # Fallback: try sibling directory (original environment without build-share.conf)
+    if [ -z "$engine_origin" ]; then
+        local ue5_fallback="$(dirname "$PROJECT_ROOT")/UnrealEngine5_carla"
+        if [ -d "$ue5_fallback/.git" ]; then
+            engine_origin="$ue5_fallback"
+        fi
+    fi
 
     if [ -z "$engine_origin" ]; then
-        _log_warn "Cannot determine engine source. No origin recorded."
+        _log_warn "Cannot determine engine source."
     elif [ ! -d "$engine_origin" ]; then
         _log_warn "Engine origin directory does not exist: $engine_origin"
     elif [ -d "$engine_origin/.git" ]; then
@@ -721,13 +732,15 @@ cmd_check_update() {
                 echo "  Each engine environment is independent after cloning." >&2
                 echo "  The clone has no .git — it cannot be updated in place." >&2
                 echo "" >&2
-                echo "  To update the ORIGINAL engine (affects future clones):" >&2
+                echo "  To update engine:" >&2
                 echo "    cd $engine_origin && git pull && make" >&2
-                echo "" >&2
-                echo "  To update THIS environment's engine clone:" >&2
-                echo "    rm -rf ${CONF_ENGINE_CLONE}" >&2
-                echo "    build-share.sh engine $(dirname "${CONF_SOURCE_PROJECT}")" >&2
-                echo "    (then rebuild CARLA: ninja -C Build)" >&2
+                if [ -n "${CONF_ENGINE_CLONE:-}" ]; then
+                    echo "" >&2
+                    echo "  To update THIS environment's engine clone:" >&2
+                    echo "    rm -rf ${CONF_ENGINE_CLONE}" >&2
+                    echo "    build-share.sh engine $(dirname "${CONF_SOURCE_PROJECT}")" >&2
+                    echo "    (then rebuild CARLA)" >&2
+                fi
             else
                 _log_info "Up to date."
             fi
