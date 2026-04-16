@@ -1,7 +1,7 @@
 # activate.sh
 #
 # Source this file to update CARLA_UNREAL_ENGINE_PATH to the cloned engine.
-# Usage: source Util/BuildShare/activate.sh
+# Usage: source Util/BuildDependencyShare/activate.sh
 #
 # Can be run from any directory — resolves paths relative to the script location.
 
@@ -10,7 +10,7 @@ _PROJECT_ROOT="$(cd "$_SCRIPT_DIR/../.." && pwd -P)"
 _CLONE_PATH_FILE="$_PROJECT_ROOT/.ue5_engine_clone_path"
 
 if [ ! -f "$_CLONE_PATH_FILE" ]; then
-    echo "ERROR: No engine clone found. Run 'Util/BuildShare/build-share.sh setup' first." >&2
+    echo "ERROR: No engine clone found. Run 'Util/BuildDependencyShare/build-dependency-share.sh setup' first." >&2
     unset _SCRIPT_DIR _PROJECT_ROOT _CLONE_PATH_FILE
     return 1 2>/dev/null || true
 fi
