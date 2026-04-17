@@ -1,7 +1,7 @@
 #!/bin/bash
 # RglSetup.sh — RobotecGPULidar setup for CARLA.
 #
-# Two-step workflow (run CarlaSetup.sh between them):
+# Three-step workflow (run CarlaSetup.sh between them):
 #   1. bash RglSetup.sh prepare [OPTIONS]   # Check prerequisites, clone+build RGL
 #   2. bash CarlaSetup.sh -i                # Standard CARLA setup (user runs this)
 #   3. bash RglSetup.sh build [OPTIONS]     # Reconfigure CARLA with RGL, rebuild
