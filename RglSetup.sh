@@ -17,9 +17,9 @@
 #   --skip-rgl-build          Skip RGL build (use pre-built library)
 #   --no-pcl                  Disable PCL extension
 #   --no-ros2-standalone      Disable ROS2 standalone extension
-#   --no-weather              Disable weather extension
 #   --no-agnocast             Disable Agnocast extension
-#   --with-udp                Enable UDP extension (disabled by default)
+#   --with-weather            Enable weather extension (disabled by default, private repo)
+#   --with-udp                Enable UDP extension (disabled by default, private repo)
 #
 # Options for 'build':
 #   --package=TYPE            shipping, development, launch, none (default: none)
@@ -50,7 +50,7 @@ cmd_prepare() {
     # RGL extensions (1=enabled, 0=disabled)
     local ext_pcl=1
     local ext_ros2_standalone=1
-    local ext_weather=1
+    local ext_weather=0
     local ext_agnocast=1
     local ext_udp=0
 
@@ -62,8 +62,8 @@ cmd_prepare() {
             --skip-rgl-build) skip_rgl_build=1; shift ;;
             --no-pcl)             ext_pcl=0; shift ;;
             --no-ros2-standalone) ext_ros2_standalone=0; shift ;;
-            --no-weather)         ext_weather=0; shift ;;
             --no-agnocast)        ext_agnocast=0; shift ;;
+            --with-weather)       ext_weather=1; shift ;;
             --with-udp)           ext_udp=1; shift ;;
             *) echo "Unknown option for prepare: $1"; usage ;;
         esac
