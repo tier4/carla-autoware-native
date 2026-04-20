@@ -1,0 +1,11 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1",
+  "FriendlyName": "T4",
+  "Description": "Team assets (TrafficLight etc.)",
+  "Category": "T4",
+  "CanContainContent": true,
+  "IsBetaVersion": true,
+  "Installed": false
+}
