@@ -38,6 +38,105 @@ usage() {
 }
 
 # ============================================================================
+# Helper: verify_cmake_cache_path
+# ----------------------------------------------------------------------------
+# Detect stale CMake cache from a relocated workspace and wipe the build dir
+# when its CMAKE_HOME_DIRECTORY no longer matches the expected source path.
+# Arguments:
+#   $1 = build directory (e.g. /path/to/RobotecGPULidar/build)
+#   $2 = expected CMake source directory (CMAKE_HOME_DIRECTORY)
+# ============================================================================
+
+verify_cmake_cache_path() {
+    local build_dir="$1"
+    local expected_src="$2"
+    local cache_file="$build_dir/CMakeCache.txt"
+
+    [ -f "$cache_file" ] || return 0
+
+    local cached_src
+    cached_src=$(grep -E '^CMAKE_HOME_DIRECTORY:INTERNAL=' "$cache_file" | cut -d= -f2-)
+    [ -n "$cached_src" ] || return 0
+
+    # Compare resolved real paths so symlinks don't trigger false positives.
+    local expected_real cached_real
+    expected_real=$(realpath -m "$expected_src")
+    cached_real=$(realpath -m "$cached_src" 2>/dev/null || echo "$cached_src")
+
+    if [ "$expected_real" != "$cached_real" ]; then
+        echo "[INFO] Stale CMake cache detected in $build_dir"
+        echo "  cached source: $cached_src"
+        echo "  expected:      $expected_src"
+        echo "  Removing $build_dir to force reconfiguration..."
+        rm -rf "$build_dir"
+    fi
+}
+
+# ============================================================================
+# Helper: verify_cmake_subcache_sources_exist
+# ----------------------------------------------------------------------------
+# Walk every CMakeCache.txt under a build root and delete the enclosing build
+# directory when its CMAKE_HOME_DIRECTORY no longer exists. Catches
+# ExternalProject sub-builds whose SOURCE_DIR was moved/renamed in the parent
+# CMakeLists.txt — those sub-caches hold stale absolute source paths that the
+# top-level Build/CMakeCache.txt check cannot detect.
+# Arguments:
+#   $1 = build root to scan (e.g. $workspace_path/Build)
+# ============================================================================
+
+verify_cmake_subcache_sources_exist() {
+    local build_root="$1"
+    [ -d "$build_root" ] || return 0
+
+    local cache_file sub_build_dir cached_src
+    while IFS= read -r -d '' cache_file; do
+        sub_build_dir="$(dirname "$cache_file")"
+        cached_src=$(grep -E '^CMAKE_HOME_DIRECTORY:INTERNAL=' "$cache_file" | cut -d= -f2-)
+        if [ -n "$cached_src" ] && [ ! -d "$cached_src" ]; then
+            echo "[INFO] Stale CMake sub-cache (source missing): $sub_build_dir"
+            echo "  cached source: $cached_src (does not exist)"
+            echo "  Removing $sub_build_dir..."
+            rm -rf "$sub_build_dir"
+        fi
+    done < <(find "$build_root" -name CMakeCache.txt -print0 2>/dev/null)
+}
+
+# ============================================================================
+# Helper: verify_colcon_install_path
+# ----------------------------------------------------------------------------
+# Detect stale colcon build artifacts from a relocated workspace. colcon bakes
+# the absolute install prefix into generated setup.sh files; if they no longer
+# match the current location, later `source install/setup.sh` lookups fail and
+# find_package() can't resolve the packages. Delete both build/ and install/
+# so the next install-*-deps step rebuilds them in-place.
+# Arguments:
+#   $1 = colcon workspace root (e.g. $rgl_dir/external/agnocast)
+# ============================================================================
+
+verify_colcon_install_path() {
+    local colcon_ws="$1"
+    local setup_sh="$colcon_ws/install/setup.sh"
+
+    [ -f "$setup_sh" ] || return 0
+
+    local cached_prefix
+    cached_prefix=$(grep -m1 -E '^_colcon_prefix_chain_sh_COLCON_CURRENT_PREFIX=' "$setup_sh" | cut -d= -f2-)
+    [ -n "$cached_prefix" ] || return 0
+
+    local expected_real cached_real
+    expected_real=$(realpath -m "$colcon_ws/install")
+    cached_real=$(realpath -m "$cached_prefix" 2>/dev/null || echo "$cached_prefix")
+
+    if [ "$expected_real" != "$cached_real" ]; then
+        echo "[INFO] Stale colcon install detected in $colcon_ws/install"
+        echo "  cached prefix: $cached_prefix"
+        echo "  expected:      $colcon_ws/install"
+        echo "  Removing $colcon_ws/{build,install,log} to force rebuild..."
+        rm -rf "$colcon_ws/build" "$colcon_ws/install" "$colcon_ws/log"
+    fi
+}
+
+# ============================================================================
 # Subcommand: prepare
 # ============================================================================
 
@@ -176,6 +275,18 @@ cmd_prepare() {
         git clone -b "$rgl_branch" "$rgl_repo" "$rgl_dir"
     fi
 
+    # Detect stale CMake cache from a relocated workspace (e.g. renamed parent dir)
+    # and wipe the build dir so setup.py can reconfigure cleanly.
+    verify_cmake_cache_path "$rgl_dir/build" "$rgl_dir"
+
+    # Scan all external/ and extensions/ subdirs for stale colcon installs.
+    # Forward-compatible: any current or future colcon-built dependency (agnocast,
+    # radar_msgs, UDP/weather private extensions, etc.) is detected automatically.
+    for _colcon_ws in "$rgl_dir"/external/*/ "$rgl_dir"/extensions/*/; do
+        [ -d "$_colcon_ws" ] || continue
+        verify_colcon_install_path "${_colcon_ws%/}"
+    done
+
     pushd "$rgl_dir" > /dev/null
 
     # Clone extension repos (separate repos, .gitignored in main RGL repo).
@@ -300,6 +411,16 @@ cmd_build() {
     echo "CARLA_UNREAL_ENGINE_PATH=$CARLA_UNREAL_ENGINE_PATH"
 
     cd "$workspace_path"
+
+    # Detect stale CMake cache from a relocated workspace and wipe Build/ so cmake
+    # can reconfigure cleanly. (ExternalProject sub-caches under Build/ are also
+    # wiped along with the parent directory.)
+    verify_cmake_cache_path "$workspace_path/Build" "$workspace_path"
+
+    # Also catch sub-cache drift: e.g. an ExternalProject whose SOURCE_DIR was
+    # moved in CMakeLists.txt (parent workspace unchanged). The top-level cache
+    # passes the check, but the sub-build still references the old path.
+    verify_cmake_subcache_sources_exist "$workspace_path/Build"
 
     # Reconfigure with RGL
     echo ""
