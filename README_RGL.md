@@ -231,6 +231,5 @@ not yet implemented.
 ## See also
 
 - [README.md](README.md) — standard CARLA UE5 build instructions.
-- [../docs/README_RGL-ja.md](../docs/README_RGL-ja.md) — Japanese translation.
 - [RobotecGPULidar](https://github.com/RobotecAI/RobotecGPULidar) — upstream
   RGL repository.
