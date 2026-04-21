@@ -1,0 +1,236 @@
+CARLA with RobotecGPULidar (RGL)
+================================
+
+This document describes how to build and run CARLA with
+[RobotecGPULidar (RGL)](https://github.com/RobotecAI/RobotecGPULidar) — a
+GPU-accelerated ray-traced LiDAR simulation library. The setup is driven by
+`RglSetup.sh`, which complements the standard `CarlaSetup.sh` flow with the
+steps required to clone, build and integrate RGL and its dependencies.
+
+> [!NOTE]
+> RGL integration requires an NVIDIA GPU, CUDA, NVIDIA OptiX SDK 7.2 and
+> ROS 2 Humble on the host machine. The GPU LiDAR pipeline also uses the
+> `RclcppBridge` helper library under
+> `Unreal/CarlaUnreal/Plugins/CarlaRGL/ThirdParty/RclcppBridge` to coordinate
+> rclcpp/DDS domain ownership between CARLA and RGL.
+
+## Recommended system
+
+* Intel i7 gen 9th - 11th / Intel i9 gen 9th - 11th / AMD Ryzen 7 / AMD Ryzen 9
+* +32 GB RAM
+* NVIDIA RTX 3070 / 3080 / 3090 / RTX 4090 / RTX 5090 or better
+* 16 GB or more VRAM
+* Ubuntu 22.04 (Ubuntu 24.04 not yet verified)
+* CUDA Toolkit (tested with 12.x)
+* NVIDIA OptiX SDK 7.2
+* ROS 2 Humble
+
+> [!NOTE]
+> Windows is not yet supported by `RglSetup.sh` — **TBD**.
+
+## Workflow overview
+
+RGL integration uses a three-step workflow. `CarlaSetup.sh` is run between
+the two `RglSetup.sh` invocations:
+
+```
+1. bash RglSetup.sh prepare [OPTIONS]   # Check prerequisites, clone+build RGL
+2. bash CarlaSetup.sh -i                # Standard CARLA setup
+3. bash RglSetup.sh build  [OPTIONS]    # Reconfigure CARLA with RGL, rebuild
+```
+
+Step 1 stages the RGL library and its colcon-built dependencies
+(`agnocast`, `radar_msgs`, …). Step 2 runs the standard CARLA setup (Unreal
+Engine download, content, initial build). Step 3 reconfigures CMake with
+`ENABLE_RGL=ON` and rebuilds CARLA so that the CarlaRGL plugin is linked in.
+
+## Building CARLA with RGL
+
+### Step 1 — `prepare`
+
+Run from the CARLA root directory (`CarlaUE5/`):
+
+```sh
+cd CarlaUE5
+bash RglSetup.sh prepare --optix-dir=/path/to/NVIDIA-OptiX-SDK-7.2.0-linux64-x86_64
+```
+
+What it does:
+
+1. Verifies CUDA, OptiX SDK, ROS 2 Humble and `patchelf` are available.
+2. Clones `RobotecGPULidar/` alongside `CarlaUE5/` (git branch: `develop`).
+3. Sources `/opt/ros/humble/setup.bash` and installs RGL core, PCL, ROS 2 and
+   Agnocast dependencies via `python3 setup.py --install-*-deps`.
+4. Builds RGL with the selected extensions and produces
+   `RobotecGPULidar/build/lib/libRobotecGPULidar.so`.
+
+> [!NOTE]
+> You can also set `OptiX_INSTALL_DIR` in the environment instead of passing
+> `--optix-dir=`.
+
+### Step 2 — `CarlaSetup.sh`
+
+Run the standard CARLA setup to download Unreal Engine 5, content and
+produce a first CARLA build:
+
+```sh
+bash CarlaSetup.sh -i
+```
+
+See [README.md](README.md) for full `CarlaSetup.sh` usage.
+
+> [!IMPORTANT]
+> Do **not** use `CarlaSetup.sh -l` here — it launches the editor *without*
+> RGL. RGL is only enabled after Step 3.
+
+### Step 3 — `build`
+
+Reconfigure CMake with `ENABLE_RGL=ON` and rebuild:
+
+```sh
+bash RglSetup.sh build                       # rebuild only
+bash RglSetup.sh build --package=shipping    # + build Shipping package
+bash RglSetup.sh build --package=development # + build Development package
+bash RglSetup.sh build --package=launch      # + open UE5 editor with RGL
+```
+
+The script:
+
+1. Detects and wipes stale CMake caches under `Build/` (see
+   [Stale cache detection](#stale-cache-detection)).
+2. Runs `cmake -G Ninja -S . -B Build --toolchain=$PWD/CMake/Toolchain.cmake
+   -DENABLE_ROS2=ON -DENABLE_RGL=ON -DCARLA_DDS_VENDOR=CycloneDDS …`.
+3. Invokes `cmake --build Build` and, if requested, the package target.
+
+`RclcppBridge` is built as an ExternalProject under `Build/` using the system
+compiler (not the UE toolchain), linking against `rclcpp` from
+`/opt/ros/humble`.
+
+## Rebuilding CARLA (manual)
+
+Once `RglSetup.sh build` has succeeded once, subsequent builds can be done
+with the standard CMake commands:
+
+```sh
+export CARLA_UNREAL_ENGINE_PATH=$(realpath ../UnrealEngine5_carla)
+cmake --build Build                              # rebuild
+cmake --build Build --target package             # Shipping package
+cmake --build Build --target package-development # Development package
+cmake --build Build --target launch              # UE5 editor
+```
+
+## Running a packaged build
+
+```sh
+cd Build/Package/Carla-*-Linux-Shipping/Linux
+./CarlaUnreal.sh --ros2
+```
+
+## Command reference
+
+### `prepare` options
+
+| Option | Description |
+|---|---|
+| `--optix-dir=PATH`       | OptiX SDK path (or set `OptiX_INSTALL_DIR`) |
+| `--rgl-branch=BRANCH`    | RGL git branch (default: `develop`) |
+| `--rgl-repo=URL`         | RGL git repository URL |
+| `--skip-rgl-build`       | Skip RGL build (use pre-built library) |
+| `--no-pcl`               | Disable PCL extension |
+| `--no-ros2-standalone`   | Disable ROS 2 standalone extension |
+| `--no-agnocast`          | Disable Agnocast extension |
+| `--with-weather`         | Enable weather extension (private repo) |
+| `--with-udp`             | Enable UDP extension (private repo) |
+
+### `build` options
+
+| Option | Description |
+|---|---|
+| `--package=shipping`    | Build the CARLA Shipping package after rebuild |
+| `--package=development` | Build the CARLA Development package after rebuild |
+| `--package=launch`      | Launch the UE5 editor after rebuild |
+| `--package=none`        | (default) Rebuild only, no package step |
+
+## Stale cache detection
+
+`RglSetup.sh` detects three classes of stale build artifacts that arise when
+the workspace is renamed, copied, or when `SOURCE_DIR` changes in CMake:
+
+| Detector | Trigger | Action |
+|---|---|---|
+| `verify_cmake_cache_path`              | top-level `CMAKE_HOME_DIRECTORY` mismatch | wipe `build_dir` |
+| `verify_cmake_subcache_sources_exist`  | ExternalProject sub-cache points to a missing directory | wipe the affected sub-build only |
+| `verify_colcon_install_path`           | colcon `setup.sh` has a baked-in path from a previous workspace | wipe `build/`, `install/`, `log/` |
+
+These are invoked automatically:
+
+- `prepare`: scans `RobotecGPULidar/build/` and every colcon workspace under
+  `RobotecGPULidar/external/*/` and `RobotecGPULidar/extensions/*/`.
+- `build`:  scans `CarlaUE5/Build/` and every ExternalProject sub-cache
+  underneath it.
+
+No flags are needed — relocating the workspace is handled transparently.
+
+## Package compression
+
+### When compression runs
+
+Whether the `package*` target compresses the staged build is controlled by the
+upstream `CARLA_UNREAL_PACKAGE_NO_COMPRESSION` option. Its default depends on
+the build type (inherited from upstream CARLA, not RGL-specific):
+
+| `CARLA_UNREAL_PACKAGE_BUILD_TYPE` | `NO_COMPRESSION` default | Behavior |
+|---|---|---|
+| `Shipping`       | `OFF` | Compression runs |
+| others (Development, Debug, …) | `ON`  | Compression is skipped |
+
+Override with `-DCARLA_UNREAL_PACKAGE_NO_COMPRESSION=ON|OFF`.
+
+### Compression method
+
+When compression runs, the method is selectable via `CARLA_PACKAGE_COMPRESSION`
+(default: `pigz` — parallel gzip, auto-detects CPU cores):
+
+```sh
+cmake ... -DCARLA_PACKAGE_COMPRESSION=pigz   # .tar.gz, parallel gzip (default)
+cmake ... -DCARLA_PACKAGE_COMPRESSION=zstd   # .tar.zst, parallel zstd (pzstd)
+cmake ... -DCARLA_PACKAGE_COMPRESSION=gzip   # .tar.gz, single-threaded (compatibility)
+```
+
+`pigz` and `zstd` both auto-detect CPU cores and parallelize. Install via
+`apt install pigz` or `apt install zstd`.
+
+## Troubleshooting
+
+### `agnocastlib` not found
+
+```
+Could not find a package configuration file provided by "agnocastlib" …
+```
+
+The colcon install for Agnocast is from a different workspace. `prepare`
+detects and removes it automatically; rerun `bash RglSetup.sh prepare`.
+
+### `CMakeCache.txt directory is different than the directory …`
+
+A build directory was generated in a different workspace. `prepare` / `build`
+detect this automatically and wipe the cache; rerun the same command.
+
+### iceoryx link errors when building CycloneDDS
+
+Fixed upstream in this fork by setting `-DENABLE_SHM=OFF` in CycloneDDS's
+ExternalProject — CycloneDDS no longer picks up the system iceoryx built
+against libstdc++ while the UE toolchain uses libc++.
+
+## Windows
+
+**TBD** — `RglSetup.sh` is currently a Bash script and targets Linux
+(Ubuntu 22.04). A Windows equivalent (e.g. `RglSetup.bat` or PowerShell) is
+not yet implemented.
+
+## See also
+
+- [README.md](README.md) — standard CARLA UE5 build instructions.
+- [../docs/README_RGL-ja.md](../docs/README_RGL-ja.md) — Japanese translation.
+- [RobotecGPULidar](https://github.com/RobotecAI/RobotecGPULidar) — upstream
+  RGL repository.
