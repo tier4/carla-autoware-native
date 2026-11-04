@@ -106,12 +106,73 @@ static void ApplySkeletalCommandLineOverrides()
     }
 }
 
+// ---- Static scene sync amortization CVars ----
+// A sync that brings many new meshes into range used to extract, upload and BVH-build all of them in one
+// game-thread frame. These knobs spread that work over successive scans. Setting
+// MaxMeshCreatesPerUpdate=0, CreateBudgetMs=0, UnloadDistanceFactor=1, IdleMeshCacheMax=0 restores the
+// original single-frame behaviour (A/B).
+static TAutoConsoleVariable<int32> CVarRGLSceneMaxMeshCreatesPerUpdate(TEXT("rgl.Scene.MaxMeshCreatesPerUpdate"), 8,
+    TEXT("Most new RGL meshes or idle reactivations per scene Update; the rest wait in a nearest-first queue. "
+         "Components whose mesh already has live entities are registered at once. 0 = unlimited (original behaviour)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneCreateBudgetMs(TEXT("rgl.Scene.CreateBudgetMs"), 4.0f,
+    TEXT("Wall-time budget (ms) for mesh creation/idle reactivation per scene Update, checked between creations; "
+         "at least one creatable mesh progresses. Excludes raytrace-time GAS builds. 0 = unlimited (original behaviour)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneUnloadDistanceFactor(TEXT("rgl.Scene.UnloadDistanceFactor"), 1.0f,
+    TEXT("Static meshes unload only beyond RegistrationDistance * factor + 20 m (load radius = RegistrationDistance). "
+         "Values below 1 are treated as 1. 1 = original behaviour. Larger values keep more geometry resident (VRAM)."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLSceneIdleMeshCacheMax(TEXT("rgl.Scene.IdleMeshCacheMax"), 0,
+    TEXT("RGL meshes kept resident after their last entity is removed, for a cheap re-entry; least recently idled "
+         "is destroyed first. 0 = destroy at once (original behaviour)."), ECVF_Default);
+
+static int32 SceneMaxMeshCreatesPerUpdate() { return FMath::Max(0, CVarRGLSceneMaxMeshCreatesPerUpdate.GetValueOnGameThread()); }
+static float SceneCreateBudgetMs()          { const float V = CVarRGLSceneCreateBudgetMs.GetValueOnGameThread(); return (V > 0.0f) ? V : 0.0f; }
+static float SceneUnloadDistanceFactor()    { const float V = CVarRGLSceneUnloadDistanceFactor.GetValueOnGameThread(); return (V >= 1.0f) ? V : 1.0f; }
+static int32 SceneIdleMeshCacheMax()        { return FMath::Max(0, CVarRGLSceneIdleMeshCacheMax.GetValueOnGameThread()); }
+
+// Scene telemetry: one grep-friendly key=value line. RGLLog::Info is compiled out in Shipping (RGLLog.h),
+// and the packaged Shipping server is what the E2E runs, so Shipping prints the same line to stderr
+// (precedent: the skeletal breadcrumbs below).
+static void EmitSceneLine(const FString& Line)
+{
+#if UE_BUILD_SHIPPING
+    fprintf(stderr, "%s\n", TCHAR_TO_UTF8(*Line));
+#else
+    RGLLog::Info(TCHAR_TO_UTF8(*Line));
+#endif
+}
+
+// Shipping-safe command-line switches for the rgl.Scene.* CVars (same reasoning as the skeletal ones above).
+// Omitted switches keep the CVar defaults: 8 creates, 4 ms, unload factor 1.0, idle cache 0.
+static void ApplySceneCommandLineOverrides()
+{
+    static bool bApplied = false; if (bApplied) return; bApplied = true;
+    int32 I = 0;
+    float F = 0.0f;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-max-mesh-creates-per-update="), I))
+    {
+        CVarRGLSceneMaxMeshCreatesPerUpdate->Set(I, ECVF_SetByCommandline);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-create-budget-ms="), F))
+    {
+        CVarRGLSceneCreateBudgetMs->Set(F, ECVF_SetByCommandline);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-unload-distance-factor="), F))
+    {
+        CVarRGLSceneUnloadDistanceFactor->Set(F, ECVF_SetByCommandline);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-idle-mesh-cache-max="), I))
+    {
+        CVarRGLSceneIdleMeshCacheMax->Set(I, ECVF_SetByCommandline);
+    }
+}
+
 TMap<UWorld*, FRGLSceneManager*> FRGLSceneManager::Instances;
 
 FRGLSceneManager::FRGLSceneManager()
 {
     // Apply the Shipping-safe command-line switches before anything reads the CVars.
     ApplySkeletalCommandLineOverrides();
+    ApplySceneCommandLineOverrides();
 
     // Use the default scene (nullptr).
     // RGL treats nullptr as the implicit default scene.
@@ -164,16 +225,20 @@ FRGLSceneManager::~FRGLSceneManager()
     }
     ISMCEntityMap.Empty();
 
-    // Destroy all cached meshes
+    // Destroy all cached meshes (live and idle alike: idle meshes live in MeshCache too, so each RGL
+    // mesh is destroyed exactly once here and IdleMeshLru only drops its keys).
     for (auto& Pair : MeshCache)
     {
-        if (Pair.Value)
+        if (Pair.Value.Mesh)
         {
-            rgl_mesh_destroy(Pair.Value);
+            rgl_mesh_destroy(Pair.Value.Mesh);
         }
     }
     MeshCache.Empty();
     MeshRefCounts.Empty();
+    IdleMeshLru.Empty();
+    PendingCreates.Empty();
+    FailedMeshRetrySync.Empty();
 }
 
 FRGLSceneManager& FRGLSceneManager::GetInstance(UWorld* World)
@@ -249,33 +314,87 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
     // Track sim time for stale-sensor eviction (used inside SyncWorldComponents).
     CurrentSimTime = (SimulationTime >= 0.0) ? SimulationTime : World->GetTimeSeconds();
 
+    LogSceneConfigIfChanged();
+
     // Sync on a time interval OR when any sensor has moved far enough that newly
     // relevant geometry could be missed before the next periodic sync
     // (Phase 1: high-speed safety).
+    // All three conditions are evaluated (the sensor loop is a handful of entries) so the telemetry can
+    // name the trigger; whether a sync happens is unchanged (any of them).
     TimeSinceLastSync += World->GetDeltaSeconds();
-    bool bShouldSync = (TimeSinceLastSync >= SyncIntervalSeconds);
-    if (!bShouldSync)
+    const bool bTimeDue = (TimeSinceLastSync >= SyncIntervalSeconds);
+    bool bNewSensor = false;   // a sensor without a previous sync (startup, newly spawned or re-registered sensor)
+    bool bMoved = false;
+    for (const auto& Pair : RegisteredSensors)
     {
-        for (const auto& Pair : RegisteredSensors)
+        const FSensorRegistration& S = Pair.Value;
+        const float TriggerCm = 0.2f * S.RegistrationDistanceCm;
+        if (!S.bLastSyncValid)
         {
-            const FSensorRegistration& S = Pair.Value;
-            const float TriggerCm = 0.2f * S.RegistrationDistanceCm;
-            if (!S.bLastSyncValid || FVector::Dist(S.Position, S.LastSyncPosition) > TriggerCm)
-            {
-                bShouldSync = true;
-                break;
-            }
+            bNewSensor = true;
+        }
+        else if (FVector::Dist(S.Position, S.LastSyncPosition) > TriggerCm)
+        {
+            bMoved = true;
         }
     }
+    const bool bShouldSync = bTimeDue || bNewSensor || bMoved;
+
+    const double StepStartSeconds = FPlatformTime::Seconds();
+    FSceneSyncStats SyncStats;
     if (bShouldSync)
     {
-        SyncWorldComponents(World);
+        SyncWorldComponents(World, SyncStats);
         TimeSinceLastSync = 0.0f;
         for (auto& Pair : RegisteredSensors)
         {
             Pair.Value.LastSyncPosition = Pair.Value.Position;
             Pair.Value.bLastSyncValid = true;
         }
+    }
+
+    // Time-sliced creation of the meshes queued by this or an earlier sync: a step on every Update, sync
+    // due or not. A sensor's first sync (startup, or a sensor spawned later) is drained in full, as before:
+    // that is not the driving stall, and localization start-up should see the complete scene.
+    if (!QueueEpisode.bActive && PendingCreates.Num() > 0)
+    {
+        QueueEpisode = FQueueEpisode();
+        QueueEpisode.bActive = true;
+        QueueEpisode.StartSimTime = CurrentSimTime;
+    }
+    FDrainStats Drain;
+    DrainPendingCreates(/*bUnlimited=*/bNewSensor, Drain);
+    if (QueueEpisode.bActive)
+    {
+        ++QueueEpisode.Updates;
+        QueueEpisode.Created += Drain.Created;
+        QueueEpisode.Failed += Drain.Failed;
+        QueueEpisode.Dropped += Drain.Dropped;
+    }
+
+    if (bShouldSync)
+    {
+        const double ElapsedMs = (FPlatformTime::Seconds() - StepStartSeconds) * 1000.0;
+        const TCHAR* Trigger = bNewSensor ? TEXT("init") : (bMoved ? TEXT("distance") : TEXT("time"));
+        EmitSceneLine(FString::Printf(
+            TEXT("rgl_scene_sync t=%.3f trigger=%s scanned=%d added_cached=%d queued=%d created=%d removed=%d "
+                 "idle_destroyed=%d pending=%d elapsed_ms=%.2f drain_ms=%.2f failed=%d drain_reused=%d dropped=%d "
+                 "range_skipped=%d sensors=%d entities=%d ismc=%d meshes=%d idle=%d"),
+            CurrentSimTime, Trigger, SyncStats.ScannedActors, SyncStats.AddedCached, SyncStats.Queued,
+            Drain.Created, SyncStats.Removed, IdleDestroyedSinceLog, PendingCreates.Num(), ElapsedMs, Drain.Ms,
+            MeshFailuresSinceLog, Drain.RegisteredCached, Drain.Dropped, SyncStats.RangeSkipped, RegisteredSensors.Num(),
+            EntityMap.Num(), ISMCEntityMap.Num(), MeshCache.Num(), IdleMeshLru.Num()));
+        IdleDestroyedSinceLog = 0;
+        MeshFailuresSinceLog = 0;
+    }
+
+    if (QueueEpisode.bActive && PendingCreates.Num() == 0)
+    {
+        EmitSceneLine(FString::Printf(
+            TEXT("rgl_scene_queue_drained t=%.3f wait_s=%.3f updates=%d created=%d failed=%d dropped=%d"),
+            CurrentSimTime, CurrentSimTime - QueueEpisode.StartSimTime, QueueEpisode.Updates,
+            QueueEpisode.Created, QueueEpisode.Failed, QueueEpisode.Dropped));
+        QueueEpisode = FQueueEpisode();
     }
 
     // Update scene time for velocity computation and ROS2 timestamp synchronization.
@@ -883,11 +1002,15 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
         return nullptr;
     }
 
-    // Check cache first
-    rgl_mesh_t* CachedMesh = MeshCache.Find(StaticMesh);
-    if (CachedMesh)
+    // Check cache first (a live or an idle entry)
+    if (rgl_mesh_t CachedMesh = FindCachedMesh(StaticMesh))
     {
-        return *CachedMesh;
+        return CachedMesh;
+    }
+
+    if (IsMeshRetryDeferred(StaticMesh))
+    {
+        return nullptr;
     }
 
     TArray<rgl_vec3f> Vertices;
@@ -931,11 +1054,13 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
 #if !UE_BUILD_SHIPPING
         ++GRGLExtractFailed;
 #endif
+        RememberMeshFailure(StaticMesh);
         return nullptr;
     }
 
     if (Vertices.Num() == 0 || Indices.Num() == 0)
     {
+        RememberMeshFailure(StaticMesh);
         return nullptr;
     }
 
@@ -989,13 +1114,101 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
                *StaticMesh->GetName(),
                Vertices.Num(), Indices.Num(),
                ErrMsg ? *FString(UTF8_TO_TCHAR(ErrMsg)) : TEXT("unknown"));
+        RememberMeshFailure(StaticMesh);
         return nullptr;
     }
 
     // Cache the mesh
-    MeshCache.Add(StaticMesh, RGLMesh);
+    FCachedMesh& Cached = MeshCache.Add(StaticMesh);
+    Cached.Mesh = RGLMesh;
+    Cached.Asset = StaticMesh;
+    FailedMeshRetrySync.Remove(FObjectKey(StaticMesh));
 
     return RGLMesh;
+}
+
+bool FRGLSceneManager::IsMeshRetryDeferred(UStaticMesh* StaticMesh) const
+{
+    const uint64* RetrySync = FailedMeshRetrySync.Find(FObjectKey(StaticMesh));
+    return RetrySync && SceneSyncSerial < *RetrySync;
+}
+
+void FRGLSceneManager::RememberMeshFailure(UStaticMesh* StaticMesh)
+{
+    // Count syncs rather than Updates so retries stay infrequent even with many LiDAR scans per sync.
+    // Keep this state outside PendingCreates: rebuilding that queue must not reset the back-off.
+    FailedMeshRetrySync.Add(FObjectKey(StaticMesh), SceneSyncSerial + 16);
+    ++MeshFailuresSinceLog;
+}
+
+rgl_mesh_t FRGLSceneManager::FindCachedMesh(UStaticMesh* StaticMesh)
+{
+    if (!StaticMesh)
+    {
+        return nullptr;
+    }
+
+    FCachedMesh* Found = MeshCache.Find(StaticMesh);
+    if (!Found)
+    {
+        return nullptr;
+    }
+
+    // An idle entry outlives the entities that kept its asset alive, so the asset may have been garbage
+    // collected and the address handed to another UStaticMesh. Never serve the old geometry for it.
+    // (A referenced entry keeps the original behaviour: its entities still use the mesh.)
+    if (Found->Asset.Get() != StaticMesh && !MeshRefCounts.Contains(StaticMesh))
+    {
+        const int32 LruIndex = IdleMeshLru.Find(StaticMesh);
+        if (LruIndex != INDEX_NONE)
+        {
+            DestroyIdleMeshAt(LruIndex);
+            return nullptr;
+        }
+    }
+    return Found->Mesh;
+}
+
+void FRGLSceneManager::DestroyIdleMeshAt(int32 LruIndex)
+{
+    UStaticMesh* Key = IdleMeshLru[LruIndex];
+    IdleMeshLru.RemoveAt(LruIndex);
+    if (MeshRefCounts.Contains(Key))
+    {
+        return;   // referenced again: not idle (defensive; AddMeshReference removes revived keys)
+    }
+    if (FCachedMesh* Cached = MeshCache.Find(Key))
+    {
+        if (Cached->Mesh)
+        {
+            RglDestroyChecked(rgl_mesh_destroy(Cached->Mesh), TEXT("rgl_mesh_destroy"));
+        }
+        MeshCache.Remove(Key);
+    }
+    ++IdleDestroyedSinceLog;
+}
+
+void FRGLSceneManager::TrimIdleMeshes(int32 MaxIdle)
+{
+    while (IdleMeshLru.Num() > MaxIdle)
+    {
+        DestroyIdleMeshAt(0);   // least recently idled first
+    }
+}
+
+void FRGLSceneManager::PurgeIdleMeshes()
+{
+    for (int32 i = IdleMeshLru.Num() - 1; i >= 0; --i)
+    {
+        UStaticMesh* Key = IdleMeshLru[i];
+        const FCachedMesh* Cached = MeshCache.Find(Key);
+        if (!Cached || Cached->Asset.Get() != Key)
+        {
+            DestroyIdleMeshAt(i);
+        }
+    }
+    // Applies a lowered rgl.Scene.IdleMeshCacheMax (0 empties the idle set).
+    TrimIdleMeshes(SceneIdleMeshCacheMax());
 }
 
 void FRGLSceneManager::AddMeshReference(UStaticMesh* StaticMesh, int32 Count)
@@ -1006,6 +1219,10 @@ void FRGLSceneManager::AddMeshReference(UStaticMesh* StaticMesh, int32 Count)
     }
 
     int32& RefCount = MeshRefCounts.FindOrAdd(StaticMesh);
+    if (RefCount == 0)
+    {
+        IdleMeshLru.RemoveSingle(StaticMesh);   // revived from the idle LRU (no-op for a fresh mesh)
+    }
     RefCount += Count;
 }
 
@@ -1030,10 +1247,25 @@ void FRGLSceneManager::ReleaseMeshReference(UStaticMesh* StaticMesh, int32 Count
 
     MeshRefCounts.Remove(StaticMesh);
 
-    rgl_mesh_t* RGLMesh = MeshCache.Find(StaticMesh);
-    if (RGLMesh && *RGLMesh)
+    FCachedMesh* Cached = MeshCache.Find(StaticMesh);
+    if (!Cached)
     {
-        rgl_mesh_destroy(*RGLMesh);
+        return;
+    }
+
+    // Keep the uploaded GPU mesh for re-entry; RGL discards its GAS when the last entity is removed.
+    const int32 MaxIdle = SceneIdleMeshCacheMax();
+    if (MaxIdle > 0 && Cached->Mesh)
+    {
+        IdleMeshLru.RemoveSingle(StaticMesh);
+        IdleMeshLru.Add(StaticMesh);
+        TrimIdleMeshes(MaxIdle);
+        return;
+    }
+
+    if (Cached->Mesh)
+    {
+        rgl_mesh_destroy(Cached->Mesh);
     }
     MeshCache.Remove(StaticMesh);
 }
@@ -1042,12 +1274,12 @@ void FRGLSceneManager::ReleaseMeshReference(UStaticMesh* StaticMesh, int32 Count
 // Entity management
 // ============================================================================
 
-bool FRGLSceneManager::IsWithinAnySensor(const FVector& CenterCm, float BoundsRadiusCm, float ExtraCm) const
+bool FRGLSceneManager::IsWithinAnySensor(const FVector& CenterCm, float BoundsRadiusCm, float ExtraCm, float RadiusScale) const
 {
     for (const auto& Pair : RegisteredSensors)
     {
         const FSensorRegistration& S = Pair.Value;
-        const float EffectiveDistanceCm = S.RegistrationDistanceCm + BoundsRadiusCm + ExtraCm;
+        const float EffectiveDistanceCm = S.RegistrationDistanceCm * RadiusScale + BoundsRadiusCm + ExtraCm;
         if (FVector::DistSquared(CenterCm, S.Position) <= FMath::Square(EffectiveDistanceCm))
         {
             return true;
@@ -1056,13 +1288,23 @@ bool FRGLSceneManager::IsWithinAnySensor(const FVector& CenterCm, float BoundsRa
     return false;
 }
 
-bool FRGLSceneManager::IsComponentWithinAnySensor(UStaticMeshComponent* Component, float ExtraCm) const
+bool FRGLSceneManager::IsComponentWithinAnySensor(UStaticMeshComponent* Component, float ExtraCm, float RadiusScale) const
 {
     if (!IsValid(Component))
     {
         return false;
     }
-    return IsWithinAnySensor(Component->Bounds.Origin, Component->Bounds.SphereRadius, ExtraCm);
+    return IsWithinAnySensor(Component->Bounds.Origin, Component->Bounds.SphereRadius, ExtraCm, RadiusScale);
+}
+
+float FRGLSceneManager::NearestSensorGapCm(const FVector& CenterCm, float BoundsRadiusCm) const
+{
+    float Best = TNumericLimits<float>::Max();
+    for (const auto& Pair : RegisteredSensors)
+    {
+        Best = FMath::Min(Best, static_cast<float>(FVector::Dist(CenterCm, Pair.Value.Position)) - BoundsRadiusCm);
+    }
+    return Best;
 }
 
 bool FRGLSceneManager::IsInstanceWithinAnySensor(
@@ -1147,8 +1389,9 @@ bool FRGLSceneManager::ShouldKeepRegisteredComponent(UStaticMeshComponent* Compo
     }
 
     // Keep a wider unload radius than the load radius to prevent repeated
-    // destroy/recreate near the boundary while sensors move.
-    return IsComponentWithinAnySensor(Component, UnregistrationHysteresisCm);
+    // destroy/recreate near the boundary while sensors move:
+    // RegistrationDistance * rgl.Scene.UnloadDistanceFactor + UnregistrationHysteresisCm (factor 1 = original).
+    return IsComponentWithinAnySensor(Component, UnregistrationHysteresisCm, SceneUnloadDistanceFactor());
 }
 
 bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
@@ -1421,8 +1664,17 @@ void FRGLSceneManager::UpdateTransforms()
 // Periodic world sync: detect new/removed components
 // ============================================================================
 
-void FRGLSceneManager::SyncWorldComponents(UWorld* World)
+void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutStats)
 {
+    ++SceneSyncSerial;
+    for (auto It = FailedMeshRetrySync.CreateIterator(); It; ++It)
+    {
+        if (!It.Key().ResolveObjectPtr())
+        {
+            It.RemoveCurrent(); // No strong asset reference; GC address reuse cannot inherit a failure.
+        }
+    }
+
     // Evict sensors that stopped refreshing (paused but not destroyed) so their
     // surrounding geometry can be released and stop holding VRAM.
     {
@@ -1440,14 +1692,18 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World)
         }
     }
 
+    // Drop idle meshes whose asset is gone and apply the current rgl.Scene.IdleMeshCacheMax before the
+    // scan decides what is resident.
+    PurgeIdleMeshes();
+
     TSet<UStaticMeshComponent*> CurrentComponents;
     TSet<UInstancedStaticMeshComponent*> CurrentISMComponents;
-    int32 AddedRegular = 0;
-    int32 AddedISM = 0;
+    TArray<FPendingCreate> NewPending;
     int32 RemovedRegular = 0;
     int32 RemovedISM = 0;
-    int32 RangeSkipped = 0;
 
+    // NOTE: a full-world actor scan on the game thread; its cost scales with the map, not with what changed
+    // (see elapsed_ms of a sync with created=0). A spatial index is the next step if that cost matters.
     for (TActorIterator<AActor> It(World); It; ++It)
     {
         AActor* Actor = *It;
@@ -1455,6 +1711,7 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World)
         {
             continue;
         }
+        ++OutStats.ScannedActors;
 
         TArray<UStaticMeshComponent*> Components;
         Actor->GetComponents<UStaticMeshComponent>(Components);
@@ -1466,34 +1723,51 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World)
             {
                 if (bOutOfRange)
                 {
-                    ++RangeSkipped;
+                    ++OutStats.RangeSkipped;
                 }
                 continue;
             }
 
-            // Classify: ISMC or regular
+            // Classify: ISMC or regular. The sets also de-duplicate the queue built below.
+            bool bAlreadySeen = false;
             if (UInstancedStaticMeshComponent* ISMComp = Cast<UInstancedStaticMeshComponent>(Comp))
             {
-                CurrentISMComponents.Add(ISMComp);
-                if (!ISMCEntityMap.Contains(ISMComp))
+                CurrentISMComponents.Add(ISMComp, &bAlreadySeen);
+                if (bAlreadySeen || ISMCEntityMap.Contains(ISMComp))
                 {
-                    if (RegisterISMComponent(ISMComp))
-                    {
-                        ++AddedISM;
-                    }
+                    continue;
                 }
             }
             else
             {
-                CurrentComponents.Add(Comp);
-                if (!EntityMap.Contains(Comp))
+                CurrentComponents.Add(Comp, &bAlreadySeen);
+                if (bAlreadySeen || EntityMap.Contains(Comp))
                 {
-                    if (RegisterComponent(Comp))
-                    {
-                        ++AddedRegular;
-                    }
+                    continue;
                 }
             }
+
+            UStaticMesh* StaticMesh = Comp->GetStaticMesh();
+            if (IsMeshRetryDeferred(StaticMesh))
+            {
+                continue; // A remembered failure consumes no create budget and is not requeued yet.
+            }
+
+            // Only meshes with live entities can bypass the budget: reviving an idle mesh rebuilds GAS
+            // at the next raytrace, just like creating a new mesh.
+            if (FindCachedMesh(StaticMesh) && MeshRefCounts.FindRef(StaticMesh) > 0)
+            {
+                if (RegisterComponent(Comp))   // dispatches ISMCs to RegisterISMComponent
+                {
+                    ++OutStats.AddedCached;
+                }
+                continue;
+            }
+
+            // New meshes and refcount-zero idle meshes share the per-Update create budget.
+            FPendingCreate& Pending = NewPending.AddDefaulted_GetRef();
+            Pending.Component = Comp;
+            Pending.GapCm = NearestSensorGapCm(Comp->Bounds.Origin, Comp->Bounds.SphereRadius);
         }
     }
 
@@ -1543,6 +1817,13 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World)
         UnregisterISMComponent(Comp);
         ++RemovedISM;
     }
+    OutStats.Removed = RemovedRegular + RemovedISM;
+
+    // The new queue replaces the old one: what the scan no longer saw in range is dropped, and the
+    // order follows the sensors' current positions (nearest surface first).
+    NewPending.Sort([](const FPendingCreate& A, const FPendingCreate& B) { return A.GapCm < B.GapCm; });
+    PendingCreates = MoveTemp(NewPending);
+    OutStats.Queued = PendingCreates.Num();
 
     // Skeletal components are tracked in a separate map with their own budget /
     // hysteresis rules; a live kill-switch flip tears the whole skeletal path down.
@@ -1554,17 +1835,112 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World)
     {
         TeardownSkeletal();
     }
+    // The per-sync summary is the rgl_scene_sync line printed by Update() after the drain step.
+}
 
-    if (AddedRegular || AddedISM || RemovedRegular || RemovedISM)
+void FRGLSceneManager::DrainPendingCreates(bool bUnlimited, FDrainStats& OutStats)
+{
+    if (PendingCreates.Num() == 0)
     {
-        RGLLog::Info("RGLSceneManager: Dynamic sync active sensors=", RegisteredSensors.Num(),
-                     " regular=", EntityMap.Num(),
-                     " ISMC=", ISMCEntityMap.Num(),
-                     " cachedMeshes=", MeshCache.Num(),
-                     " added=", AddedRegular, "+", AddedISM,
-                     " removed=", RemovedRegular, "+", RemovedISM,
-                     " range-skipped=", RangeSkipped);
+        return;
     }
+
+    const double StartSeconds = FPlatformTime::Seconds();
+    const int32 MaxCreates = bUnlimited ? 0 : SceneMaxMeshCreatesPerUpdate();
+    const double BudgetSeconds = bUnlimited ? 0.0 : static_cast<double>(SceneCreateBudgetMs()) / 1000.0;
+    int32 BudgetedCreates = 0;
+
+    // In-place compaction: consumed or dropped entries are removed, waiting ones keep their order.
+    int32 Write = 0;
+    for (int32 Read = 0; Read < PendingCreates.Num(); ++Read)
+    {
+        UStaticMeshComponent* Comp = PendingCreates[Read].Component.Get();
+        UInstancedStaticMeshComponent* ISMComp = Cast<UInstancedStaticMeshComponent>(Comp);
+        if (!Comp || (ISMComp ? ISMCEntityMap.Contains(ISMComp) : EntityMap.Contains(Comp)))
+        {
+            ++OutStats.Dropped;   // destroyed (stale weak pointer) or already registered
+            continue;
+        }
+
+        UStaticMesh* StaticMesh = Comp->GetStaticMesh();
+        if (IsMeshRetryDeferred(StaticMesh))
+        {
+            continue; // Includes other queued components sharing an asset that failed earlier this step.
+        }
+        const bool bResident = (FindCachedMesh(StaticMesh) != nullptr);
+        const bool bNeedsCreate = !bResident || MeshRefCounts.FindRef(StaticMesh) <= 0;
+
+        // Re-check what the scan checked: still valid, visible, and within registration range.
+        bool bOutOfRange = false;
+        if (!ShouldRegisterComponent(Comp, bOutOfRange))
+        {
+            ++OutStats.Dropped;
+            continue;
+        }
+
+        // Failed extractions/uploads do not satisfy the minimum progress guarantee. Once a creatable
+        // item ran, elapsed time (including failed attempts) can stop further creations this Update.
+        if (bNeedsCreate && BudgetedCreates > 0 &&
+            ((MaxCreates > 0 && BudgetedCreates >= MaxCreates) ||
+             (BudgetSeconds > 0.0 && FPlatformTime::Seconds() - StartSeconds >= BudgetSeconds)))
+        {
+            if (Write != Read)
+            {
+                PendingCreates[Write] = MoveTemp(PendingCreates[Read]);
+            }
+            ++Write;
+            continue;
+        }
+
+        const bool bRegistered = RegisterComponent(Comp);   // dispatches ISMCs to RegisterISMComponent
+        if (!bNeedsCreate)
+        {
+            // An earlier creation/reactivation made the mesh live: additional entities share its GAS.
+            if (bRegistered)
+            {
+                ++OutStats.RegisteredCached;
+            }
+            continue;
+        }
+
+        if (IsMeshRetryDeferred(StaticMesh))
+        {
+            ++OutStats.Failed; // Actual extraction/upload failure; do not block the first creatable item.
+            continue;
+        }
+
+        // A successful upload (even if registration found no eligible instances), or an idle
+        // reactivation, consumes a slot. The ms budget does not include RGL's raytrace-time GAS build.
+        ++BudgetedCreates;
+        if (!bResident && FindCachedMesh(StaticMesh))
+        {
+            ++OutStats.Created;
+        }
+    }
+    PendingCreates.SetNum(Write);
+
+    OutStats.Ms = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+}
+
+void FRGLSceneManager::LogSceneConfigIfChanged()
+{
+    const int32 MaxCreates = SceneMaxMeshCreatesPerUpdate();
+    const float BudgetMs = SceneCreateBudgetMs();
+    const float UnloadFactor = SceneUnloadDistanceFactor();
+    const int32 IdleMax = SceneIdleMeshCacheMax();
+    if (MaxCreates == LoggedMaxCreates && BudgetMs == LoggedCreateBudgetMs &&
+        UnloadFactor == LoggedUnloadFactor && IdleMax == LoggedIdleMeshCacheMax)
+    {
+        return;
+    }
+    LoggedMaxCreates = MaxCreates;
+    LoggedCreateBudgetMs = BudgetMs;
+    LoggedUnloadFactor = UnloadFactor;
+    LoggedIdleMeshCacheMax = IdleMax;
+    EmitSceneLine(FString::Printf(
+        TEXT("rgl_scene_config t=%.3f max_mesh_creates_per_update=%d create_budget_ms=%.2f unload_distance_factor=%.2f "
+             "idle_mesh_cache_max=%d unload_margin_cm=%.0f sync_interval_s=%.2f"),
+        CurrentSimTime, MaxCreates, BudgetMs, UnloadFactor, IdleMax, UnregistrationHysteresisCm, SyncIntervalSeconds));
 }
 
 // ============================================================================

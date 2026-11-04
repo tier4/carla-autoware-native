@@ -8,6 +8,8 @@
 //   - Creates rgl_entity_t for each UStaticMeshComponent instance
 //   - Updates entity transforms each tick
 //   - Handles actor creation/destruction via periodic world scans
+//   - Amortizes new-mesh creation across scans (rgl.Scene.* CVars): a budgeted, nearest-first
+//     create queue, an unload radius wider than the load radius, and an LRU of idle meshes
 
 #pragma once
 
@@ -118,8 +120,10 @@ private:
     bool ShouldKeepRegisteredComponent(UStaticMeshComponent* Component) const;
 
     /// Union distance culling helpers (within ANY registered sensor's sphere).
-    bool IsWithinAnySensor(const FVector& CenterCm, float BoundsRadiusCm, float ExtraCm) const;
-    bool IsComponentWithinAnySensor(UStaticMeshComponent* Component, float ExtraCm) const;
+    /// The tested radius per sensor is RegistrationDistanceCm * RadiusScale + BoundsRadiusCm + ExtraCm;
+    /// RadiusScale > 1 is the unload hysteresis (rgl.Scene.UnloadDistanceFactor).
+    bool IsWithinAnySensor(const FVector& CenterCm, float BoundsRadiusCm, float ExtraCm, float RadiusScale = 1.0f) const;
+    bool IsComponentWithinAnySensor(UStaticMeshComponent* Component, float ExtraCm, float RadiusScale = 1.0f) const;
     bool IsInstanceWithinAnySensor(
         UInstancedStaticMeshComponent* Component,
         UStaticMesh* StaticMesh,
@@ -142,8 +146,52 @@ private:
     /// Update all entity transforms to match current UE5 state.
     void UpdateTransforms();
 
-    /// Scan world for new/removed components since last update.
-    void SyncWorldComponents(UWorld* World);
+    /// Per-sync counters for the rgl_scene_sync telemetry line.
+    struct FSceneSyncStats
+    {
+        int32 ScannedActors = 0;  // valid actors visited by the static-mesh scan
+        int32 AddedCached = 0;    // registered during the scan (mesh already has live entities)
+        int32 Queued = 0;         // components waiting for a new mesh or idle reactivation
+        int32 Removed = 0;        // regular + ISMC components unregistered
+        int32 RangeSkipped = 0;   // components outside every sensor's registration sphere
+    };
+
+    /// Per-Update counters of one drain step of the pending-create queue.
+    struct FDrainStats
+    {
+        int32 Created = 0;          // new RGL meshes still resident after registration (GAS builds at raytrace)
+        int32 Failed = 0;           // actual extraction/upload failures, excluding deferred retries
+        int32 RegisteredCached = 0; // queued components registered on an already live mesh
+        int32 Dropped = 0;          // queued components that became stale, ineligible or out of range
+        double Ms = 0.0;            // wall time of the drain step
+    };
+
+    /// Scan world for new/removed components since last update. Components whose mesh has live entities
+    /// are registered at once; new meshes and idle reactivations are (re)queued, nearest first.
+    void SyncWorldComponents(UWorld* World, FSceneSyncStats& OutStats);
+
+    /// Create queued meshes under the rgl.Scene.MaxMeshCreatesPerUpdate / rgl.Scene.CreateBudgetMs budget
+    /// (bUnlimited ignores both). Removal is never deferred; only creation is.
+    void DrainPendingCreates(bool bUnlimited, FDrainStats& OutStats);
+
+    /// Distance from the nearest registered sensor to a bounding sphere's surface (cm). Sort key of the queue.
+    float NearestSensorGapCm(const FVector& CenterCm, float BoundsRadiusCm) const;
+
+    /// Resident RGL mesh for StaticMesh (live or idle), or nullptr. An idle entry whose asset was garbage
+    /// collected (address reused by another object) is destroyed here and reported as not resident.
+    rgl_mesh_t FindCachedMesh(UStaticMesh* StaticMesh);
+
+    /// Failed extraction/upload retries are deferred across queue rebuilds using generation-aware keys.
+    bool IsMeshRetryDeferred(UStaticMesh* StaticMesh) const;
+    void RememberMeshFailure(UStaticMesh* StaticMesh);
+
+    /// Idle mesh LRU maintenance (rgl.Scene.IdleMeshCacheMax).
+    void DestroyIdleMeshAt(int32 LruIndex);
+    void TrimIdleMeshes(int32 MaxIdle);
+    void PurgeIdleMeshes();
+
+    /// Print an rgl_scene_config line when any rgl.Scene.* knob differs from the last printed value.
+    void LogSceneConfigIfChanged();
 
     // ---- Skeletal mesh path (spec 2026-09-10-rgl-skeletal-mesh-design.md) ----
     struct FSkeletalEntityInfo
@@ -202,10 +250,56 @@ private:
 
     /// Cache: UStaticMesh* -> rgl_mesh_t (avoids duplicate uploads).
     /// Uses TMap for UE5 compatibility and safe iteration.
-    TMap<UStaticMesh*, rgl_mesh_t> MeshCache;
+    /// Invariant: every entry is either referenced (MeshRefCounts > 0) or listed in IdleMeshLru.
+    struct FCachedMesh
+    {
+        rgl_mesh_t Mesh = nullptr;
+        TWeakObjectPtr<UStaticMesh> Asset; // identity check: the raw key may be reused after GC
+    };
+    TMap<UStaticMesh*, FCachedMesh> MeshCache;
 
-    /// Active entity references per cached mesh. Meshes are released when this reaches zero.
+    /// Retry failed assets after 16 syncs: transient streaming/upload failures can recover without
+    /// retrying every scan. FObjectKey includes the GC serial; dead keys are purged at each sync.
+    TMap<FObjectKey, uint64> FailedMeshRetrySync;
+    uint64 SceneSyncSerial = 0;
+    int32 MeshFailuresSinceLog = 0; // actual failures since the last rgl_scene_sync, including non-sync drains
+
+    /// Active entity references per cached mesh. At zero the mesh becomes idle (kept in IdleMeshLru)
+    /// or, with rgl.Scene.IdleMeshCacheMax = 0, is destroyed at once.
     TMap<UStaticMesh*, int32> MeshRefCounts;
+
+    /// Unreferenced but still resident meshes, least recently idled first.
+    TArray<UStaticMesh*> IdleMeshLru;
+
+    /// Idle meshes destroyed (LRU overflow or stale identity) since the last rgl_scene_sync line.
+    int32 IdleDestroyedSinceLog = 0;
+
+    /// Components in range needing a new mesh or idle reactivation, nearest to any sensor first. Rebuilt by every
+    /// sync (so it never holds duplicates or components the last scan no longer saw), drained by Update().
+    struct FPendingCreate
+    {
+        TWeakObjectPtr<UStaticMeshComponent> Component;
+        float GapCm = 0.0f;
+    };
+    TArray<FPendingCreate> PendingCreates;
+
+    /// One queue episode = from the queue becoming non-empty to it draining (rgl_scene_queue_drained line).
+    struct FQueueEpisode
+    {
+        bool   bActive = false;
+        double StartSimTime = 0.0;
+        int32  Updates = 0;
+        int32  Created = 0;
+        int32  Failed = 0;
+        int32  Dropped = 0;
+    };
+    FQueueEpisode QueueEpisode;
+
+    /// Last printed rgl.Scene.* knob values (rgl_scene_config line).
+    int32 LoggedMaxCreates = -1;
+    float LoggedCreateBudgetMs = -1.0f;
+    float LoggedUnloadFactor = -1.0f;
+    int32 LoggedIdleMeshCacheMax = -1;
 
     /// Mapping: UStaticMeshComponent* -> RGL entity + weak reference.
     struct FEntityInfo
@@ -251,6 +345,8 @@ private:
     TMap<const void*, FSensorRegistration> RegisteredSensors;
 
     /// Hysteresis for dynamic unloads to avoid add/remove churn around the boundary (UE5 cm).
+    /// Static meshes unload beyond RegistrationDistanceCm * rgl.Scene.UnloadDistanceFactor + this margin
+    /// (factor 1.0 = the original rule); skeletal components use this margin alone.
     float UnregistrationHysteresisCm = 2000.0f; // 20m
 
     /// Evict sensors that stopped ticking (paused but not destroyed) to free their VRAM.
