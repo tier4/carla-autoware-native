@@ -7,11 +7,50 @@
 #include "Autoware/Sensors/VehicleStatusSensor.h"
 
 #include "Carla/Game/CarlaEpisode.h"
+#include "Carla/Actor/ActorBlueprintFunctionLibrary.h"
 #include "Carla/Vehicle/CarlaWheeledVehicle.h"
 #include "Carla/Vehicle/VehicleLightState.h"
 #include "Engine/World.h"
 #include "Carla/Sensor/Sensor.h"
 #include "Carla/Game/CarlaEngine.h"
+
+namespace
+{
+// Defaults describe the Odaiba anchor used to convert the CARLA world pose of
+// the ego into the Autoware (lanelet) map frame. Spawners such as
+// carla_bridge.py override them per spawn via the sensor attributes below.
+constexpr double DefaultReferenceMapX = 89626.180;
+constexpr double DefaultReferenceMapY = 42257.898;
+constexpr double DefaultReferenceMapZ = 6.4475;
+constexpr double DefaultReferenceMapYawRad = 2.124242444006411;
+constexpr double DefaultReferenceCarlaBaseX = -2382.261356801974;
+constexpr double DefaultReferenceCarlaBaseY = 3077.154881891110;
+constexpr double DefaultReferenceCarlaBaseZ = 10.9;
+constexpr double DefaultReferenceCarlaBaseYawRad = -2.121702995108797;
+constexpr double DefaultMapToCarlaScale = 1.0001113293488773;
+constexpr double DefaultMapToCarlaXyYawRad = 0.00020967531865156985;
+constexpr double DefaultMapToCarlaYawRad = 0.0011632706731004028;
+
+FActorVariation MakeBoolVariation(const TCHAR* Name, const TCHAR* DefaultValue)
+{
+  FActorVariation Variation;
+  Variation.Id = Name;
+  Variation.Type = EActorAttributeType::Bool;
+  Variation.RecommendedValues = {DefaultValue};
+  Variation.bRestrictToRecommended = false;
+  return Variation;
+}
+
+FActorVariation MakeFloatVariation(const TCHAR* Name, const double DefaultValue)
+{
+  FActorVariation Variation;
+  Variation.Id = Name;
+  Variation.Type = EActorAttributeType::Float;
+  Variation.RecommendedValues = {FString::SanitizeFloat(DefaultValue)};
+  Variation.bRestrictToRecommended = false;
+  return Variation;
+}
+} // namespace
 
 AVehicleStatusSensor::AVehicleStatusSensor(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
@@ -42,12 +81,55 @@ FActorDefinition AVehicleStatusSensor::GetSensorDefinition()
     Definition.Attributes.Emplace(MoveTemp(SpeedUnits));
   }
 
+  Definition.Variations.Append({
+    MakeBoolVariation(TEXT("publish_autoware_localization_ground_truth"), TEXT("false")),
+    MakeFloatVariation(TEXT("reference_map_x"), DefaultReferenceMapX),
+    MakeFloatVariation(TEXT("reference_map_y"), DefaultReferenceMapY),
+    MakeFloatVariation(TEXT("reference_map_z"), DefaultReferenceMapZ),
+    MakeFloatVariation(TEXT("reference_map_yaw_rad"), DefaultReferenceMapYawRad),
+    MakeFloatVariation(TEXT("reference_carla_base_x"), DefaultReferenceCarlaBaseX),
+    MakeFloatVariation(TEXT("reference_carla_base_y"), DefaultReferenceCarlaBaseY),
+    MakeFloatVariation(TEXT("reference_carla_base_z"), DefaultReferenceCarlaBaseZ),
+    MakeFloatVariation(TEXT("reference_carla_base_yaw_rad"), DefaultReferenceCarlaBaseYawRad),
+    MakeFloatVariation(TEXT("map_to_carla_scale"), DefaultMapToCarlaScale),
+    MakeFloatVariation(TEXT("map_to_carla_xy_yaw_rad"), DefaultMapToCarlaXyYawRad),
+    MakeFloatVariation(TEXT("map_to_carla_yaw_rad"), DefaultMapToCarlaYawRad),
+  });
+
   return Definition;
 }
 
 void AVehicleStatusSensor::Set(const FActorDescription &ActorDescription)
 {
   Super::Set(ActorDescription);
+  const auto& Attributes = ActorDescription.Variations;
+  bPublishAutowareLocalizationGroundTruth =
+      UActorBlueprintFunctionLibrary::RetrieveActorAttributeToBool(
+          TEXT("publish_autoware_localization_ground_truth"),
+          Attributes,
+          false);
+  ReferenceMapX = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("reference_map_x"), Attributes, DefaultReferenceMapX);
+  ReferenceMapY = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("reference_map_y"), Attributes, DefaultReferenceMapY);
+  ReferenceMapZ = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("reference_map_z"), Attributes, DefaultReferenceMapZ);
+  ReferenceMapYawRad = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("reference_map_yaw_rad"), Attributes, DefaultReferenceMapYawRad);
+  ReferenceCarlaBaseX = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("reference_carla_base_x"), Attributes, DefaultReferenceCarlaBaseX);
+  ReferenceCarlaBaseY = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("reference_carla_base_y"), Attributes, DefaultReferenceCarlaBaseY);
+  ReferenceCarlaBaseZ = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("reference_carla_base_z"), Attributes, DefaultReferenceCarlaBaseZ);
+  ReferenceCarlaBaseYawRad = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("reference_carla_base_yaw_rad"), Attributes, DefaultReferenceCarlaBaseYawRad);
+  MapToCarlaScale = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("map_to_carla_scale"), Attributes, DefaultMapToCarlaScale);
+  MapToCarlaXyYawRad = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("map_to_carla_xy_yaw_rad"), Attributes, DefaultMapToCarlaXyYawRad);
+  MapToCarlaYawRad = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
+      TEXT("map_to_carla_yaw_rad"), Attributes, DefaultMapToCarlaYawRad);
 }
 
 void AVehicleStatusSensor::BeginPlay()
@@ -151,11 +233,25 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   if (auto ROS2 = carla::ros2::ROS2::GetInstance(); ROS2->IsEnabled())
   {
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
+    carla::ros2::AutowareLocalizationConfig LocalizationConfig;
+    LocalizationConfig.enabled = bPublishAutowareLocalizationGroundTruth;
+    LocalizationConfig.reference_map_x = ReferenceMapX;
+    LocalizationConfig.reference_map_y = ReferenceMapY;
+    LocalizationConfig.reference_map_z = ReferenceMapZ;
+    LocalizationConfig.reference_map_yaw = ReferenceMapYawRad;
+    LocalizationConfig.reference_carla_base_x = ReferenceCarlaBaseX;
+    LocalizationConfig.reference_carla_base_y = ReferenceCarlaBaseY;
+    LocalizationConfig.reference_carla_base_z = ReferenceCarlaBaseZ;
+    LocalizationConfig.reference_carla_base_yaw = ReferenceCarlaBaseYawRad;
+    LocalizationConfig.map_to_carla_scale = MapToCarlaScale;
+    LocalizationConfig.map_to_carla_xy_yaw = MapToCarlaXyYawRad;
+    LocalizationConfig.map_to_carla_yaw = MapToCarlaYawRad;
     ROS2->ProcessDataFromStatusSensor(
       0,
       StreamId,
       GetActorTransform(),
       Msg,
+      LocalizationConfig,
       Vehicle,
       this
   );

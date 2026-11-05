@@ -94,6 +94,19 @@ private:
 	void CollectAndStream(float DeltaSeconds);
 	void SetVelocityInfoToLocal(const AActor* VehicleActor);
 
+	bool bPublishAutowareLocalizationGroundTruth = false;
+	double ReferenceMapX = 0.0;
+	double ReferenceMapY = 0.0;
+	double ReferenceMapZ = 0.0;
+	double ReferenceMapYawRad = 0.0;
+	double ReferenceCarlaBaseX = 0.0;
+	double ReferenceCarlaBaseY = 0.0;
+	double ReferenceCarlaBaseZ = 0.0;
+	double ReferenceCarlaBaseYawRad = 0.0;
+	double MapToCarlaScale = 1.0;
+	double MapToCarlaXyYawRad = 0.0;
+	double MapToCarlaYawRad = 0.0;
+
 	// Scale UE velocity from cm/s to m/s
 	template<typename T>
 	static FORCEINLINE T CmpsToMps(const T& v_cmps)

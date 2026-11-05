@@ -101,6 +101,35 @@ namespace RGLCoord
         return Out;
     }
 
+    /// Same element mapping as ToRGL(FTransform) applied to a raw FMatrix (keeps shear):
+    /// transpose the 3x3 block, UE row-3 translation -> column 3, cm -> m.
+    /// Homogeneous identity Phi(M) = S*M^T*S^-1, S=diag(0.01,0.01,0.01,1)  =>  Phi(A*B) = Phi(B)*Phi(A).
+    inline rgl_mat3x4f ToRGLMat(const FMatrix& M)
+    {
+        rgl_mat3x4f Out;
+        for (int Row = 0; Row < 3; ++Row)
+        {
+            Out.value[Row][0] = static_cast<float>(M.M[0][Row]);
+            Out.value[Row][1] = static_cast<float>(M.M[1][Row]);
+            Out.value[Row][2] = static_cast<float>(M.M[2][Row]);
+            Out.value[Row][3] = static_cast<float>(M.M[3][Row]) * UE_TO_RGL;
+        }
+        return Out;
+    }
+
+    /// Homogeneous 3x4 product A*B (B applied first) in RGL's convention.
+    inline rgl_mat3x4f MulRGL(const rgl_mat3x4f& A, const rgl_mat3x4f& B)
+    {
+        rgl_mat3x4f Out;
+        for (int r = 0; r < 3; ++r)
+        {
+            for (int c = 0; c < 3; ++c)
+                Out.value[r][c] = A.value[r][0] * B.value[0][c] + A.value[r][1] * B.value[1][c] + A.value[r][2] * B.value[2][c];
+            Out.value[r][3] = A.value[r][0] * B.value[0][3] + A.value[r][1] * B.value[1][3] + A.value[r][2] * B.value[2][3] + A.value[r][3];
+        }
+        return Out;
+    }
+
     // Build a 3x4 identity matrix.
     inline rgl_mat3x4f Identity()
     {

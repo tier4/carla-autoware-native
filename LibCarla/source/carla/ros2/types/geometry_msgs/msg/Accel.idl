@@ -1,0 +1,13 @@
+// geometry_msgs/msg/Accel.idl
+// Canonical IDL definition for geometry_msgs::msg::Accel
+
+#include "geometry_msgs/msg/Vector3.idl"
+
+module geometry_msgs {
+  module msg {
+    struct Accel {
+      geometry_msgs::msg::Vector3 linear;
+      geometry_msgs::msg::Vector3 angular;
+    };
+  };
+};

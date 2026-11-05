@@ -20,6 +20,8 @@
 #   --no-agnocast             Disable Agnocast extension
 #   --with-weather            Enable weather extension (disabled by default, private repo)
 #   --with-udp                Enable UDP extension (disabled by default, private repo)
+#   --ext-patch-dir=DIR       Apply DIR/*.patch to extensions/udp after cloning
+#                             (idempotent; for fixes kept outside this public repo)
 #
 # Options for 'build':
 #   --package=TYPE            shipping, development, launch, none (default: none)
@@ -35,8 +37,71 @@ workspace_path="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 # ============================================================================
 
 usage() {
-    head -28 "$0" | tail -27
+    head -30 "$0" | tail -29
     exit 1
+}
+
+# ============================================================================
+# Helper: apply_extension_patches
+# ----------------------------------------------------------------------------
+# Apply every *.patch of a directory to an extension checkout. Idempotent: a
+# patch that already applies in reverse is reported as applied and skipped; a
+# patch that neither applies nor reverse-applies aborts (wrong revision).
+# Arguments:
+#   $1 = extension checkout (e.g. extensions/udp)
+#   $2 = directory holding *.patch files
+# ============================================================================
+
+apply_extension_patches() {
+    local ext_dir="$1" patch_dir="$2" p name
+    [ -d "$ext_dir" ] || { echo "[ERROR] extension dir not found: $ext_dir"; exit 1; }
+    [ -d "$patch_dir" ] || { echo "[ERROR] patch dir not found: $patch_dir"; exit 1; }
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        name=$(basename "$p")
+        if git -C "$ext_dir" apply --check --reverse "$p" >/dev/null 2>&1; then
+            echo "[OK] patch already applied: $name"
+        elif git -C "$ext_dir" apply --check "$p" >/dev/null 2>&1; then
+            git -C "$ext_dir" apply "$p"
+            echo "[OK] patch applied: $name"
+        else
+            echo "[ERROR] patch neither applied nor applicable: $name ($ext_dir is at an unexpected revision)"
+            exit 1
+        fi
+    done < <(find "$patch_dir" -maxdepth 1 -name '*.patch' -type f | sort)
+}
+
+# ============================================================================
+# Helper: report_rgl_lib_capabilities
+# ----------------------------------------------------------------------------
+# Print which point-cloud paths a libRobotecGPULidar.so can serve. The CARLA
+# RGL glue dlopens the library and silently disables missing entry points, so
+# a library built without --with-udp produces a package whose UDP raw-packet
+# lidar path is dead. Surface that at build time instead.
+# Arguments:
+#   $1 = path to libRobotecGPULidar.so
+#   $2 = 1 if the UDP extension was requested (warn when the symbol is absent)
+# ============================================================================
+
+report_rgl_lib_capabilities() {
+    local so="$1" want_udp="$2"
+    command -v nm >/dev/null 2>&1 || { echo "[INFO] nm not found; skipping RGL capability report"; return 0; }
+    local udp ros2 qos
+    udp=$(nm -D "$so" 2>/dev/null | grep -c -E ' T rgl_node_points_udp_publish$' || true)
+    ros2=$(nm -D "$so" 2>/dev/null | grep -c -E ' T rgl_node_points_ros2_publish$' || true)
+    qos=$(nm -D "$so" 2>/dev/null | grep -c -E ' T rgl_node_points_ros2_publish_with_qos$' || true)
+    echo "[INFO] RGL lib capabilities: udp_publish=$udp ros2_publish=$ros2 ros2_publish_with_qos=$qos"
+    if [ "$udp" = 1 ]; then
+        echo "[OK] UDP raw-packet lidar path available (rgl_node_points_udp_publish)"
+    elif [ "$want_udp" = 1 ]; then
+        echo "[WARNING] --with-udp was requested but rgl_node_points_udp_publish is not exported."
+        echo "  Packages built from this library cannot feed the UDP raw-packet lidar path."
+    else
+        echo "[INFO] UDP raw-packet lidar path not available (build with --with-udp if you need it)"
+    fi
+    if [ "$ros2" = 0 ] && [ "$qos" = 0 ]; then
+        echo "[INFO] direct ROS 2 point-cloud publish not available (no rgl_node_points_ros2_publish*)"
+    fi
 }
 
 # ============================================================================
@@ -194,6 +259,7 @@ cmd_prepare() {
     local ext_weather=0
     local ext_agnocast=1
     local ext_udp=0
+    local ext_patch_dir=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -206,6 +272,7 @@ cmd_prepare() {
             --no-agnocast)        ext_agnocast=0; shift ;;
             --with-weather)       ext_weather=1; shift ;;
             --with-udp)           ext_udp=1; shift ;;
+            --ext-patch-dir=*)    ext_patch_dir="${1#*=}"; shift ;;
             *) echo "Unknown option for prepare: $1"; usage ;;
         esac
     done
@@ -218,6 +285,7 @@ cmd_prepare() {
     echo "  optix_dir:    ${optix_dir:-(not set)}"
     echo "  rgl_branch:   $rgl_branch"
     echo "  extensions:   pcl=$ext_pcl ros2=$ext_ros2_standalone weather=$ext_weather agnocast=$ext_agnocast udp=$ext_udp"
+    echo "  ext_patches:  ${ext_patch_dir:-(none)}"
     echo "========================================================================"
 
     # ---- Prerequisites check ----
@@ -347,6 +415,10 @@ cmd_prepare() {
         echo "Cloning RGL UDP extension ($udp_branch)..."
         git clone -b "$udp_branch" "$udp_url" extensions/udp
     fi
+    if [ $ext_udp -eq 1 ] && [ -n "$ext_patch_dir" ]; then
+        echo "Applying extension patches from $ext_patch_dir..."
+        apply_extension_patches "extensions/udp" "$ext_patch_dir"
+    fi
 
     # Source ROS2
     source /opt/ros/humble/setup.bash
@@ -386,6 +458,7 @@ cmd_prepare() {
     # Verify
     if [ -f "$rgl_dir/build/lib/libRobotecGPULidar.so" ]; then
         echo "[OK] RGL build succeeded."
+        report_rgl_lib_capabilities "$rgl_dir/build/lib/libRobotecGPULidar.so" "$ext_udp"
     else
         echo "[ERROR] RGL build failed: libRobotecGPULidar.so not found."
         exit 1

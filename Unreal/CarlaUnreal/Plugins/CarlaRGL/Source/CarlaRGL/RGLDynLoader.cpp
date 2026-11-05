@@ -156,6 +156,16 @@ static fn_rgl_node_points_udp_publish_t fn_rgl_node_points_udp_publish = nullptr
 typedef rgl_status_t (*fn_rgl_get_extension_info_t)(rgl_extension_t, int32_t*);
 static fn_rgl_get_extension_info_t fn_rgl_get_extension_info = nullptr;
 
+// 31. rgl_mesh_set_bone_weights
+typedef rgl_status_t (*fn_rgl_mesh_set_bone_weights_t)(rgl_mesh_t, const rgl_bone_weights_t*, int32_t);
+static fn_rgl_mesh_set_bone_weights_t fn_rgl_mesh_set_bone_weights = nullptr;
+// 32. rgl_mesh_set_restposes
+typedef rgl_status_t (*fn_rgl_mesh_set_restposes_t)(rgl_mesh_t, const rgl_mat3x4f*, int32_t);
+static fn_rgl_mesh_set_restposes_t fn_rgl_mesh_set_restposes = nullptr;
+// 33. rgl_entity_set_pose_world
+typedef rgl_status_t (*fn_rgl_entity_set_pose_world_t)(rgl_entity_t, const rgl_mat3x4f*, int32_t);
+static fn_rgl_entity_set_pose_world_t fn_rgl_entity_set_pose_world = nullptr;
+
 // ---------------------------------------------------------------------------
 // Wrapper function definitions
 // These provide the symbols the linker resolves to, replacing the .so linkage.
@@ -404,6 +414,25 @@ rgl_status_t rgl_get_extension_info(rgl_extension_t extension, int32_t* out_avai
     return fn_rgl_get_extension_info(extension, out_available);
 }
 
+// 31. rgl_mesh_set_bone_weights
+rgl_status_t rgl_mesh_set_bone_weights(rgl_mesh_t mesh, const rgl_bone_weights_t* bone_weights, int32_t bone_weights_count)
+{
+    if (!fn_rgl_mesh_set_bone_weights) return RGL_INVALID_STATE;
+    return fn_rgl_mesh_set_bone_weights(mesh, bone_weights, bone_weights_count);
+}
+// 32. rgl_mesh_set_restposes
+rgl_status_t rgl_mesh_set_restposes(rgl_mesh_t mesh, const rgl_mat3x4f* restposes, int32_t bones_count)
+{
+    if (!fn_rgl_mesh_set_restposes) return RGL_INVALID_STATE;
+    return fn_rgl_mesh_set_restposes(mesh, restposes, bones_count);
+}
+// 33. rgl_entity_set_pose_world
+rgl_status_t rgl_entity_set_pose_world(rgl_entity_t entity, const rgl_mat3x4f* pose, int32_t bones_count)
+{
+    if (!fn_rgl_entity_set_pose_world) return RGL_INVALID_STATE;
+    return fn_rgl_entity_set_pose_world(entity, pose, bones_count);
+}
+
 // ---------------------------------------------------------------------------
 // RGLDynLoader implementation
 // ---------------------------------------------------------------------------
@@ -459,6 +488,9 @@ bool RGLDynLoader::Load(const char* LibPath)
     LOAD_FN(rgl_node_raytrace_configure_return_mode)
     LOAD_FN(rgl_node_points_udp_publish)
     LOAD_FN(rgl_get_extension_info)
+    LOAD_FN(rgl_mesh_set_bone_weights)
+    LOAD_FN(rgl_mesh_set_restposes)
+    LOAD_FN(rgl_entity_set_pose_world)
 
     if (!allResolved)
     {
@@ -510,11 +542,19 @@ void RGLDynLoader::Unload()
     fn_rgl_node_raytrace_configure_return_mode = nullptr;
     fn_rgl_node_points_udp_publish = nullptr;
     fn_rgl_get_extension_info = nullptr;
+    fn_rgl_mesh_set_bone_weights = nullptr;
+    fn_rgl_mesh_set_restposes = nullptr;
+    fn_rgl_entity_set_pose_world = nullptr;
 }
 
 bool RGLDynLoader::IsLoaded()
 {
     return Handle != nullptr;
+}
+
+bool RGLDynLoader::IsSkeletalApiAvailable()
+{
+    return fn_rgl_mesh_set_bone_weights && fn_rgl_mesh_set_restposes && fn_rgl_entity_set_pose_world;
 }
 
 // --- RclcppBridge dynamic loader ---

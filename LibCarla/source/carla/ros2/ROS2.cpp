@@ -956,6 +956,7 @@ void ROS2::ProcessDataFromStatusSensor(
     carla::streaming::detail::stream_id_type /*stream_id*/,
     const carla::geom::Transform /*sensor_transform*/,
     const carla::sensor::s11n::VehicleStatusData &/*data*/,
+    const AutowareLocalizationConfig &/*localization_config*/,
     void */*vehicle_actor*/,
     void */*actor*/) {
   // Vehicle status processing is handled by CycloneDDS ROS2.cpp

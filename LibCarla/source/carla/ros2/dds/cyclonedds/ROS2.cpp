@@ -26,6 +26,7 @@
 
 #include "carla/ros2/data_types.h"
 #include "carla/ros2/publishers/AutowarePublisher.h"
+#include "carla/ros2/publishers/AutowareLocalizationPublisher.h"
 #include "carla/ros2/publishers/AutowareGNSSPublisher.h"
 #include "carla/ros2/publishers/CarlaPublisher.h"
 #include "carla/ros2/publishers/CarlaClockPublisher.h"
@@ -285,6 +286,7 @@ void ROS2::RemoveActorCallback(void* actor) {
   _controller.reset();
   _autoware_controller.reset();
   _autoware_publisher.reset();
+  _autoware_localization_publisher.reset();
   _actor_callbacks.erase(actor);
 }
 
@@ -1143,6 +1145,7 @@ void ROS2::ProcessDataFromStatusSensor(
   carla::streaming::detail::stream_id_type stream_id,
   const carla::geom::Transform sensor_transform,
   const sensor::s11n::VehicleStatusData &data,
+  const AutowareLocalizationConfig &localization_config,
   void *vehicle_actor,
   void *actor)
 {
@@ -1277,6 +1280,34 @@ void ROS2::ProcessDataFromStatusSensor(
 
   _autoware_publisher->Publish(_seconds, _nanoseconds);
 
+  if (localization_config.enabled) {
+    if (!_autoware_localization_publisher) {
+      _autoware_localization_publisher =
+          std::make_shared<AutowareLocalizationPublisher>(_domain_id);
+    }
+    AutowareLocalizationPose base_link_pose {};
+    base_link_pose.x = sensor_transform.location.x;
+    base_link_pose.y = sensor_transform.location.y;
+    base_link_pose.z = sensor_transform.location.z;
+    base_link_pose.yaw_degrees = sensor_transform.rotation.yaw;
+
+    AutowareLocalizationStatus localization_status {};
+    localization_status.vel_x_mps = data.vel_x_mps;
+    localization_status.vel_y_mps = data.vel_y_mps;
+    localization_status.vel_z_mps = data.vel_z_mps;
+    localization_status.ang_vel_x_radps = data.angVel_x_mps;
+    localization_status.ang_vel_y_radps = data.angVel_y_mps;
+    localization_status.ang_vel_z_radps = data.angVel_z_mps;
+
+    _autoware_localization_publisher->SetData(
+        _seconds,
+        _nanoseconds,
+        localization_config,
+        base_link_pose,
+        localization_status);
+    _autoware_localization_publisher->Publish();
+  }
+
   // Debug
   if constexpr (false) {
     std::cerr << "========== NEW STATUS ==========" << '\n'
@@ -1317,6 +1348,7 @@ void ROS2::Shutdown() {
   _controller.reset();
   _autoware_controller.reset();
   _autoware_publisher.reset();
+  _autoware_localization_publisher.reset();
   _enabled = false;
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher.reset();

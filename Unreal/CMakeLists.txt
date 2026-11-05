@@ -14,6 +14,17 @@ carla_option (
   ON
 )
 
+# Extra arguments appended verbatim to the UAT BuildCookRun command of the
+# package targets (semicolon-separated list). Example, for hosts where IPv6 is
+# disabled and the Zen local DDC cannot start:
+#   -DCARLA_UNREAL_COOK_EXTRA_ARGS=-AdditionalCookerOptions=-ddc=NoZenLocalFallback
+set (
+  CARLA_UNREAL_COOK_EXTRA_ARGS
+  ""
+  CACHE STRING
+  "Extra arguments appended to the UAT BuildCookRun command of package targets."
+)
+
 set (
   CARLA_UE_PATH
   ${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal
@@ -504,6 +515,7 @@ function (
       -build
       -stagingdirectory=${CARLA_PACKAGE_STAGING_PATH}
       -archivedirectory=${CARLA_PACKAGE_ARCHIVE_PATH}
+      ${CARLA_UNREAL_COOK_EXTRA_ARGS}
     USES_TERMINAL
     VERBATIM
   )

@@ -46,3 +46,11 @@ file (COPY ${CARLA_WORKSPACE_PATH}/PythonAPI/util/opendrive/ DESTINATION ${CARLA
 # file (GLOB PYTHON_HDMAP_FILES ${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Content/Carla/HDMaps/*.pcd)
 # file (COPY ${PYTHON_HDMAP_FILES} DESTINATION ${CARLA_PACKAGE_ARCHIVE_PATH}/HDMaps/)
 # file (COPY_FILE ${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Content/Carla/HDMaps/Readme.md ${CARLA_PACKAGE_ARCHIVE_PATH}/HDMaps/README)
+
+# Extension point. Content that exists only in a downstream fork is copied by
+# scripts under Package/Fork/, which keeps the list above unmodified.
+file (GLOB CARLA_FORK_PACKAGE_SCRIPTS ${CMAKE_CURRENT_LIST_DIR}/Fork/*.cmake)
+foreach (CARLA_FORK_PACKAGE_SCRIPT IN LISTS CARLA_FORK_PACKAGE_SCRIPTS)
+  message (STATUS "Running fork package script ${CARLA_FORK_PACKAGE_SCRIPT}.")
+  include (${CARLA_FORK_PACKAGE_SCRIPT})
+endforeach ()

@@ -7,6 +7,11 @@ DEFINE_LOG_CATEGORY(LogCarlaRGL);
 
 #ifdef WITH_RGL
 #include "RGLBackendImpl.h"
+#include "RGLSceneManager.h"
+
+#include <util/ue-header-guard-begin.h>
+#include "Engine/World.h"
+#include <util/ue-header-guard-end.h>
 #endif
 
 static FString GetCarlaRGLBinDir()
@@ -65,6 +70,10 @@ void FCarlaRGLModule::StartupModule()
 
     FRGLBackendRegistry::Register(new FRGLBackendImpl());
     UE_LOG(LogCarlaRGL, Log, TEXT("CarlaRGL: RGL backend registered."));
+
+    // Deterministic per-world teardown (episode reload / map change): restores skeletal tick policies, frees entities.
+    WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddStatic(
+        [](UWorld* World, bool /*bSessionEnded*/, bool /*bCleanupResources*/) { FRGLSceneManager::DestroyInstance(World); });
 #else
     UE_LOG(LogCarlaRGL, Log, TEXT("CarlaRGL: WITH_RGL not defined, no backend registered."));
 #endif
@@ -72,7 +81,17 @@ void FCarlaRGLModule::StartupModule()
 
 void FCarlaRGLModule::ShutdownModule()
 {
+#ifdef WITH_RGL
+    if (WorldCleanupHandle.IsValid())
+    {
+        FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
+        WorldCleanupHandle.Reset();
+    }
+#endif
     FRGLBackendRegistry::Unregister();
+#ifdef WITH_RGL
+    FRGLSceneManager::DestroyAllInstances();   // before Unload: destructors call rgl_* through the loader
+#endif
     RGLDynLoader::Unload();
     RclcppBridge::Shutdown();
     RclcppBridge::Unload();

@@ -13,6 +13,10 @@ namespace RGLDynLoader
 
     // Check if the library is loaded.
     bool IsLoaded();
+
+    // True when all three skeleton-animation entry points resolved. Core RGL API
+    // (not an extension); the skeletal scene path auto-disables when false.
+    bool IsSkeletalApiAvailable();
 }
 
 // Dynamic loader for libRclcppBridge.so

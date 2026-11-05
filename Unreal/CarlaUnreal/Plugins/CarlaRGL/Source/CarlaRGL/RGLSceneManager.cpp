@@ -6,12 +6,22 @@
 #include "RGLSceneManager.h"
 #include "RGLCoordinateUtils.h"
 #include "CarlaRGLModule.h"
+#include "RGLSkeletalMeshExtractor.h"
+#include "RGLDynLoader.h"
+
+#include <cstdio>   // Shipping breadcrumbs: NO_LOGGING compiles UE_LOG out (precedent: RGLDynLoader.cpp)
 
 #include <util/ue-header-guard-begin.h>
 #include "Engine/World.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "Engine/SkeletalMesh.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/Pawn.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Rendering/PositionVertexBuffer.h"
 #include "StaticMeshResources.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -38,17 +48,86 @@ int64 GRGLTotalVertices = 0, GRGLTotalTriangles = 0;
 // Static singleton storage
 // ============================================================================
 
+// ---- Skeletal mesh path CVars (spec §2.3) ----
+static TAutoConsoleVariable<int32> CVarRGLSkeletalEnable(TEXT("rgl.SkeletalMesh.Enable"), 1,
+    TEXT("Register pawn-owned USkeletalMeshComponents in the RGL scene. 0 = legacy static-mesh-only (live: tears down)."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLSkeletalAlwaysTickPose(TEXT("rgl.SkeletalMesh.AlwaysTickPose"), 1,
+    TEXT("Force AlwaysTickPoseAndRefreshBones and disable URO on registered skeletal components (live: re-applied/restored at next sync)."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLSkeletalScope(TEXT("rgl.SkeletalMesh.Scope"), 0,
+    TEXT("0 = APawn-owned components only. 1 = every USkeletalMeshComponent."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLSkeletalMaxEntities(TEXT("rgl.SkeletalMesh.MaxEntities"), 64,
+    TEXT("Budget of simultaneously registered skeletal components; ranked by distance to the nearest sensor. "
+         "Device memory is roughly 24 B per vertex per registered entity (RGL SkeletonAnimator + GAS), "
+         "so a 350k-vertex LOD0 vehicle costs ~8 MB; lower this (or raise MinLOD) on VRAM-tight setups."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLSkeletalMinLOD(TEXT("rgl.SkeletalMesh.MinLOD"), 0,
+    TEXT("Lowest LOD index the extractor may use; raise to trade fidelity for VRAM/skinning cost."), ECVF_Default);
+#if !UE_BUILD_SHIPPING
+static TAutoConsoleVariable<int32> CVarRGLSkeletalDebugForceApiUnavailable(TEXT("rgl.SkeletalMesh.Debug.ForceApiUnavailable"), 0,
+    TEXT("Test only: pretend the RGL skeleton API did not resolve."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLSkeletalDebugForcePoseFailure(TEXT("rgl.SkeletalMesh.Debug.ForcePoseFailure"), 0,
+    TEXT("Test only: make every skeletal pose build fail (exercises destroy->pending->recover)."), ECVF_Default);
+#endif
+
+// Shipping-safe rebuild-free kill switch (spec §6.4). A packaged Shipping server cannot
+// take `-ExecCmds=` (UnrealEngine.cpp: #if !UE_BUILD_SHIPPING) nor `-ini:` overrides
+// (ALLOW_INI_OVERRIDE_FROM_COMMANDLINE = UE_SERVER || !UE_BUILD_SHIPPING), so the CVars
+// above would be unreachable from the command line. FParse::Value is compiled in for every
+// configuration, so these switches work everywhere; they only *set* the CVars, which remain
+// the single source of truth. ECVF_SetByCommandline ranks below ECVF_SetByCode, so console
+// commands and the Automation tests can still override them at runtime.
+static void ApplySkeletalCommandLineOverrides()
+{
+    static bool bApplied = false; if (bApplied) return; bApplied = true;
+    int32 V = 0;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-skeletal-mesh-enable="), V))
+    {
+        CVarRGLSkeletalEnable->Set(V, ECVF_SetByCommandline);
+        UE_LOG(LogCarlaRGL, Warning, TEXT("RGLSceneManager[skeletal] command line: Enable=%d"), V);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-skeletal-mesh-always-tick-pose="), V))
+    {
+        CVarRGLSkeletalAlwaysTickPose->Set(V, ECVF_SetByCommandline);
+        UE_LOG(LogCarlaRGL, Warning, TEXT("RGLSceneManager[skeletal] command line: AlwaysTickPose=%d"), V);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-skeletal-mesh-scope="), V))
+    {
+        CVarRGLSkeletalScope->Set(V, ECVF_SetByCommandline);
+        UE_LOG(LogCarlaRGL, Warning, TEXT("RGLSceneManager[skeletal] command line: Scope=%d"), V);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-skeletal-mesh-max-entities="), V))
+    {
+        CVarRGLSkeletalMaxEntities->Set(V, ECVF_SetByCommandline);
+        UE_LOG(LogCarlaRGL, Warning, TEXT("RGLSceneManager[skeletal] command line: MaxEntities=%d"), V);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-skeletal-mesh-min-lod="), V))
+    {
+        CVarRGLSkeletalMinLOD->Set(V, ECVF_SetByCommandline);
+        UE_LOG(LogCarlaRGL, Warning, TEXT("RGLSceneManager[skeletal] command line: MinLOD=%d"), V);
+    }
+}
+
 TMap<UWorld*, FRGLSceneManager*> FRGLSceneManager::Instances;
 
 FRGLSceneManager::FRGLSceneManager()
 {
+    // Apply the Shipping-safe command-line switches before anything reads the CVars.
+    ApplySkeletalCommandLineOverrides();
+
     // Use the default scene (nullptr).
     // RGL treats nullptr as the implicit default scene.
     Scene = nullptr;
+
+    bSkeletalApiAvailable = RGLDynLoader::IsSkeletalApiAvailable();
+    if (!bSkeletalApiAvailable)
+    {
+        UE_LOG(LogCarlaRGL, Warning, TEXT("RGLSceneManager: RGL skeleton API unavailable; skeletal meshes will not be registered."));
+    }
 }
 
 FRGLSceneManager::~FRGLSceneManager()
 {
+    TeardownSkeletal();
+
     // Destroy ground plane
     if (GroundEntity)
     {
@@ -136,6 +215,12 @@ void FRGLSceneManager::DestroyInstance(UWorld* World)
     }
 }
 
+void FRGLSceneManager::DestroyAllInstances()
+{
+    for (auto& Pair : Instances) delete Pair.Value;
+    Instances.Empty();
+}
+
 // ============================================================================
 // Update: called each frame before raytrace
 // ============================================================================
@@ -202,6 +287,12 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
 
     // Update only dynamic entity transforms (static entities skip after first set)
     UpdateTransforms();
+
+    // Re-pose every registered skeletal entity for this scene time (no skip optimization).
+    if (SkeletalEnabled())
+    {
+        UpdateSkeletalPoses();
+    }
 }
 
 // ============================================================================
@@ -318,6 +409,11 @@ void FRGLSceneManager::InitializeFromWorld(UWorld* World)
                 ++SkippedCount;
             }
         }
+    }
+
+    if (SkeletalEnabled())
+    {
+        SyncSkeletalComponents(World);
     }
 
     const int32 MeshCount = MeshCache.Num();
@@ -1448,6 +1544,17 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World)
         ++RemovedISM;
     }
 
+    // Skeletal components are tracked in a separate map with their own budget /
+    // hysteresis rules; a live kill-switch flip tears the whole skeletal path down.
+    if (SkeletalEnabled())
+    {
+        SyncSkeletalComponents(World);
+    }
+    else if (SkeletalEntityMap.Num() > 0)
+    {
+        TeardownSkeletal();
+    }
+
     if (AddedRegular || AddedISM || RemovedRegular || RemovedISM)
     {
         RGLLog::Info("RGLSceneManager: Dynamic sync active sensors=", RegisteredSensors.Num(),
@@ -1543,5 +1650,301 @@ void FRGLSceneManager::UpdateGroundPlane(UWorld* World, const FTransform& Sensor
 
     RGL_CHECK(rgl_entity_set_transform(GroundEntity, &GroundTf));
 }
+
+// ============================================================================
+// Skeletal mesh path
+// ============================================================================
+
+void FRGLSceneManager::RglDestroyChecked(rgl_status_t Status, const TCHAR* Api)
+{
+    if (Status != RGL_SUCCESS)
+    {
+        const char* Err = nullptr; rgl_get_last_error_string(&Err);
+        UE_LOG(LogCarlaRGL, Warning, TEXT("RGLSceneManager[skeletal] %s failed (status %d): %s"), Api, (int)Status, Err ? *FString(UTF8_TO_TCHAR(Err)) : TEXT("?"));
+    }
+}
+
+void FRGLSceneManager::UnregisterSensor(const void* SensorId)
+{
+    RegisteredSensors.Remove(SensorId);
+    // Update() only runs from sensor ticks; with no sensor left nothing would restore tick policies or free entities.
+    if (RegisteredSensors.Num() == 0 && SkeletalEntityMap.Num() > 0) TeardownSkeletal();
+}
+
+bool FRGLSceneManager::SkeletalEnabled() const
+{
+    bool bApi = bSkeletalApiAvailable;
+#if !UE_BUILD_SHIPPING
+    if (CVarRGLSkeletalDebugForceApiUnavailable.GetValueOnGameThread() != 0) bApi = false;
+#endif
+    return bApi && CVarRGLSkeletalEnable.GetValueOnGameThread() != 0;
+}
+
+void FRGLSceneManager::WarnSkeletalOnce(const USkeletalMeshComponent* Comp, const USkeletalMesh* Mesh, const FString& Msg)
+{
+    // (component, asset, reason) identity. FObjectKey carries the object's serial number, so an
+    // address recycled by GC starts with a clean slate; the reason hash lets a *different* later
+    // failure for the same pair (e.g. permanent skip after "not readable yet") still be logged once.
+    const FSkeletalWarnKey Key = MakeTuple(FObjectKey(Comp), FObjectKey(Mesh), GetTypeHash(Msg));
+    if (SkeletalWarned.Contains(Key)) return;
+    SkeletalWarned.Add(Key);
+    UE_LOG(LogCarlaRGL, Warning, TEXT("RGLSceneManager[skeletal] %s (%s / %s)"), *Msg, Comp ? *Comp->GetPathName() : TEXT("?"), Mesh ? *Mesh->GetName() : TEXT("?"));
+}
+
+// Non-distance disqualifiers (return false with bOutOfRange=false) are applied without hysteresis.
+bool FRGLSceneManager::ShouldRegisterSkeletalComponent(USkeletalMeshComponent* Comp, bool& bOutOfRange, bool& bRetryLater, FString& OutReason) const
+{
+    bOutOfRange = false; bRetryLater = false;
+    if (!IsValid(Comp) || !Comp->IsRegistered() || !Comp->GetSkeletalMeshAsset() || !Comp->IsVisible() || Comp->bRenderStatic) return false;
+    const FVector Scale = Comp->GetComponentTransform().GetScale3D();
+    if (FMath::IsNearlyZero(Scale.X) || FMath::IsNearlyZero(Scale.Y) || FMath::IsNearlyZero(Scale.Z)) return false;
+    if (CVarRGLSkeletalScope.GetValueOnGameThread() == 0) { const AActor* O = Comp->GetOwner(); if (!O || !O->IsA<APawn>()) return false; }
+    if (Comp->bNoSkeletonUpdate) return false;
+    const FBoxSphereBounds B = Comp->Bounds;
+    if (RegisteredSensors.Num() == 0 || !IsWithinAnySensor(B.Origin, B.SphereRadius, 0.0f)) { bOutOfRange = true; return false; }
+    // Permanently skipped after a non-recoverable extraction/upload failure (spec §6.1);
+    // hard disqualifier, so no hysteresis and no repeated extraction attempts.
+    if (SkeletalSkipped.Contains(FSkeletalSkipKey(FObjectKey(Comp), FObjectKey(Comp->GetSkeletalMeshAsset())))) return false;
+    if (RGLSkeletal::SelectReadableLOD(Comp->GetSkeletalMeshAsset(), OutReason, CVarRGLSkeletalMinLOD.GetValueOnGameThread()) < 0) { bRetryLater = true; return false; }
+    return true;
+}
+
+rgl_mesh_t FRGLSceneManager::GetOrUploadSkeletalMesh(USkeletalMesh* Mesh, int32& OutLOD, int32& OutRawBoneNum, FString& OutReason)
+{
+    if (!Mesh) { OutReason = TEXT("null skeletal mesh"); return nullptr; }
+    // Resolve the cache key WITHOUT extracting: SelectReadableLOD only inspects buffer
+    // sizes, whereas ExtractSkeletalMesh walks every vertex. N pawns sharing one asset
+    // must therefore cost one extraction, not N (spec §4.2).
+    // MinLOD is part of the selection, and the cache key carries the LOD actually used, so a live
+    // MinLOD change simply produces new cache entries when components are (re-)registered.
+    const int32 MinLOD = CVarRGLSkeletalMinLOD.GetValueOnGameThread();
+    const int32 LOD = RGLSkeletal::SelectReadableLOD(Mesh, OutReason, MinLOD);
+    if (LOD < 0) return nullptr;   // §3.1 readiness not met: retry later, OutLOD stays < 0
+    // From here on OutLOD >= 0, which tells the caller readiness passed and any later
+    // failure is non-recoverable and must be skipped permanently (spec §6.1).
+    OutLOD = LOD;
+    const FSkeletalMeshKey Key{ Mesh, LOD };
+    if (rgl_mesh_t* Cached = SkeletalMeshCache.Find(Key))
+    {
+        OutRawBoneNum = Mesh->GetRefSkeleton().GetRawBoneNum();
+        return *Cached;
+    }
+
+    FRGLSkeletalMeshData Data;
+    if (!RGLSkeletal::ExtractSkeletalMesh(Mesh, Data, OutReason, MinLOD)) return nullptr;
+    // ExtractSkeletalMesh selects the same lowest readable LOD; a divergence would put
+    // the entity on a mesh cached under the wrong key.
+    if (Data.LODIndex != LOD) { OutReason = FString::Printf(TEXT("LOD mismatch: SelectReadableLOD=%d ExtractSkeletalMesh=%d"), LOD, Data.LODIndex); return nullptr; }
+    OutRawBoneNum = Data.RawBoneNum;
+    rgl_mesh_t M = nullptr;
+    if (rgl_mesh_create(&M, Data.Vertices.GetData(), Data.Vertices.Num(), Data.Indices.GetData(), Data.Indices.Num()) != RGL_SUCCESS || !M) { OutReason = TEXT("rgl_mesh_create failed"); return nullptr; }
+    if (rgl_mesh_set_bone_weights(M, Data.Weights.GetData(), Data.Weights.Num()) != RGL_SUCCESS) { RglDestroyChecked(rgl_mesh_destroy(M), TEXT("rgl_mesh_destroy")); OutReason = TEXT("rgl_mesh_set_bone_weights failed"); return nullptr; }
+    if (rgl_mesh_set_restposes(M, Data.RestposesInv.GetData(), Data.RestposesInv.Num()) != RGL_SUCCESS) { RglDestroyChecked(rgl_mesh_destroy(M), TEXT("rgl_mesh_destroy")); OutReason = TEXT("rgl_mesh_set_restposes failed"); return nullptr; }
+    SkeletalMeshCache.Add(Key, M);
+    UE_LOG(LogCarlaRGL, Log, TEXT("RGLSceneManager[skeletal] uploaded %s LOD=%d verts=%d tris=%d rawBones=%d"), *Mesh->GetName(), Data.LODIndex, Data.Vertices.Num(), Data.Indices.Num(), Data.RawBoneNum);
+    // Shipping has NO_LOGGING, so the line above vanishes there. One stderr breadcrumb per process
+    // is enough to tell an operator that the skeletal path is actually live in a packaged server.
+    static bool bFirstSkeletalUploadLogged = false;
+    if (!bFirstSkeletalUploadLogged)
+    {
+        bFirstSkeletalUploadLogged = true;
+        fprintf(stderr, "CarlaRGL[skeletal]: first skeletal mesh uploaded (%s LOD=%d verts=%d bones=%d); skeletal path active\n",
+                TCHAR_TO_UTF8(*Mesh->GetName()), Data.LODIndex, Data.Vertices.Num(), Data.RawBoneNum);
+    }
+    return M;
+}
+
+void FRGLSceneManager::ReleaseSkeletalMeshReference(const FSkeletalMeshKey& Key)
+{
+    int32* Count = SkeletalMeshRefCounts.Find(Key); if (!Count) return;
+    if (--(*Count) <= 0)
+    {
+        if (rgl_mesh_t* M = SkeletalMeshCache.Find(Key)) { if (*M) RglDestroyChecked(rgl_mesh_destroy(*M), TEXT("rgl_mesh_destroy")); SkeletalMeshCache.Remove(Key); }
+        SkeletalMeshRefCounts.Remove(Key);
+    }
+}
+
+void FRGLSceneManager::ApplyTickPolicy(USkeletalMeshComponent* Comp, FSkeletalEntityInfo& Info, bool bEnable)
+{
+    if (!IsValid(Comp)) return;
+    if (bEnable && !Info.bTickPolicyApplied)
+    {
+        Info.SavedTickOption = Comp->VisibilityBasedAnimTickOption; Info.bSavedURO = Comp->bEnableUpdateRateOptimizations;
+        Comp->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+        Comp->bEnableUpdateRateOptimizations = false; Info.bTickPolicyApplied = true;
+    }
+    else if (!bEnable && Info.bTickPolicyApplied)
+    {
+        Comp->VisibilityBasedAnimTickOption = Info.SavedTickOption; Comp->bEnableUpdateRateOptimizations = Info.bSavedURO;
+        Info.bTickPolicyApplied = false;
+    }
+}
+
+bool FRGLSceneManager::RegisterSkeletalComponent(USkeletalMeshComponent* Comp)
+{
+    if (!IsValid(Comp) || SkeletalEntityMap.Contains(Comp)) return false;
+    USkeletalMesh* Mesh = Comp->GetSkeletalMeshAsset();
+    FString Reason; int32 LOD = -1, RawBoneNum = 0;
+    rgl_mesh_t M = GetOrUploadSkeletalMesh(Mesh, LOD, RawBoneNum, Reason);
+    if (!M)
+    {
+        // LOD >= 0 means readiness passed and extraction/upload itself failed: not a
+        // §3.1 condition, so never retry this (component, asset) pair (spec §6.1).
+        // Readiness failures cannot reach here (ShouldRegisterSkeletalComponent returns bRetryLater).
+        if (LOD >= 0)
+        {
+            SkeletalSkipped.Add(FSkeletalSkipKey(FObjectKey(Comp), FObjectKey(Mesh)));
+            // Shipping has no log: a permanent skip silently removes an actor from the point cloud,
+            // so leave a stderr breadcrumb (LOD >= 0 implies Mesh != nullptr; Comp is IsValid here).
+            fprintf(stderr, "CarlaRGL[skeletal]: permanently skipping %s (%s): %s\n",
+                    TCHAR_TO_UTF8(*Comp->GetPathName()), TCHAR_TO_UTF8(*Mesh->GetName()), TCHAR_TO_UTF8(*Reason));
+        }
+        WarnSkeletalOnce(Comp, Mesh, TEXT("skipped: ") + Reason);
+        return false;
+    }
+    FSkeletalEntityInfo Info;
+    Info.Component = Comp; Info.SkeletalMesh = Mesh; Info.LODIndex = LOD; Info.RawBoneNum = RawBoneNum;
+    Info.PoseScratch.SetNumUninitialized(RawBoneNum);
+    ApplyTickPolicy(Comp, Info, CVarRGLSkeletalAlwaysTickPose.GetValueOnGameThread() != 0);
+    SkeletalMeshRefCounts.FindOrAdd(FSkeletalMeshKey{ Mesh, LOD })++;
+    SkeletalEntityMap.Add(Comp, MoveTemp(Info));   // Entity stays nullptr until the first valid pose (spec §4.3/§4.5)
+    return true;
+}
+
+void FRGLSceneManager::UnregisterSkeletalComponent(USkeletalMeshComponent* Key)
+{
+    FSkeletalEntityInfo* Info = SkeletalEntityMap.Find(Key); if (!Info) return;
+    if (Info->Entity) { RglDestroyChecked(rgl_entity_destroy(Info->Entity), TEXT("rgl_entity_destroy")); Info->Entity = nullptr; }
+    ReleaseSkeletalMeshReference(FSkeletalMeshKey{ Info->SkeletalMesh, Info->LODIndex });
+    if (USkeletalMeshComponent* Live = Info->Component.Get()) ApplyTickPolicy(Live, *Info, false);   // never through the raw key
+    SkeletalEntityMap.Remove(Key);
+}
+
+void FRGLSceneManager::TeardownSkeletal()
+{
+    TArray<USkeletalMeshComponent*> Keys; SkeletalEntityMap.GetKeys(Keys);
+    for (USkeletalMeshComponent* K : Keys) UnregisterSkeletalComponent(K);
+    for (auto& P : SkeletalMeshCache) if (P.Value) RglDestroyChecked(rgl_mesh_destroy(P.Value), TEXT("rgl_mesh_destroy"));
+    SkeletalMeshCache.Empty(); SkeletalMeshRefCounts.Empty();
+    SkeletalSkipped.Empty(); SkeletalWarned.Empty();
+}
+
+void FRGLSceneManager::UpdateSkeletalPoses()
+{
+    TArray<USkeletalMeshComponent*> ToRemove;
+    for (auto& Pair : SkeletalEntityMap)
+    {
+        FSkeletalEntityInfo& Info = Pair.Value;
+        USkeletalMeshComponent* Comp = Info.Component.Get();
+        if (!Comp || !IsValid(Comp) || !Comp->IsRegistered()) { ToRemove.Add(Pair.Key); continue; }
+        if (Comp->GetSkeletalMeshAsset() != Info.SkeletalMesh) { ToRemove.Add(Pair.Key); continue; }   // swapped: re-register at next sync
+        bool bPose = RGLSkeletal::BuildWorldPose(Comp, Info.RawBoneNum, Info.PoseScratch);
+#if !UE_BUILD_SHIPPING
+        if (CVarRGLSkeletalDebugForcePoseFailure.GetValueOnGameThread() != 0) bPose = false;
+#endif
+        if (!bPose)
+        {
+            if (Info.Entity) { RglDestroyChecked(rgl_entity_destroy(Info.Entity), TEXT("rgl_entity_destroy")); Info.Entity = nullptr; }
+            WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("no complete pose this tick; pending"));
+            continue;
+        }
+        if (!Info.Entity)
+        {
+            rgl_mesh_t* M = SkeletalMeshCache.Find(FSkeletalMeshKey{ Info.SkeletalMesh, Info.LODIndex });
+            if (!M || !*M) { ToRemove.Add(Pair.Key); continue; }
+            rgl_entity_t E = nullptr;
+            if (rgl_entity_create(&E, Scene, *M) != RGL_SUCCESS || !E) { WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("rgl_entity_create failed; pending")); continue; }
+            Info.Entity = E;   // identity transform; world-space poses follow. Never call rgl_entity_set_transform.
+        }
+        if (rgl_entity_set_pose_world(Info.Entity, Info.PoseScratch.GetData(), Info.RawBoneNum) != RGL_SUCCESS)
+        {
+            RglDestroyChecked(rgl_entity_destroy(Info.Entity), TEXT("rgl_entity_destroy")); Info.Entity = nullptr;
+            WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("rgl_entity_set_pose_world failed; pending"));
+        }
+    }
+    for (USkeletalMeshComponent* K : ToRemove) UnregisterSkeletalComponent(K);
+}
+
+void FRGLSceneManager::SyncSkeletalComponents(UWorld* World)
+{
+    const bool bTickPolicy = CVarRGLSkeletalAlwaysTickPose.GetValueOnGameThread() != 0;
+    const int32 MaxEntities = FMath::Max(0, CVarRGLSkeletalMaxEntities.GetValueOnGameThread());
+    for (auto& Pair : SkeletalEntityMap) if (USkeletalMeshComponent* Live = Pair.Value.Component.Get()) ApplyTickPolicy(Live, Pair.Value, bTickPolicy);
+
+    // 1) Evaluate every skeletal component: eligible set (with distance), hard-disqualified set, retry set.
+    struct FCand { USkeletalMeshComponent* Comp; float DistSq; };
+    TArray<FCand> Eligible; TSet<USkeletalMeshComponent*> Disqualified; int32 RangeSkipped = 0, RetryLater = 0;
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* Actor = *It; if (!IsValid(Actor)) continue;
+        TArray<USkeletalMeshComponent*> Comps; Actor->GetComponents<USkeletalMeshComponent>(Comps);
+        for (USkeletalMeshComponent* C : Comps)
+        {
+            bool bOut = false, bRetry = false; FString Reason;
+            if (!ShouldRegisterSkeletalComponent(C, bOut, bRetry, Reason))
+            {
+                if (bRetry) { ++RetryLater; WarnSkeletalOnce(C, C->GetSkeletalMeshAsset(), TEXT("not readable yet, will retry: ") + Reason); }
+                else if (bOut) ++RangeSkipped;
+                else Disqualified.Add(C);          // scope/visibility/scale/bNoSkeletonUpdate/bRenderStatic: no hysteresis
+                continue;
+            }
+            float Best = TNumericLimits<float>::Max();
+            for (const auto& S : RegisteredSensors) Best = FMath::Min(Best, (float)FVector::DistSquared(S.Value.Position, C->Bounds.Origin));
+            Eligible.Add({ C, Best });
+        }
+    }
+    // 2) Unregister: dead, hard-disqualified, or out of range beyond hysteresis. Registrations that
+    //    survive this step but are NOT eligible ("retained" by hysteresis) still occupy VRAM, so
+    //    they are ranked alongside the eligible candidates in step 3 (spec §4.2-5).
+    TSet<USkeletalMeshComponent*> EligibleSet; for (const FCand& C : Eligible) EligibleSet.Add(C.Comp);
+    TArray<USkeletalMeshComponent*> ToRemove; TArray<FCand> Retained;
+    for (auto& Pair : SkeletalEntityMap)
+    {
+        USkeletalMeshComponent* Live = Pair.Value.Component.Get();
+        if (!Live || !IsValid(Live) || Disqualified.Contains(Pair.Key)) { ToRemove.Add(Pair.Key); continue; }
+        if (EligibleSet.Contains(Pair.Key)) continue;   // already ranked as an eligible candidate
+        const FBoxSphereBounds B = Live->Bounds;
+        if (!IsWithinAnySensor(B.Origin, B.SphereRadius, UnregistrationHysteresisCm)) { ToRemove.Add(Pair.Key); continue; }
+        float Best = TNumericLimits<float>::Max();
+        for (const auto& S : RegisteredSensors) Best = FMath::Min(Best, (float)FVector::DistSquared(S.Value.Position, B.Origin));
+        Retained.Add({ Pair.Key, Best });
+    }
+    for (USkeletalMeshComponent* K : ToRemove) UnregisterSkeletalComponent(K);
+    // 3) Budget over the UNION of eligible candidates and hysteresis-retained registrations,
+    //    nearest first. Everything past MaxEntities is unregistered FIRST (so MaxEntities=0 really
+    //    empties the set), then the in-budget newcomers are registered.
+    TArray<FCand> Ranked = MoveTemp(Eligible);
+    Ranked.Append(Retained);
+    Ranked.Sort([](const FCand& A, const FCand& B) { return A.DistSq < B.DistSq; });
+    TArray<USkeletalMeshComponent*> OverBudget;
+    for (int32 i = MaxEntities; i < Ranked.Num(); ++i)
+        if (SkeletalEntityMap.Contains(Ranked[i].Comp)) OverBudget.Add(Ranked[i].Comp);
+    for (USkeletalMeshComponent* K : OverBudget) UnregisterSkeletalComponent(K);
+    int32 Added = 0;
+    for (int32 i = 0, N = FMath::Min(MaxEntities, Ranked.Num()); i < N; ++i)
+    {
+        USkeletalMeshComponent* C = Ranked[i].Comp;
+        if (!SkeletalEntityMap.Contains(C) && RegisterSkeletalComponent(C)) ++Added;
+    }
+    if (Added || ToRemove.Num() || OverBudget.Num())
+        RGLLog::Info("RGLSceneManager[skeletal]: registered=", SkeletalEntityMap.Num(), " cachedMeshes=", SkeletalMeshCache.Num(),
+                     " added=", Added, " removed=", ToRemove.Num() + OverBudget.Num(), " range-skipped=", RangeSkipped, " retry-later=", RetryLater);
+}
+
+#if !UE_BUILD_SHIPPING
+void FRGLSceneManager::SyncSkeletalNow_ForTest(UWorld* World, double SimTime)
+{
+    CurrentSimTime = SimTime;
+    if (SkeletalEnabled()) SyncSkeletalComponents(World); else if (SkeletalEntityMap.Num() > 0) TeardownSkeletal();
+}
+void FRGLSceneManager::UpdateSkeletalPosesNow_ForTest(double SimTime)
+{
+    CurrentSimTime = SimTime;
+    const uint64 TimeNs = static_cast<uint64>(SimTime * 1e9);
+    RGL_CHECK(rgl_scene_set_time(Scene, TimeNs));      // mirrors Update(): time before poses
+    if (SkeletalEnabled()) UpdateSkeletalPoses();
+}
+int32 FRGLSceneManager::GetSkeletalLiveEntityCount_ForTest() const { int32 N = 0; for (const auto& P : SkeletalEntityMap) N += (P.Value.Entity != nullptr); return N; }
+#endif
 
 #endif // WITH_RGL

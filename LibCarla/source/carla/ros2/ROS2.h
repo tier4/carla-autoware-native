@@ -9,6 +9,7 @@
 #include "carla/Buffer.h"
 #include "carla/BufferView.h"
 #include "carla/geom/Transform.h"
+#include "carla/ros2/AutowareLocalizationConfig.h"
 #include "carla/ros2/ROS2CallbackData.h"
 #include "carla/streaming/detail/Types.h"
 
@@ -47,6 +48,7 @@ namespace ros2 {
   class CarlaEgoVehicleControlSubscriber;
   class AutowareController;
   class AutowarePublisher;
+  class AutowareLocalizationPublisher;
   class BasicSubscriber;
   class BasicPublisher;
 
@@ -215,6 +217,7 @@ class ROS2
       carla::streaming::detail::stream_id_type stream_id,
       const carla::geom::Transform sensor_transform,
       const sensor::s11n::VehicleStatusData &data,
+      const AutowareLocalizationConfig &localization_config,
       void *vehicle_actor,
       void *actor);
 
@@ -242,6 +245,7 @@ class ROS2
   std::shared_ptr<CarlaEgoVehicleControlSubscriber> _controller;
   std::shared_ptr<AutowareController> _autoware_controller;
   std::shared_ptr<AutowarePublisher> _autoware_publisher;
+  std::shared_ptr<AutowareLocalizationPublisher> _autoware_localization_publisher;
   std::shared_ptr<CarlaClockPublisher> _clock_publisher;
   std::unordered_map<void *, std::shared_ptr<CarlaPublisher>> _publishers;
   std::unordered_map<void *, std::shared_ptr<CarlaTransformPublisher>> _transforms;

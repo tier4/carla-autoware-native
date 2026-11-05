@@ -1,0 +1,14 @@
+// geometry_msgs/msg/AccelWithCovarianceStamped.idl
+// Canonical IDL definition for geometry_msgs::msg::AccelWithCovarianceStamped
+
+#include "std_msgs/msg/Header.idl"
+#include "geometry_msgs/msg/AccelWithCovariance.idl"
+
+module geometry_msgs {
+  module msg {
+    struct AccelWithCovarianceStamped {
+      std_msgs::msg::Header header;
+      geometry_msgs::msg::AccelWithCovariance accel;
+    };
+  };
+};

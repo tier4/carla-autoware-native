@@ -1,0 +1,13 @@
+// geometry_msgs/msg/AccelWithCovariance.idl
+// Canonical IDL definition for geometry_msgs::msg::AccelWithCovariance
+
+#include "geometry_msgs/msg/Accel.idl"
+
+module geometry_msgs {
+  module msg {
+    struct AccelWithCovariance {
+      geometry_msgs::msg::Accel accel;
+      double covariance[36];
+    };
+  };
+};
