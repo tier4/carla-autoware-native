@@ -86,6 +86,23 @@ def _get_editor_world():
     return unreal.EditorLevelLibrary.get_editor_world()
 
 
+def _save_current_level():
+    """Save the level currently open in the editor.
+
+    EditorLevelLibrary (Editor Scripting Utilities plugin) is deprecated since
+    UE5.0 and its save_current_level() only forwards to LevelEditorSubsystem,
+    so the subsystem is called directly; the legacy API is used as fallback.
+    """
+    subsys = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+    if subsys is not None:
+        saved = subsys.save_current_level()
+    else:
+        saved = unreal.EditorLevelLibrary.save_current_level()
+    if not saved:
+        unreal.log_error("editor_placer: failed to save the current level")
+    return saved
+
+
 def _resolve_soft_object(soft_ref):
     """Resolve a TSoftObjectPtr / SoftObjectPath and return the UObject.
 
@@ -1434,7 +1451,7 @@ def place_from_specs(
     if save_level:
         # Note: saving does not flush the Undo stack, but to require explicit
         # user approval, save_level=True is only executed when passed explicitly.
-        unreal.EditorLevelLibrary.save_current_level()
+        _save_current_level()
 
     # Report file output (added in Phase 4.2): complete, no omissions
     if report_path:
