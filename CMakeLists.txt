@@ -110,15 +110,31 @@ if (ENABLE_RGL)
   include (ExternalProject)
   set (RCLCPP_BRIDGE_SRC "${CMAKE_SOURCE_DIR}/Unreal/CarlaUnreal/Plugins/CarlaRGL/ThirdParty/RclcppBridge")
   if (IS_DIRECTORY "${RCLCPP_BRIDGE_SRC}")
-    # RclcppBridge needs `source /opt/ros/humble/setup.bash` equivalent:
+    # RclcppBridge needs `source /opt/ros/<distro>/setup.bash` equivalent:
     #   - CMAKE_PREFIX_PATH for find_package(rclcpp)
     #   - PYTHONPATH for ament_package (used by rclcpp's cmake config)
-    # We construct these from AMENT_PREFIX_PATH or fall back to /opt/ros/humble.
+    # We construct these from AMENT_PREFIX_PATH, else /opt/ros/$ROS_DISTRO, else
+    # the first installed of jazzy (Ubuntu 24.04) / humble (Ubuntu 22.04). Use the
+    # same distro the RGL library was built against (RglSetup.sh --ros-distro).
     if (DEFINED ENV{AMENT_PREFIX_PATH})
       set (RCLCPP_BRIDGE_ROS_PREFIX "$ENV{AMENT_PREFIX_PATH}")
+    elseif (DEFINED ENV{ROS_DISTRO})
+      set (RCLCPP_BRIDGE_ROS_PREFIX "/opt/ros/$ENV{ROS_DISTRO}")
     else ()
       set (RCLCPP_BRIDGE_ROS_PREFIX "/opt/ros/humble")
+      foreach (RCLCPP_BRIDGE_DISTRO jazzy humble)
+        if (IS_DIRECTORY "/opt/ros/${RCLCPP_BRIDGE_DISTRO}")
+          set (RCLCPP_BRIDGE_ROS_PREFIX "/opt/ros/${RCLCPP_BRIDGE_DISTRO}")
+          break ()
+        endif ()
+      endforeach ()
     endif ()
+    message (STATUS "RclcppBridge: ROS 2 prefix ${RCLCPP_BRIDGE_ROS_PREFIX}")
+    # Python version differs per distro (humble: 3.10, jazzy: 3.12).
+    file (GLOB RCLCPP_BRIDGE_ROS_PYTHONPATH
+      "${RCLCPP_BRIDGE_ROS_PREFIX}/lib/python3.*/site-packages"
+      "${RCLCPP_BRIDGE_ROS_PREFIX}/local/lib/python3.*/dist-packages")
+    list (JOIN RCLCPP_BRIDGE_ROS_PYTHONPATH ":" RCLCPP_BRIDGE_ROS_PYTHONPATH)
 
     set (RCLCPP_BRIDGE_BUILD_DIR "${CMAKE_BINARY_DIR}/rclcpp-bridge-prefix/src/rclcpp-bridge-build")
 
@@ -128,7 +144,7 @@ if (ENABLE_RGL)
       BINARY_DIR ${RCLCPP_BRIDGE_BUILD_DIR}
       CONFIGURE_COMMAND
         ${CMAKE_COMMAND} -E env
-          "PYTHONPATH=${RCLCPP_BRIDGE_ROS_PREFIX}/lib/python3.10/site-packages:${RCLCPP_BRIDGE_ROS_PREFIX}/local/lib/python3.10/dist-packages:$ENV{PYTHONPATH}"
+          "PYTHONPATH=${RCLCPP_BRIDGE_ROS_PYTHONPATH}:$ENV{PYTHONPATH}"
           "AMENT_PREFIX_PATH=${RCLCPP_BRIDGE_ROS_PREFIX}"
         ${CMAKE_COMMAND}
           -S ${RCLCPP_BRIDGE_SRC}

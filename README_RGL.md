@@ -9,7 +9,7 @@ steps required to clone, build and integrate RGL and its dependencies.
 
 > [!NOTE]
 > RGL integration requires an NVIDIA GPU, CUDA, NVIDIA OptiX SDK 7.2 and
-> ROS 2 Humble on the host machine. The GPU LiDAR pipeline also uses the
+> ROS 2 (Humble on Ubuntu 22.04, Jazzy on Ubuntu 24.04) on the host machine. The GPU LiDAR pipeline also uses the
 > `RclcppBridge` helper library under
 > `Unreal/CarlaUnreal/Plugins/CarlaRGL/ThirdParty/RclcppBridge` to coordinate
 > rclcpp/DDS domain ownership between CARLA and RGL.
@@ -20,10 +20,14 @@ steps required to clone, build and integrate RGL and its dependencies.
 * +32 GB RAM
 * NVIDIA RTX 3070 / 3080 / 3090 / RTX 4090 / RTX 5090 or better
 * 16 GB or more VRAM
-* Ubuntu 22.04 (Ubuntu 24.04 not yet verified)
-* CUDA Toolkit (tested with 12.x)
+* Ubuntu 22.04 or Ubuntu 24.04
+* CUDA Toolkit 12.x (tested with 12.9 on Ubuntu 24.04; RGL needs 12.6+ there)
 * NVIDIA OptiX SDK 7.2
-* ROS 2 Humble
+* ROS 2 Humble (Ubuntu 22.04) or ROS 2 Jazzy (Ubuntu 24.04), plus
+  `ros-<distro>-radar-msgs`, `ros-<distro>-fastrtps`,
+  `ros-<distro>-rmw-fastrtps-cpp`, `ros-<distro>-cyclonedds`,
+  `ros-<distro>-rmw-cyclonedds-cpp`, `python3-colcon-common-extensions` and
+  `patchelf`
 
 > [!NOTE]
 > Windows is not yet supported by `RglSetup.sh` — **TBD**.
@@ -55,11 +59,22 @@ cd CarlaUE5
 bash RglSetup.sh prepare --optix-dir=/path/to/NVIDIA-OptiX-SDK-7.2.0-linux64-x86_64
 ```
 
+Options worth knowing:
+
+* `--ros-distro=humble|jazzy` selects the ROS 2 distribution. The default is
+  `$ROS_DISTRO` when a ROS environment is sourced, otherwise Humble on
+  Ubuntu 22.04 and Jazzy on Ubuntu 24.04. Pass the same value to
+  `RglSetup.sh build`.
+* `--cuda-dir=PATH` points at a CUDA Toolkit whose `nvcc` is not on `PATH`,
+  e.g. a toolkit-only install under your home directory.
+* `--no-pcl` skips the PCL extension (CARLA's RGL plugin does not use it) and
+  saves the long vcpkg build.
+
 What it does:
 
-1. Verifies CUDA, OptiX SDK, ROS 2 Humble and `patchelf` are available.
+1. Verifies CUDA, OptiX SDK, ROS 2 (the selected distro) and `patchelf` are available.
 2. Clones `RobotecGPULidar/` alongside `CarlaUE5/` (git branch: `develop`).
-3. Sources `/opt/ros/humble/setup.bash` and installs RGL core, PCL, ROS 2 and
+3. Sources `/opt/ros/<distro>/setup.bash` and installs RGL core, PCL, ROS 2 and
    Agnocast dependencies via `python3 setup.py --install-*-deps`.
 4. Builds RGL with the selected extensions and produces
    `RobotecGPULidar/build/lib/libRobotecGPULidar.so`.
@@ -105,7 +120,9 @@ The script:
 
 `RclcppBridge` is built as an ExternalProject under `Build/` using the system
 compiler (not the UE toolchain), linking against `rclcpp` from
-`/opt/ros/humble`.
+`$AMENT_PREFIX_PATH`, else `/opt/ros/$ROS_DISTRO` (`RglSetup.sh build` sets it
+from `--ros-distro`), else whichever of `/opt/ros/jazzy` and `/opt/ros/humble`
+is installed. Use the same distro RGL was prepared with.
 
 ## Rebuilding CARLA (manual)
 
@@ -302,7 +319,7 @@ verify all eight supported LiDAR models against the production ROS 2
 driver `tier4/nebula`:
 
 ```bash
-source /opt/ros/humble/setup.bash
+source /opt/ros/<distro>/setup.bash   # humble or jazzy
 source /path/to/colcon_workspace/install/setup.bash
 
 cd PythonAPI/rgl/tests

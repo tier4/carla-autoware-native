@@ -12,6 +12,10 @@
 #
 # Options for 'prepare':
 #   --optix-dir=PATH          OptiX SDK path (or set OptiX_INSTALL_DIR env var)
+#   --cuda-dir=PATH           CUDA Toolkit path when nvcc is not on PATH
+#                             (e.g. a toolkit-only install under $HOME)
+#   --ros-distro=NAME         ROS 2 distro: humble or jazzy (default: $ROS_DISTRO,
+#                             else humble on Ubuntu 22.04 / jazzy on Ubuntu 24.04)
 #   --rgl-branch=BRANCH       RGL git branch (default: develop)
 #   --rgl-repo=URL            RGL git repository URL
 #   --skip-rgl-build          Skip RGL build (use pre-built library)
@@ -25,6 +29,8 @@
 #
 # Options for 'build':
 #   --package=TYPE            shipping, development, launch, none (default: none)
+#   --ros-distro=NAME         ROS 2 distro RclcppBridge builds against; must match
+#                             the one RGL was prepared with (same default as above)
 #   --no-clear-ddc            Skip automatic DDC clear on launch (default: clear
 #                             when git HEAD has changed since last launch)
 
@@ -37,8 +43,28 @@ workspace_path="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 # ============================================================================
 
 usage() {
-    head -30 "$0" | tail -29
+    sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
+}
+
+# ============================================================================
+# Helper: default_ros_distro
+# ----------------------------------------------------------------------------
+# Print the ROS 2 distro to use when --ros-distro is not given: $ROS_DISTRO if
+# a ROS environment is sourced, else the distro RGL supports on this Ubuntu
+# release (22.04 -> humble, 24.04 -> jazzy).
+# ============================================================================
+
+default_ros_distro() {
+    if [ -n "${ROS_DISTRO:-}" ]; then
+        echo "$ROS_DISTRO"
+        return
+    fi
+    case "$(. /etc/os-release 2>/dev/null && echo "$VERSION_ID")" in
+        22.04) echo "humble" ;;
+        24.04) echo "jazzy" ;;
+        *)     echo "humble" ;;
+    esac
 }
 
 # ============================================================================
@@ -249,6 +275,9 @@ verify_ddc_freshness() {
 
 cmd_prepare() {
     local optix_dir="${OptiX_INSTALL_DIR:-}"
+    local cuda_dir=""
+    local ros_distro
+    ros_distro="$(default_ros_distro)"
     local rgl_branch="develop"
     local rgl_repo="https://github.com/RobotecAI/RobotecGPULidar.git"
     local skip_rgl_build=0
@@ -264,6 +293,8 @@ cmd_prepare() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --optix-dir=*)  optix_dir="${1#*=}"; shift ;;
+            --cuda-dir=*)   cuda_dir="${1#*=}"; shift ;;
+            --ros-distro=*) ros_distro="${1#*=}"; shift ;;
             --rgl-branch=*) rgl_branch="${1#*=}"; shift ;;
             --rgl-repo=*)   rgl_repo="${1#*=}"; shift ;;
             --skip-rgl-build) skip_rgl_build=1; shift ;;
@@ -283,6 +314,8 @@ cmd_prepare() {
     echo "========================================================================"
     echo "  workspace:    $workspace_path"
     echo "  optix_dir:    ${optix_dir:-(not set)}"
+    echo "  cuda_dir:     ${cuda_dir:-(nvcc from PATH)}"
+    echo "  ros_distro:   $ros_distro"
     echo "  rgl_branch:   $rgl_branch"
     echo "  extensions:   pcl=$ext_pcl ros2=$ext_ros2_standalone weather=$ext_weather agnocast=$ext_agnocast udp=$ext_udp"
     echo "  ext_patches:  ${ext_patch_dir:-(none)}"
@@ -296,6 +329,11 @@ cmd_prepare() {
     local errors=0
 
     # CUDA
+    if [ -n "$cuda_dir" ]; then
+        export PATH="$cuda_dir/bin:$PATH"
+        export CUDACXX="$cuda_dir/bin/nvcc"
+        export CUDAToolkit_ROOT="$cuda_dir"
+    fi
     if command -v nvcc &>/dev/null; then
         echo "[OK] CUDA: $(nvcc --version | grep 'release' | sed 's/.*release //' | sed 's/,.*//')"
     else
@@ -319,12 +357,19 @@ cmd_prepare() {
         echo "[OK] OptiX SDK: $optix_dir"
     fi
 
-    # ROS2 Humble
-    if [ -f /opt/ros/humble/setup.bash ]; then
-        echo "[OK] ROS2 Humble: /opt/ros/humble/"
+    # ROS 2 (RGL supports humble and jazzy)
+    case "$ros_distro" in
+        humble|jazzy) ;;
+        *)
+            echo "[ERROR] Unsupported ROS 2 distro '$ros_distro' (RGL supports humble, jazzy)"
+            errors=1
+            ;;
+    esac
+    if [ -f "/opt/ros/$ros_distro/setup.bash" ]; then
+        echo "[OK] ROS2 $ros_distro: /opt/ros/$ros_distro/"
     else
-        echo "[ERROR] ROS2 Humble not found at /opt/ros/humble/setup.bash"
-        echo "  Install: https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html"
+        echo "[ERROR] ROS2 $ros_distro not found at /opt/ros/$ros_distro/setup.bash"
+        echo "  Install: https://docs.ros.org/en/$ros_distro/Installation/Ubuntu-Install-Debs.html"
         errors=1
     fi
 
@@ -421,7 +466,7 @@ cmd_prepare() {
     fi
 
     # Source ROS2
-    source /opt/ros/humble/setup.bash
+    source "/opt/ros/$ros_distro/setup.bash"
     export OptiX_INSTALL_DIR="$optix_dir"
 
     # Install core dependencies
@@ -498,11 +543,14 @@ cmd_prepare() {
 cmd_build() {
     local package_type="none"
     local _no_clear_ddc=0
+    local ros_distro
+    ros_distro="$(default_ros_distro)"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --package=*) package_type="${1#*=}"; shift ;;
             --no-clear-ddc) _no_clear_ddc=1; shift ;;
+            --ros-distro=*) ros_distro="${1#*=}"; shift ;;
             *) echo "Unknown option for build: $1"; usage ;;
         esac
     done
@@ -526,6 +574,13 @@ cmd_build() {
         fi
     fi
     echo "CARLA_UNREAL_ENGINE_PATH=$CARLA_UNREAL_ENGINE_PATH"
+
+    # RclcppBridge (top-level CMakeLists.txt) resolves its ROS 2 prefix from
+    # AMENT_PREFIX_PATH, else /opt/ros/$ROS_DISTRO.
+    if [ -z "${AMENT_PREFIX_PATH:-}" ]; then
+        export ROS_DISTRO="$ros_distro"
+    fi
+    echo "ROS 2 for RclcppBridge: ${AMENT_PREFIX_PATH:-/opt/ros/$ROS_DISTRO}"
 
     cd "$workspace_path"
 
