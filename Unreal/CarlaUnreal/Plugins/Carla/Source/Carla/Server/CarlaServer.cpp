@@ -1386,6 +1386,17 @@ void FCarlaServer::FPimpl::BindActions()
       ForceInPrimary = true;
     }
 
+    // tier4: the RGL lidar publishes only through RGL's own ROS 2 node
+    // (rgl_lidar_topic_name); CARLA's native ROS 2 never carries it. Clients
+    // built from this tree warn and skip the call; this covers other clients.
+    if (Desc == "sensor.lidar.rgl")
+    {
+      UE_LOG(LogCarla, Warning,
+          TEXT("enable_for_ros() ignored for sensor %d '%s': the RGL point cloud is published only by RGL itself (set rgl_lidar_topic_name)"),
+          sensor_id, *Desc);
+      return R<void>::Success();
+    }
+
     if (SecondaryServer->HasClientsConnected() && !ForceInPrimary)
     {
       // multi-gpu

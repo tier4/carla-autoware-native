@@ -20,10 +20,6 @@
 #include <carla/Logging.h>
 #include <carla/geom/Math.h>
 #include <carla/sensor/data/LidarData.h>
-#if defined(WITH_ROS2)
-#include <carla/ros2/ROS2.h>
-#endif
-#include <carla/streaming/detail/Token.h>
 #include <util/enable-ue4-macros.h>
 
 #include <cmath>
@@ -153,43 +149,13 @@ void ARGLLidar::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeco
         DataStream.SerializeAndSend(*this, LidarMeasurement, DataStream.PopBufferFromPool());
     }
 
-#if defined(WITH_ROS2)
-    // Only publish via CARLA's built-in ROS2 if enable_for_ros() was called.
-    // This checks the per-sensor flag set by the Python API, not the global --ros2 flag.
-    auto ROS2 = carla::ros2::ROS2::GetInstance();
-    if (ROS2->IsEnabled())
-    {
-        auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
-        auto *GameInstance = UCarlaStatics::GetGameInstance(GetWorld());
-        const bool bSensorEnabledForRos = GameInstance &&
-            GameInstance->GetServer().GetStreamingServer().IsEnabledForROS(StreamId);
-
-        if (bSensorEnabledForRos)
-        {
-            TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Send RGL LiDAR");
-            auto DataStream = GetDataStream(*this);
-            AActor* ParentActor = GetAttachParentActor();
-            if (IsValid(ParentActor))
-            {
-                FTransform LocalTransformRelativeToParent =
-                    GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-                ROS2->ProcessDataFromLidar(
-                    DataStream.GetSensorType(), StreamId,
-                    LocalTransformRelativeToParent,
-                    Description.Channels, Description.UpperFovLimit, Description.LowerFovLimit,
-                    LidarMeasurement, this);
-            }
-            else
-            {
-                ROS2->ProcessDataFromLidar(
-                    DataStream.GetSensorType(), StreamId,
-                    DataStream.GetSensorTransform(),
-                    Description.Channels, Description.UpperFovLimit, Description.LowerFovLimit,
-                    LidarMeasurement, this);
-            }
-        }
-    }
-#endif
+    // ROS 2 output of the RGL point cloud comes only from RGL's own rclcpp
+    // node (rgl_lidar_topic_name). It is deliberately not routed through
+    // CARLA's native ROS 2 publisher: that path re-packs the points into
+    // carla::sensor::data::LidarData (approximate channel, no per-point time)
+    // and costs a full extra serialization per scan. Upstream enables every
+    // sensor stream for ROS 2 by default, so leaving this path in made each RGL
+    // scan publish twice.
 }
 
 // ============================================================================

@@ -80,15 +80,32 @@ namespace client {
     listening_mask.reset(GBufferId + 1);
   }
 
+  // tier4: the RGL lidar publishes its point cloud only through RGL's own
+  // ROS 2 node (rgl_lidar_topic_name), never through CARLA's native ROS 2.
+  static bool IsRGLLidar(const ServerSideSensor &sensor) {
+    return sensor.GetTypeId() == "sensor.lidar.rgl";
+  }
+
   void ServerSideSensor::EnableForROS() {
+    if (IsRGLLidar(*this)) {
+      log_warning("enable_for_ros() has no effect on sensor.lidar.rgl: its point cloud "
+                  "is published only by RGL itself. Set the rgl_lidar_topic_name attribute instead.");
+      return;
+    }
     GetEpisode().Lock()->EnableForROS(*this);
   }
 
   void ServerSideSensor::DisableForROS() {
+    if (IsRGLLidar(*this)) {
+      return;
+    }
     GetEpisode().Lock()->DisableForROS(*this);
   }
 
   bool ServerSideSensor::IsEnabledForROS(){
+    if (IsRGLLidar(*this)) {
+      return false;
+    }
     return GetEpisode().Lock()->IsEnabledForROS(*this);
   }
 
