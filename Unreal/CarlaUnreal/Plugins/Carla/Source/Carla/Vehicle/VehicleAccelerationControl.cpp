@@ -1,4 +1,7 @@
 // Copyright (c) 2026 TIER IV, Inc.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
 
 // TODO: Add gear-aware input (e.g. allow reverse when in reverse gear, keep forward-only in drive).
 
@@ -35,7 +38,7 @@ void UVehicleAccelerationControl::Activate(bool bReset)
 {
   Super::Activate(bReset);
 
-  DesiredTargetAcceleration = FVector();
+  TargetAcceleration = FVector();
   FilteredTargetAcceleration = FVector();
   AppliedAcceleration = FVector();
   SetComponentTickEnabled(true);
@@ -45,7 +48,7 @@ void UVehicleAccelerationControl::Activate(FVector Acceleration, bool bReset)
 {
   Super::Activate(bReset);
 
-  DesiredTargetAcceleration = Acceleration;
+  TargetAcceleration = Acceleration;
   FilteredTargetAcceleration = Acceleration;
   AppliedAcceleration = Acceleration;
   if (PrimitiveComponent != nullptr)
@@ -64,9 +67,9 @@ void UVehicleAccelerationControl::Activate(FVector Acceleration, bool bReset)
 
 void UVehicleAccelerationControl::SetTargetAcceleration(const FVector& Acceleration)
 {
-  DesiredTargetAcceleration = Acceleration;
-  // Do not reset AppliedAcceleration or ControlledForwardSpeed here; jerk limiting
-  // will move AppliedAcceleration towards the (possibly filtered) target over time.
+  TargetAcceleration = Acceleration;
+  // Do not reset AppliedAcceleration or ControlledForwardSpeed here; the jerk limit
+  // moves AppliedAcceleration towards the (possibly filtered) target over time.
 }
 
 void UVehicleAccelerationControl::SetJerkLimit(float InJerkLimitPosCmps3, float InJerkLimitNegCmps3)
@@ -92,25 +95,24 @@ void UVehicleAccelerationControl::TickComponent(float DeltaTime, enum ELevelTick
 
   const FTransform Transf = OwnerVehicle->GetActorTransform();
   const FVector ForwardDir = Transf.TransformVectorNoScale(FVector(1, 0, 0)).GetSafeNormal();
-
-  // First-order lag (exponential smoothing) on the target acceleration in vehicle-local space.
-  // alpha = 1 - exp(-dt/tau)
-  FVector TargetAcceleration = DesiredTargetAcceleration;
+  // tier4: optional first-order lag (exponential smoothing) on the target, in
+  // vehicle-local space: alpha = 1 - exp(-dt/tau).
+  FVector CommandAcceleration = TargetAcceleration;
   if (DeltaTime > 0.0f && TargetLagTauS > 0.0f)
   {
     const float Alpha = 1.0f - FMath::Exp(-DeltaTime / TargetLagTauS);
-    FilteredTargetAcceleration = FilteredTargetAcceleration + Alpha * (DesiredTargetAcceleration - FilteredTargetAcceleration);
-    TargetAcceleration = FilteredTargetAcceleration;
+    FilteredTargetAcceleration += Alpha * (TargetAcceleration - FilteredTargetAcceleration);
+    CommandAcceleration = FilteredTargetAcceleration;
   }
   else
   {
-    FilteredTargetAcceleration = DesiredTargetAcceleration;
+    FilteredTargetAcceleration = TargetAcceleration;
   }
 
-  // Apply jerk limits (rate limit on acceleration command) in vehicle-local space.
-  if (DeltaTime > 0.0f)
+  // tier4: optional jerk limit (rate limit on the acceleration command) in vehicle-local space.
+  if (DeltaTime > 0.0f && (JerkLimitPosCmps3 > 0.0f || JerkLimitNegCmps3 > 0.0f))
   {
-    const FVector Diff = TargetAcceleration - AppliedAcceleration;
+    const FVector Diff = CommandAcceleration - AppliedAcceleration;
     const float MaxInc = (JerkLimitPosCmps3 > 0.0f) ? (JerkLimitPosCmps3 * DeltaTime) : TNumericLimits<float>::Max();
     const float MaxDec = (JerkLimitNegCmps3 > 0.0f) ? (JerkLimitNegCmps3 * DeltaTime) : TNumericLimits<float>::Max();
     AppliedAcceleration.X += FMath::Clamp(Diff.X, -MaxDec, MaxInc);
@@ -119,7 +121,7 @@ void UVehicleAccelerationControl::TickComponent(float DeltaTime, enum ELevelTick
   }
   else
   {
-    AppliedAcceleration = TargetAcceleration;
+    AppliedAcceleration = CommandAcceleration;
   }
 
   const FVector WorldAcceleration = Transf.TransformVector(AppliedAcceleration);

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2021 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -8,32 +8,23 @@
 
 #include <iostream>
 #include <fstream>
+#include "OpenDriveToMap.h"
 
-#include <util/ue-header-guard-begin.h>
 #if WITH_EDITOR
 #include "FileHelpers.h"
 #endif
-#include "UObject/ConstructorHelpers.h"
-#include <util/ue-header-guard-end.h>
+#include "UObject/SoftObjectPath.h"
 
 DEFINE_LOG_CATEGORY(LogCarlaToolsMapGenerateTileCommandlet);
 
 
 UGenerateTileCommandlet::UGenerateTileCommandlet()
 {
-#if WITH_EDITOR
-  ConstructorHelpers::FClassFinder<UOpenDriveToMap> OpenDrivelassFinder(TEXT("/CarlaTools/OnroadMapGenerator/BP_OpenDriveToMap"));
-  OpenDriveClass = OpenDrivelassFinder.Class;
-#endif
 }
 
 UGenerateTileCommandlet::UGenerateTileCommandlet(const FObjectInitializer& Initializer)
   : Super(Initializer)
 {
-#if WITH_EDITOR
-  ConstructorHelpers::FClassFinder<UOpenDriveToMap> OpenDrivelassFinder(TEXT("/CarlaTools/OnroadMapGenerator/BP_OpenDriveToMap"));
-  OpenDriveClass = OpenDrivelassFinder.Class;
-#endif
 }
 
 #if WITH_EDITORONLY_DATA
@@ -72,14 +63,33 @@ int32 UGenerateTileCommandlet::Main(const FString &Params)
   }
 
 
+  // Resolved here, not in the constructor: the blueprint lives in the content-only
+  // CarlaDigitalTwinsTool plugin, which most checkouts do not have.
+  if (OpenDriveClass == nullptr)
+  {
+    OpenDriveClass = FSoftClassPath(
+        TEXT("/CarlaDigitalTwinsTool/BP_OpenDriveToMap.BP_OpenDriveToMap_C")).TryLoadClass<UOpenDriveToMap>();
+  }
 
+  if(OpenDriveClass == nullptr )
+  {
+    UE_LOG(LogCarlaToolsMapGenerateTileCommandlet, Error,
+        TEXT("OpenDrive class is not properly set: the CarlaDigitalTwinsTool content is not installed"));
+    return -1;
+  }
   OpenDriveMap = NewObject<UOpenDriveToMap>(this, OpenDriveClass);
+  if(OpenDriveMap == nullptr )
+  {
+    UE_LOG(LogCarlaToolsMapGenerateTileCommandlet, Error, TEXT("OpenDrive object is not properly spawned"));
+    return -1;
+  }
   OpenDriveMap->FilePath = ParamsMap["FilePath"];
   OpenDriveMap->BaseLevelName = ParamsMap["BaseLevelName"];
   OpenDriveMap->OriginGeoCoordinates = FVector2D(FCString::Atof(*ParamsMap["GeoCoordsX"]),FCString::Atof(*ParamsMap["GeoCoordsY"]));
   OpenDriveMap->CurrentTilesInXY = FIntVector(FCString::Atof(*ParamsMap["CTileX"]),FCString::Atof(*ParamsMap["CTileY"]), 0);
   // Parse Params
   OpenDriveMap->GenerateTile();
+
   return 0;
 }
 

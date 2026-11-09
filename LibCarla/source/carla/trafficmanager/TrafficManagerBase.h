@@ -35,8 +35,8 @@ public:
   /// To release the traffic manager.
   virtual void Release() = 0;
 
-  /// To reset the traffic manager.
-  virtual void Reset() = 0;
+  /// To reset the traffic manager for the episode @a episode_id.
+  virtual void Reset(uint64_t episode_id) = 0;
 
   /// Protected constructor for singleton lifecycle management.
   TrafficManagerBase() {};
@@ -68,6 +68,12 @@ public:
   /// Method to set a global lane offset displacement from the center line.
   /// Positive values imply a right offset while negative ones mean a left one.
   virtual void SetGlobalLaneOffset(float const offset) = 0;
+
+  /// Method to enable/disable the wide-turn manoeuvre for a single large vehicle.
+  virtual void SetLargeVehicleWideTurn(const ActorPtr &actor, const bool enable) = 0;
+
+  /// Method to enable/disable the wide-turn manoeuvre globally for large vehicles.
+  virtual void SetGlobalLargeVehicleWideTurn(const bool enable) = 0;
 
   /// Method to set the automatic management of the vehicle lights
   virtual void SetUpdateVehicleLights(const ActorPtr &actor, const bool do_update) = 0;

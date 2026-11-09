@@ -6,10 +6,9 @@
 
 #pragma once
 
-#include <variant>
+#include <cstdint>
 #include <functional>
-
-#include "carla/ros2/data_types.h"
+#include <variant>
 
 namespace carla {
 namespace ros2 {
@@ -25,7 +24,7 @@ namespace ros2 {
     bool    manual_gear_shift;
   };
 
-  struct VehicleAckermannControl
+  struct AckermannControl
   {
     float steer;
     float steer_speed;
@@ -34,14 +33,23 @@ namespace ros2 {
     float jerk;
   };
 
-  // VehicleAccelerationControl is defined in data_types.h
+  /// Control decoded from Autoware's /control/command/control_cmd:
+  /// longitudinal acceleration [m/s^2] + steering (CARLA sign convention,
+  /// already passed through the AutowareSteeringCompensation LUT).
+  struct VehicleAccelerationControl
+  {
+    float acceleration;
+    float steer;
+    float steer_speed;
+  };
 
-    struct MessageControl
+  struct MessageControl
   {
     const char* message;
   };
 
-  using ROS2CallbackData = std::variant<VehicleControl, VehicleAckermannControl, VehicleAccelerationControl>;
+  using ROS2CallbackData =
+      std::variant<VehicleControl, AckermannControl, VehicleAccelerationControl>;
   using ROS2MessageCallbackData = std::variant<MessageControl>;
 
   using ActorCallback = std::function<void(void *actor, ROS2CallbackData data)>;

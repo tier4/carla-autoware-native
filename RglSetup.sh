@@ -548,7 +548,6 @@ cmd_build() {
         -DCMAKE_BUILD_TYPE=Release \
         -DENABLE_ROS2=ON \
         -DENABLE_RGL=ON \
-        -DCARLA_DDS_VENDOR=CycloneDDS \
         -DBUILD_LIBCARLA_TESTS=OFF \
         -DCARLA_UNREAL_ENGINE_PATH="$CARLA_UNREAL_ENGINE_PATH"
 
@@ -599,7 +598,7 @@ cmd_build() {
     echo "  cmake --build Build --target package-development  # Development"
     echo ""
     echo "To run the server:"
-    echo "  cd Build/Package/Carla-*-Linux-Shipping/Linux"
+    echo "  cd Build/Package/Carla-*-Linux-Shipping"
     echo "  ./CarlaUnreal.sh --ros2"
 }
 

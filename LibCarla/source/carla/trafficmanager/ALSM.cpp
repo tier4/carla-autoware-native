@@ -1,6 +1,11 @@
 
+#include <algorithm>
+#include <cctype>
+#include <string>
+
 #include "boost/pointer_cast.hpp"
 
+#include "carla/Logging.h"
 #include "carla/client/Actor.h"
 #include "carla/client/Vehicle.h"
 #include "carla/client/Walker.h"
@@ -23,6 +28,7 @@ ALSM::ALSM(
   const cc::World &world,
   const LocalMapPtr &local_map,
   SimulationState &simulation_state,
+  std::unordered_map<ActorId, std::pair<float, bool>> &large_vehicles,
   LocalizationStage &localization_stage,
   CollisionStage &collision_stage,
   TrafficLightStage &traffic_light_stage,
@@ -40,7 +46,8 @@ ALSM::ALSM(
     collision_stage(collision_stage),
     traffic_light_stage(traffic_light_stage),
     motion_plan_stage(motion_plan_stage),
-    vehicle_light_stage(vehicle_light_stage) {}
+    vehicle_light_stage(vehicle_light_stage),
+    large_vehicles(large_vehicles) {}
 
 void ALSM::Update() {
 
@@ -176,20 +183,40 @@ void ALSM::UpdateRegisteredActorsData(const bool hybrid_physics_mode, ALSM::Idle
   if (is_respawn_vehicles && !hero_actor_present) {
     track_traffic.SetHeroLocation(cg::Location(0,0,0));
   }
+  // A vehicle can die after the snapshot (destroyed through its handle, or by a map load): drop it, don't throw.
+  std::vector<ActorId> vanished_heroes;
+  std::vector<ActorId> vanished_vehicles;
   // Update first the information regarding any hero vehicle.
   for (auto &hero_actor_info: hero_actors){
-    if (is_respawn_vehicles) {
-      track_traffic.SetHeroLocation(hero_actor_info.second->GetTransform().location);
+    try {
+      if (is_respawn_vehicles) {
+        track_traffic.SetHeroLocation(hero_actor_info.second->GetTransform().location);
+      }
+      UpdateData(hybrid_physics_mode, hero_actor_info.second, hero_actor_present, physics_radius_square);
+    } catch (const std::exception &e) {
+      log_debug("Traffic Manager: dropping hero vehicle", hero_actor_info.first, ":", e.what());
+      vanished_heroes.push_back(hero_actor_info.first);
     }
-    UpdateData(hybrid_physics_mode, hero_actor_info.second, hero_actor_present, physics_radius_square);
   }
   // Update information for all other registered vehicles.
   for (const Actor &vehicle : vehicle_list) {
     ActorId actor_id = vehicle->GetId();
     if (hero_actors.find(actor_id) == hero_actors.end()) {
-      UpdateData(hybrid_physics_mode, vehicle, hero_actor_present, physics_radius_square);
+      try {
+        UpdateData(hybrid_physics_mode, vehicle, hero_actor_present, physics_radius_square);
+      } catch (const std::exception &e) {
+        log_debug("Traffic Manager: dropping vehicle", actor_id, ":", e.what());
+        vanished_vehicles.push_back(actor_id);
+        continue;
+      }
       UpdateIdleTime(max_idle_time, actor_id);
     }
+  }
+  for (const ActorId actor_id : vanished_heroes) {
+    RemoveActor(actor_id, false);
+  }
+  for (const ActorId actor_id : vanished_vehicles) {
+    RemoveActor(actor_id, true);
   }
 }
 
@@ -262,6 +289,20 @@ void ALSM::UpdateData(const bool hybrid_physics_mode, const Actor &vehicle,
     cg::Vector3D dimensions = vehicle_ptr->GetBoundingBox().extent;
     StaticAttributes attributes{ActorType::Vehicle, dimensions.x, dimensions.y, dimensions.z};
 
+    // One-time query of the physical steering lock: the motion-plan stage
+    // normalizes steering authority (gains and envelope) by it. Guarded so a
+    // failed RPC (e.g. the actor died this frame) falls back to the default.
+    try {
+      const auto physics_control = vehicle_ptr->GetPhysicsControl();
+      float max_steer_angle = 0.0f;
+      for (const auto &wheel : physics_control.wheels) {
+        max_steer_angle = std::max(max_steer_angle, wheel.max_steer_angle);
+      }
+      if (max_steer_angle > 1.0f) {
+        attributes.max_steer_angle = max_steer_angle;
+      }
+    } catch (const std::exception &) {}
+
     simulation_state.AddActor(actor_id, kinematic_state, attributes, tl_state);
   }
 }
@@ -312,7 +353,9 @@ void ALSM::UpdateUnregisteredActorsData() {
                                            actor_location + cg::Location(-extent.x * heading_vector)};
       for (cg::Location &vertex: corners) {
         SimpleWaypointPtr nearest_waypoint = local_map->GetWaypoint(vertex);
-        nearest_waypoints.push_back(nearest_waypoint);
+        if (nearest_waypoint != nullptr) {
+          nearest_waypoints.push_back(nearest_waypoint);
+        }
       }
     }
     else if (type_id.front() == 'w') {
@@ -330,7 +373,9 @@ void ALSM::UpdateUnregisteredActorsData() {
 
       // Identify occupied waypoints.
       SimpleWaypointPtr nearest_waypoint = local_map->GetWaypoint(actor_location);
-      nearest_waypoints.push_back(nearest_waypoint);
+      if (nearest_waypoint != nullptr) {
+        nearest_waypoints.push_back(nearest_waypoint);
+      }
     }
 
     track_traffic.UpdateUnregisteredGridPosition(actor_id, nearest_waypoints);
@@ -364,6 +409,32 @@ bool ALSM::IsVehicleStuck(const ActorId& actor_id) {
   return false;
 }
 
+void ALSM::AddActor(const Actor actor) {
+  const ActorId actor_id = actor->GetId();
+  for (auto &&attribute : actor->GetAttributes()) {
+    if (attribute.GetId() != "base_type") {
+      continue;
+    }
+    std::string value = attribute.GetValue();
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](unsigned char c) { return std::tolower(c); });
+    const std::string_view value_view{value};
+    const auto match = std::find(
+        large_vehicle_types.begin(),
+        large_vehicle_types.end(),
+        value_view);
+    if (match != large_vehicle_types.end()) {
+      large_vehicles[actor_id] = std::make_pair(0.0f, false);
+    }
+    // There is at most one "base_type" attribute, so stop scanning once it
+    // has been handled.
+    break;
+  }
+}
+
 void ALSM::RemoveActor(const ActorId actor_id, const bool registered_actor) {
   if (registered_actor) {
     registered_vehicles.Remove({actor_id});
@@ -374,6 +445,8 @@ void ALSM::RemoveActor(const ActorId actor_id, const bool registered_actor) {
     traffic_light_stage.RemoveActor(actor_id);
     motion_plan_stage.RemoveActor(actor_id);
     vehicle_light_stage.RemoveActor(actor_id);
+
+    large_vehicles.erase(actor_id);
   }
   else {
     unregistered_actors.erase(actor_id);

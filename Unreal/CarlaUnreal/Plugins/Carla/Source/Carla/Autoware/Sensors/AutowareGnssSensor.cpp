@@ -1,214 +1,237 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
-#include "AutowareGnssSensor.h"
+#include "Carla/Autoware/Sensors/AutowareGnssSensor.h"
 
-#include <carla/rpc/Vector3D.h>
+#include "Carla.h"
+#include "Carla/Actor/ActorBlueprintFunctionLibrary.h"
+#include "Carla/Autoware/Game/AutowareWorldSettings.h"
+#include "Carla/Game/CarlaEpisode.h"
+#include "Carla/Game/CarlaStatics.h"
+#include "Carla/MapGen/LargeMapManager.h"
 
-#include "Actor/ActorBlueprintFunctionLibrary.h"
-#include "Autoware/Game/AutowareWorldSettings.h"
-#include "Game/CarlaStatics.h"
+#include <util/disable-ue4-macros.h>
+#include "carla/geom/Vector3D.h"
+#include "carla/ros2/ROS2.h"
+#include <util/enable-ue4-macros.h>
 
-
-// Sets default values
-AAutowareGnssSensor::AAutowareGnssSensor(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
+AAutowareGnssSensor::AAutowareGnssSensor(const FObjectInitializer &ObjectInitializer)
+  : Super(ObjectInitializer)
 {
-	PrimaryActorTick.bCanEverTick = true;
-	RandomEngine = CreateDefaultSubobject<URandomEngine>(TEXT("RandomEngine"));
+  PrimaryActorTick.bCanEverTick = true;
+  RandomEngine = CreateDefaultSubobject<URandomEngine>(TEXT("RandomEngine"));
 }
 
 FActorDefinition AAutowareGnssSensor::GetSensorDefinition()
 {
-	UE_LOG(LogCarla, Log, TEXT("GNSS Sensor Definition set to: AUTOWARE GNSS"));
-	return UActorBlueprintFunctionLibrary::MakeAutowareGnssDefinition();
+  return UActorBlueprintFunctionLibrary::MakeAutowareGnssDefinition();
 }
 
-// Called when the game starts or when spawned
 void AAutowareGnssSensor::BeginPlay()
 {
-	Super::BeginPlay();
-	
-	// Load mgrs data from active level
-	LoadMgrsData();
-	
-	const UCarlaEpisode* episode = UCarlaStatics::GetCurrentEpisode(GetWorld());
-	CurrentGeoProjection = episode->GetGeoProjection(); // Can be directly set inside gnss sensor, but carla does it in game mode base and attaches it into episode
+  Super::BeginPlay();
+
+  // Load MGRS data from the active level's world settings.
+  LoadMgrsData();
+
+  const UCarlaEpisode* episode = UCarlaStatics::GetCurrentEpisode(GetWorld());
+  CurrentGeoProjection = episode->GetGeoProjection();
 }
 
-void AAutowareGnssSensor::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
+void AAutowareGnssSensor::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaSeconds)
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE(AAutowareGnssSensor::PostPhysTick);
+  TRACE_CPUPROFILER_EVENT_SCOPE(AAutowareGnssSensor::PostPhysTick);
 
-	FVector ActorLocation = GetActorLocation();
-	carla::geom::Location Location = ActorLocation;
-	carla::geom::GeoLocation CurrentLocation = CurrentGeoProjection.TransformToGeoLocation(Location);
-	
-	LatitudeValue = CurrentLocation.latitude;
-	LongitudeValue = CurrentLocation.longitude;
-	AltitudeValue = CurrentLocation.altitude;
-	
-	if (bApplyNoiseError)
-	{
-		// Compute the noise for the sensor
-		const float LatError = RandomEngine->GetNormalDistribution(0.0f, LatitudeDeviation);
-		const float LonError = RandomEngine->GetNormalDistribution(0.0f, LongitudeDeviation);
-		const float AltError = RandomEngine->GetNormalDistribution(0.0f, AltitudeDeviation);
+  FVector ActorLocation = GetActorLocation();
+  ALargeMapManager * LargeMap = UCarlaStatics::GetLargeMapManager(GetWorld());
+  if (LargeMap)
+  {
+    ActorLocation = LargeMap->LocalToGlobalLocation(ActorLocation);
+  }
+  carla::geom::Location Location = ActorLocation;
+  carla::geom::GeoLocation CurrentLocation = CurrentGeoProjection.TransformToGeoLocation(Location);
 
-		// Apply the noise to the sensor
-		LatitudeValue += LatitudeBias + LatError;
-		LongitudeValue += LongitudeBias + LonError;
-		AltitudeValue += AltitudeBias + AltError;
-	}
-	
-	auto DataStream = GetDataStream(*this);
+  LatitudeValue = CurrentLocation.latitude;
+  LongitudeValue = CurrentLocation.longitude;
+  AltitudeValue = CurrentLocation.altitude;
 
-	// ROS2
-	#if defined(WITH_ROS2)
-	auto ROS2 = carla::ros2::ROS2::GetInstance();
-	if (ROS2->IsEnabled())
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Send");
-		auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
-		AActor* ParentActor = GetAttachParentActor();
-		const FTransform sensor_world_transform = GetActorTransform();
-		double mgrs_offset_position[3] = {0.0, 0.0, 0.0};
-		if (MgrsDataAsset)
-		{
-			mgrs_offset_position[0] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.X);
-			mgrs_offset_position[1] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.Y);
-			mgrs_offset_position[2] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.Z);
-		}
-		
-		if (ParentActor)
-		{
-			FTransform LocalTransformRelativeToParent = GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-			ROS2->ProcessDataFromAutowareGNSS(DataStream.GetSensorType(), StreamId, LocalTransformRelativeToParent, carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue}, sensor_world_transform, mgrs_offset_position, this);
-		}
-		else
-		{
-			ROS2->ProcessDataFromAutowareGNSS(DataStream.GetSensorType(), StreamId, DataStream.GetSensorTransform(), carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue}, sensor_world_transform, mgrs_offset_position, this);
-		}
-	}
-	#endif
-	
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE_STR("AAutowareGnssSensor Stream Send");
-		DataStream.SerializeAndSend(*this, carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue});
-	}
+  if (bApplyNoiseError)
+  {
+    // Compute the noise for the sensor
+    const float LatError = RandomEngine->GetNormalDistribution(0.0f, LatitudeDeviation);
+    const float LonError = RandomEngine->GetNormalDistribution(0.0f, LongitudeDeviation);
+    const float AltError = RandomEngine->GetNormalDistribution(0.0f, AltitudeDeviation);
+
+    // Apply the noise to the sensor
+    LatitudeValue += LatitudeBias + LatError;
+    LongitudeValue += LongitudeBias + LonError;
+    AltitudeValue += AltitudeBias + AltError;
+  }
+
+  auto DataStream = GetDataStream(*this);
+
+  // ROS2
+  #if defined(WITH_ROS2)
+  auto ROS2 = carla::ros2::ROS2::GetInstance();
+  if (ROS2->IsEnabled())
+  {
+    TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Send");
+    auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
+    AActor* ParentActor = GetAttachParentActor();
+    const FTransform SensorWorldTransform = GetActorTransform();
+    double MgrsOffsetPosition[3] = {0.0, 0.0, 0.0};
+    if (MgrsDataAsset)
+    {
+      MgrsOffsetPosition[0] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.X);
+      MgrsOffsetPosition[1] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.Y);
+      MgrsOffsetPosition[2] = static_cast<double>(MgrsDataAsset->MgrsOffsetPosition.Z);
+    }
+
+    if (ParentActor)
+    {
+      FTransform LocalTransformRelativeToParent = GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
+      ROS2->ProcessDataFromAutowareGNSS(DataStream.GetSensorType(), StreamId, LocalTransformRelativeToParent, carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue}, SensorWorldTransform, MgrsOffsetPosition, this);
+    }
+    else
+    {
+      ROS2->ProcessDataFromAutowareGNSS(DataStream.GetSensorType(), StreamId, DataStream.GetSensorTransform(), carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue}, SensorWorldTransform, MgrsOffsetPosition, this);
+    }
+  }
+  #endif
+
+  {
+    TRACE_CPUPROFILER_EVENT_SCOPE_STR("AAutowareGnssSensor Stream Send");
+    DataStream.SerializeAndSend(*this, carla::geom::GeoLocation{LatitudeValue, LongitudeValue, AltitudeValue});
+  }
 }
 
 void AAutowareGnssSensor::LoadMgrsData()
 {
-	if (MgrsDataAsset)
-	{
-		return;	// Already loaded
-	}
+  if (MgrsDataAsset)
+  {
+    return; // Already loaded
+  }
 
-	if (const auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
-	{
-		if (WS->MgrsDataAssetSoftPtr.IsNull())
-		{
-			UE_LOG(LogCarla, Warning, TEXT("MGRS Data Asset SoftPtr not set in WorldSettings."));
-			return;
-		}
+  if (const auto* WS = Cast<AAutowareWorldSettings>(GetWorld()->GetWorldSettings()))
+  {
+    if (WS->MgrsDataAssetSoftPtr.IsNull())
+    {
+      UE_LOG(LogCarla, Warning, TEXT("MGRS Data Asset SoftPtr not set in WorldSettings."));
+      return;
+    }
 
-		UMgrsDataAsset* Data = WS->MgrsDataAssetSoftPtr.Get();
-		if (!IsValid(Data))
-		{
-			Data = WS->MgrsDataAssetSoftPtr.LoadSynchronous();
-		}
+    UMgrsDataAsset* Data = WS->MgrsDataAssetSoftPtr.Get();
+    if (!IsValid(Data))
+    {
+      Data = WS->MgrsDataAssetSoftPtr.LoadSynchronous();
+    }
 
-		MgrsDataAsset = Data;
-	}
+    MgrsDataAsset = Data;
+  }
 }
 
-void AAutowareGnssSensor::Set(const FActorDescription& ActorDescription)
+void AAutowareGnssSensor::Set(const FActorDescription &ActorDescription)
 {
-	Super::Set(ActorDescription);
-	UActorBlueprintFunctionLibrary::SetAutowareGnss(ActorDescription, this);
+  Super::Set(ActorDescription);
+  UActorBlueprintFunctionLibrary::SetAutowareGnss(ActorDescription, this);
 }
 
 void AAutowareGnssSensor::SetLatitudeDeviation(float Value)
 {
-	LatitudeDeviation = Value;
+  LatitudeDeviation = Value;
 }
 
 void AAutowareGnssSensor::SetLongitudeDeviation(float Value)
 {
-	LongitudeDeviation = Value;
+  LongitudeDeviation = Value;
 }
 
 void AAutowareGnssSensor::SetAltitudeDeviation(float Value)
 {
-	AltitudeDeviation = Value;
+  AltitudeDeviation = Value;
 }
 
 void AAutowareGnssSensor::SetLatitudeBias(float Value)
 {
-	LatitudeBias = Value;
+  LatitudeBias = Value;
 }
 
 void AAutowareGnssSensor::SetLongitudeBias(float Value)
 {
-	LongitudeBias = Value;
+  LongitudeBias = Value;
 }
 
 void AAutowareGnssSensor::SetAltitudeBias(float Value)
 {
-	AltitudeBias = Value;
+  AltitudeBias = Value;
 }
 
 float AAutowareGnssSensor::GetLatitudeDeviation() const
 {
-	return LatitudeDeviation;
+  return LatitudeDeviation;
 }
 float AAutowareGnssSensor::GetLongitudeDeviation() const
 {
-	return LongitudeDeviation;
+  return LongitudeDeviation;
 }
 float AAutowareGnssSensor::GetAltitudeDeviation() const
 {
-	return AltitudeDeviation;
+  return AltitudeDeviation;
 }
 
 float AAutowareGnssSensor::GetLatitudeBias() const
 {
-	return LatitudeBias;
+  return LatitudeBias;
 }
 float AAutowareGnssSensor::GetLongitudeBias() const
 {
-	return LongitudeBias;
+  return LongitudeBias;
 }
 float AAutowareGnssSensor::GetAltitudeBias() const
 {
-	return AltitudeBias;
+  return AltitudeBias;
 }
 
 double AAutowareGnssSensor::GetLatitudeValue() const
 {
-	return LatitudeValue;
+  return LatitudeValue;
 }
 
 double AAutowareGnssSensor::GetLongitudeValue() const
 {
-	return LongitudeValue;
+  return LongitudeValue;
 }
 
 double AAutowareGnssSensor::GetAltitudeValue() const
 {
-	return AltitudeValue;
+  return AltitudeValue;
 }
 
 bool AAutowareGnssSensor::IsNoiseErrorEnabled() const
 {
-	return bApplyNoiseError;
+  return bApplyNoiseError;
 }
 
 void AAutowareGnssSensor::SetNoiseErrorActive(const bool bEnabled)
 {
-	bApplyNoiseError = bEnabled;
+  bApplyNoiseError = bEnabled;
+}
+
+void AAutowareGnssSensor::GetMirrorState(carla::multigpu::SensorState &State) const
+{
+  if (RandomEngine != nullptr)
+  {
+    State.random_engine = RandomEngine->GetState();
+  }
+}
+
+void AAutowareGnssSensor::SetMirrorState(const carla::multigpu::SensorState &State)
+{
+  if (State.random_engine && (RandomEngine != nullptr))
+  {
+    RandomEngine->SetState(*State.random_engine);
+  }
 }

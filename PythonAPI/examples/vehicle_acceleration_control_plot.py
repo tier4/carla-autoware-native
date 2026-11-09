@@ -233,7 +233,7 @@ class VehicleAccelerationControl(object):
 
         self._use_wheel_steer_angle = False
         try:
-            test_angle = vehicle.get_wheel_steer_angle(carla.WheelLocation.FrontLeft)
+            test_angle = vehicle.get_wheel_steer_angle(carla.VehicleWheelLocation.FL_Wheel)
             if test_angle != 0.0:
                 self._use_wheel_steer_angle = True
         except:

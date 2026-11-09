@@ -12,6 +12,7 @@
 #include "Carla/Sensor/UE4_Overridden/SceneCaptureComponent2D_CARLA.h"
 #include "Carla/Sensor/ImageUtil.h"
 #include "Carla/Sensor/PostProcessConfig.h"
+#include "Carla/Sensor/ShowOnlyFilter.h"
 
 #include <type_traits>
 
@@ -25,13 +26,10 @@
 
 #include "SceneCaptureSensor.generated.h"
 
-
-
 class UDrawFrustumComponent;
 class UStaticMeshComponent;
 class UTextureRenderTarget2D;
 class APostProcessVolume;
-
 
 struct FCameraGBufferUint8
 {
@@ -74,8 +72,6 @@ struct FCameraGBufferUint8
   FDataStream Stream;
 };
 
-
-
 struct FCameraGBufferFloat
 {
   /// Prevent this sensor to be spawned by users.
@@ -116,8 +112,6 @@ struct FCameraGBufferFloat
   FDataStream Stream;
 };
 
-
-
 /// Base class for sensors using a USceneCaptureComponent2D for rendering the
 /// scene. This class does not capture data, use
 /// `FPixelReader::SendPixelsInRenderThread<FColor>(*this)` in derived classes.
@@ -136,7 +130,6 @@ class CARLA_API ASceneCaptureSensor : public ASensor
   friend class FPixelReader2;
 
 public:
-
   ASceneCaptureSensor(const FObjectInitializer &ObjectInitializer);
 
   void Set(const FActorDescription &ActorDescription) override;
@@ -170,6 +163,22 @@ public:
     return bEnablePostProcessingEffects;
   }
 
+  /// Render the capture at ScreenPercentage (25-100) of the target resolution
+  /// and upscale it back with DLSS Super Resolution when available (bilinear
+  /// otherwise). 100 or Enable=false keeps the stock full-resolution path.
+  UFUNCTION(BlueprintCallable)
+  void SetDLSSUpscale(bool Enable, float ScreenPercentage)
+  {
+    bEnableDLSSUpscale = Enable;
+    DLSSScreenPercentage = FMath::Clamp(ScreenPercentage, 25.0f, 100.0f);
+  }
+
+  UFUNCTION(BlueprintCallable)
+  bool IsDLSSUpscaleEnabled() const
+  {
+    return bEnableDLSSUpscale;
+  }
+
   UFUNCTION(BlueprintCallable)
   void SetUseRayTracing(bool Enable);
 
@@ -177,6 +186,47 @@ public:
   bool GetUseRayTracing() const
   {
     return bUseRayTracing;
+  }
+
+  /// Applies the `carla.Camera.UseRayTracing` tier policy to a camera's own
+  /// ray-tracing preference. A camera that cannot render without ray tracing
+  /// passes `bRequired` and is never switched off by the policy.
+  static bool ResolveCameraRayTracing(bool bSensorEnabled, bool bRequired);
+
+  /// Show-only render mode (see FCarlaShowOnlyFilter): comma separated
+  /// semantic label names. Non-empty restricts the capture to the actors
+  /// carrying those labels (plus the shadow catchers and explicit ids).
+  UFUNCTION(BlueprintCallable)
+  void SetShowOnlyTags(const FString &CommaSeparatedLabels)
+  {
+    ShowOnlyFilter.SetShowOnlyTags(CommaSeparatedLabels);
+  }
+
+  /// Labels whose actors are rendered alongside the show-only set so they
+  /// receive its cast shadows ("Roads,Sidewalks"). No effect when the
+  /// show-only mode is off.
+  UFUNCTION(BlueprintCallable)
+  void SetShadowCatcherTags(const FString &CommaSeparatedLabels)
+  {
+    ShowOnlyFilter.SetShadowCatcherTags(CommaSeparatedLabels);
+  }
+
+  /// CARLA actor ids always included in the show-only set.
+  UFUNCTION(BlueprintCallable)
+  void SetShowOnlyActorIds(const FString &CommaSeparatedIds)
+  {
+    ShowOnlyFilter.SetShowOnlyActorIds(CommaSeparatedIds);
+  }
+
+  UFUNCTION(BlueprintCallable)
+  bool IsShowOnlyEnabled() const
+  {
+    return ShowOnlyFilter.IsEnabled();
+  }
+
+  const FCarlaShowOnlyFilter &GetShowOnlyFilter() const
+  {
+    return ShowOnlyFilter;
   }
 
   UFUNCTION(BlueprintCallable)
@@ -210,16 +260,76 @@ public:
   }
 
   UFUNCTION(BlueprintCallable)
+  void SetBloomMethod(EBloomMethod Method);
+
+  UFUNCTION(BlueprintCallable)
+  EBloomMethod GetBloomMethod() const;
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetGlobalGain() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetGlobalGain(FVector4 Gain);
+
+  UFUNCTION(BlueprintCallable)
+  float GetBlueCorrection() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetBlueCorrection(float Val);
+
+  UFUNCTION(BlueprintCallable)
+  float GetDetailStrength() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetDetailStrength(float Val);
+
+  UFUNCTION(BlueprintCallable)
+  float GetFilmGrainIntensity() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetFilmGrainIntensity(float Val);
+
+  UFUNCTION(BlueprintCallable)
+  void SetAOIntensity(float Intensity);
+
+  UFUNCTION(BlueprintCallable)
+  float GetAOIntensity() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetAORadius(float Radius);
+
+  UFUNCTION(BlueprintCallable)
+  float GetAORadius() const;
+
+  UFUNCTION(BlueprintCallable)
   void SetExposureMethod(EAutoExposureMethod Method);
 
   UFUNCTION(BlueprintCallable)
   EAutoExposureMethod GetExposureMethod() const;
 
   UFUNCTION(BlueprintCallable)
+  void SetLocalExposureMethod(ELocalExposureMethod Method);
+
+  UFUNCTION(BlueprintCallable)
+  ELocalExposureMethod GetLocalExposureMethod() const;
+
+  UFUNCTION(BlueprintCallable)
+  UTexture2D *GetBloomKernelTexture() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetBloomConvolutionTexture(UTexture2D *Texture);
+
+  UFUNCTION(BlueprintCallable)
   void SetExposureCompensation(float Compensation);
 
   UFUNCTION(BlueprintCallable)
   float GetExposureCompensation() const;
+
+  UFUNCTION(BlueprintCallable)
+  float GetDirtMaskIntensity() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetDirtMaskIntensity(float Intensity);
 
   UFUNCTION(BlueprintCallable)
   void SetShutterSpeed(float Speed);
@@ -396,10 +506,34 @@ public:
   FVector4 GetColorSaturation() const;
 
   UFUNCTION(BlueprintCallable)
+  void SetColorSaturationMidtones(FVector4 ColorSaturation);
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetColorSaturationMidtones() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetColorSaturationHighlights(FVector4 ColorSaturation);
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetColorSaturationHighlights() const;
+
+  UFUNCTION(BlueprintCallable)
   void SetColorContrast(FVector4 ColorContrast);
 
   UFUNCTION(BlueprintCallable)
   FVector4 GetColorContrast() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetColorContrastMidtones(FVector4 ColorContrast);
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetColorContrastMidtones() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetColorContrastHighlights(FVector4 ColorContrast);
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetColorContrastHighlights() const;
 
   UFUNCTION(BlueprintCallable)
   void SetColorGamma(FVector4 ColorGamma);
@@ -444,7 +578,7 @@ public:
   float GetShadowContrastScale() const;
 
   virtual void UpdatePostProcessConfig(
-    FPostProcessConfig& InOutPostProcessConfig);
+      FPostProcessConfig &InOutPostProcessConfig);
 
   /// Use for debugging purposes only.
   UFUNCTION(BlueprintCallable)
@@ -483,7 +617,8 @@ public:
   void EnqueueRenderSceneImmediate();
 
   /// Blocks until the render thread has finished all it's tasks.
-  void WaitForRenderThreadToFinish() {
+  void WaitForRenderThreadToFinish()
+  {
     TRACE_CPUPROFILER_EVENT_SCOPE(ASceneCaptureSensor::WaitForRenderThreadToFinish);
     // FlushRenderingCommands();
   }
@@ -506,19 +641,35 @@ public:
   } CameraGBuffers;
 
   UFUNCTION(BlueprintCallable)
-  static bool ApplyPostProcessVolumeToSensor(APostProcessVolume* Origin, ASceneCaptureSensor* Dest, bool bOverrideCurrentCamera = false);
+  static bool ApplyPostProcessVolumeToSensor(APostProcessVolume *Origin, ASceneCaptureSensor *Dest, bool bOverrideCurrentCamera = false);
+
 protected:
+  /// True for sensors that cannot render without hardware ray tracing
+  /// (path-traced lens cameras); the tier policy never switches them off.
+  virtual bool RequiresRayTracing() const
+  {
+    return false;
+  }
 
   void CaptureSceneExtended();
 
 #ifdef CARLA_HAS_GBUFFER_API
-  virtual void SendGBufferTextures(FGBufferRequest& GBuffer);
+  virtual void SendGBufferTextures(FGBufferRequest &GBuffer);
 #endif
 
   virtual void BeginPlay() override;
 
   virtual void PrePhysTick(float DeltaSeconds) override;
   virtual void PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaTime) override;
+
+  /// Motion blur from the auto exposure time (carla.Camera.ExposureMotionBlur).
+  void UpdateExposureMotionBlur(UWorld *World, float DeltaTime);
+
+  /// Simulation time of this sensor's previous capture (-1 before the first).
+  double LastCaptureTime = -1.0;
+
+  /// Exposure time of the last capture in seconds (exposure-linked motion blur).
+  float ExposureSeconds = 0.0f;
 
   virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -532,8 +683,16 @@ protected:
   UPROPERTY(VisibleAnywhere)
   TObjectPtr<USceneCaptureComponent2D_CARLA> CaptureComponent2D = nullptr;
 
+  // Standard RGB/depth/segmentation cameras (MakeCameraDefinition) never
+  // register a "gamma" blueprint attribute -- only Wide Angle Lens and
+  // RayTraced Lens cameras do, defaulting it to 2.2 (sRGB). Client code that
+  // guards on bp.has_attribute('gamma') before setting it (e.g.
+  // manual_control.py's --gamma) silently no-ops for the standard camera, so
+  // this default is the only gamma that ever actually applies to it. 2.4
+  // reads visibly brighter/blown-out next to the editor/server's own ~2.2
+  // display gamma; match it instead.
   UPROPERTY(EditAnywhere)
-  float TargetGamma = 2.4f;
+  float TargetGamma = 2.2f;
 
   /// Image width in pixels.
   UPROPERTY(EditAnywhere)
@@ -560,10 +719,28 @@ protected:
   UPROPERTY(EditAnywhere)
   bool bEnable16BitFormat = false;
 
+  /// Render the capture at DLSSScreenPercentage of the target resolution and
+  /// upscale back with DLSS Super Resolution (engine scene-capture temporal
+  /// upscaler; bilinear fallback without NVIDIA hardware). Off by default:
+  /// non-NVIDIA users keep the stock full-resolution path. Requires
+  /// bEnablePostProcessingEffects (the capture needs a temporal AA method for
+  /// DLSS to engage; without one the engine spatially upscales instead).
+  UPROPERTY(EditAnywhere)
+  bool bEnableDLSSUpscale = false;
+
+  /// Internal render resolution as a percentage of the target resolution when
+  /// bEnableDLSSUpscale is set. 50 = quarter of the pixels, 33 = one ninth.
+  UPROPERTY(EditAnywhere)
+  float DLSSScreenPercentage = 50.0f;
+
   /// Per-sensor pool of recyclable RHI readback objects. Created in BeginPlay,
   /// dropped in EndPlay; outstanding AsyncTasks keep it alive via shared
   /// ownership.
   FRHIGPUReadbackPoolPtr ReadbackPool;
+
+  /// Show-only actor filter, applied to the capture component right before
+  /// every capture (see FCarlaShowOnlyFilter).
+  FCarlaShowOnlyFilter ShowOnlyFilter;
 
   /// Returns true if any GBuffer stream has an active listener.
   bool IsAnyGBufferClientListening() const;
@@ -576,39 +753,42 @@ protected:
 private:
   void ApplyRayTracingSetting();
 
+  /// Captures rendered as camera cuts since BeginPlay (carla.Camera.SpawnCameraCuts).
+  int32 NumCaptures = 0;
+
 #ifdef CARLA_HAS_GBUFFER_API
   template <
-    typename SensorT,
-    typename CameraGBufferT>
+      typename SensorT,
+      typename CameraGBufferT>
   static void SendGBuffer(
-      SensorT& Self,
-      CameraGBufferT& CameraGBuffer,
-      FGBufferRequest& GBufferData,
+      SensorT &Self,
+      CameraGBufferT &CameraGBuffer,
+      FGBufferRequest &GBufferData,
       EGBufferTextureID TextureID)
   {
-      using PixelType = typename std::conditional<
+    using PixelType = typename std::conditional<
         std::is_same<std::remove_reference_t<CameraGBufferT>, FCameraGBufferUint8>::value,
         FColor,
         FLinearColor>::type;
-      FIntPoint ViewSize;
-      TArray<PixelType> Pixels;
-      if (GBufferData.WaitForTextureTransfer(TextureID))
-      {
-        TRACE_CPUPROFILER_EVENT_SCOPE_STR("GBuffer Decode");
-        void* PixelData;
-        int32 SourcePitch;
-        FIntPoint SourceExtent;
-        GBufferData.MapTextureData(
+    FIntPoint ViewSize;
+    TArray<PixelType> Pixels;
+    if (GBufferData.WaitForTextureTransfer(TextureID))
+    {
+      TRACE_CPUPROFILER_EVENT_SCOPE_STR("GBuffer Decode");
+      void *PixelData;
+      int32 SourcePitch;
+      FIntPoint SourceExtent;
+      GBufferData.MapTextureData(
           TextureID,
           PixelData,
           SourcePitch,
           SourceExtent);
-        auto Format = GBufferData.Readbacks[(size_t)TextureID]->GetFormat();
-        ViewSize = GBufferData.ViewRect.Size();
-        Pixels.AddUninitialized(ViewSize.X * ViewSize.Y);
-        FReadSurfaceDataFlags Flags = {};
-        Flags.SetLinearToGamma(true);
-        ImageUtil::DecodePixelsByFormat(
+      auto Format = GBufferData.Readbacks[(size_t)TextureID]->GetFormat();
+      ViewSize = GBufferData.ViewRect.Size();
+      Pixels.AddUninitialized(ViewSize.X * ViewSize.Y);
+      FReadSurfaceDataFlags Flags = {};
+      Flags.SetLinearToGamma(true);
+      ImageUtil::DecodePixelsByFormat(
           PixelData,
           SourcePitch,
           SourceExtent,
@@ -616,26 +796,27 @@ private:
           Format,
           Flags,
           Pixels);
-        GBufferData.UnmapTextureData(TextureID);
-      }
-      else
-      {
-        ViewSize = GBufferData.ViewRect.Size();
-        Pixels.SetNum(ViewSize.X * ViewSize.Y);
-        for (auto& Pixel : Pixels)
-          Pixel = PixelType::Black;
-      }
-      auto GBufferStream = CameraGBuffer.GetDataStream(Self);
-      auto Buffer = GBufferStream.PopBufferFromPool();
-      Buffer.copy_from(
-        carla::sensor::SensorRegistry::get<CameraGBufferT*>::type::header_offset,
+      GBufferData.UnmapTextureData(TextureID);
+    }
+    else
+    {
+      ViewSize = GBufferData.ViewRect.Size();
+      Pixels.SetNum(ViewSize.X * ViewSize.Y);
+      for (auto &Pixel : Pixels)
+        Pixel = PixelType::Black;
+    }
+    auto GBufferStream = CameraGBuffer.GetDataStream(Self);
+    auto Buffer = GBufferStream.PopBufferFromPool();
+    Buffer.copy_from(
+        carla::sensor::SensorRegistry::get<CameraGBufferT *>::type::header_offset,
         Pixels);
-      if (Buffer.empty()) {
-        return;
-      }
-      SCOPE_CYCLE_COUNTER(STAT_CarlaSensorStreamSend);
-      TRACE_CPUPROFILER_EVENT_SCOPE_STR("Stream Send");
-      GBufferStream.SerializeAndSend(
+    if (Buffer.empty())
+    {
+      return;
+    }
+    SCOPE_CYCLE_COUNTER(STAT_CarlaSensorStreamSend);
+    TRACE_CPUPROFILER_EVENT_SCOPE_STR("Stream Send");
+    GBufferStream.SerializeAndSend(
         CameraGBuffer,
         std::move(Buffer),
         ViewSize.X,
@@ -645,17 +826,17 @@ private:
 #endif
 
 protected:
-
 #ifdef CARLA_HAS_GBUFFER_API
   template <typename T>
-  void SendGBufferTexturesInternal(T& Self, FGBufferRequest& GBufferData)
+  void SendGBufferTexturesInternal(T &Self, FGBufferRequest &GBufferData)
   {
     for (size_t i = 0; i != FGBufferRequest::TextureCount; ++i)
     {
-      if ((GBufferData.DesiredTexturesMask & (UINT64_C(1) << i)) == 0) {
+      if ((GBufferData.DesiredTexturesMask & (UINT64_C(1) << i)) == 0)
+      {
         continue;
       }
-      auto& C = CameraGBuffers;
+      auto &C = CameraGBuffers;
       EGBufferTextureID ID = (EGBufferTextureID)i;
       switch (ID)
       {
@@ -699,10 +880,9 @@ protected:
         SendGBuffer(Self, C.CustomStencil, GBufferData, ID);
         break;
       default:
-          abort();
+        abort();
       }
     }
   }
 #endif
-
 };

@@ -94,6 +94,15 @@ public:
 
   /// Return the name of the map loaded in this episode.
   UFUNCTION(BlueprintCallable)
+  /// Block (game thread, bounded) until the RecastBuilder run started by the
+  /// last generate_opendrive_world has finished. Returns whether the navmesh
+  /// was built (true when no build is pending).
+  static bool WaitForPendingNavigationBuild(double TimeoutSeconds);
+
+  /// Delete Saved/OpenDrive|Nav/OpenDriveMap.* left by a previous generated
+  /// world (server startup and before each generation).
+  static void ClearGeneratedWorldFiles();
+
   const FString &GetMapName() const
   {
     return MapName;
@@ -196,6 +205,12 @@ public:
     return ActorDispatcher->GetActorRegistry().GetDescriptionFromStream(StreamId);
   }
 
+  /// Find the Carla actor (sensor) that owns the stream @a StreamId, or nullptr.
+  FCarlaActor* FindCarlaActorFromStream(carla::streaming::detail::stream_id_type StreamId)
+  {
+    return ActorDispatcher->GetActorRegistry().FindCarlaActorFromStream(StreamId);
+  }
+
   // ===========================================================================
   // -- Actor handling methods -------------------------------------------------
   // ===========================================================================
@@ -281,6 +296,14 @@ public:
     return ActorDispatcher->DestroyActor(ActorId);
   }
 
+  /// SerializeActor, with the ids the primary's clients know on a Multi-GPU
+  /// secondary (for data a sensor streams to them).
+  carla::rpc::Actor SerializeActorWithPrimaryIds(AActor *Actor) const;
+
+  /// ROS 2: registers the ros_name of each of @a Child's ancestors as one of
+  /// its parent frames.
+  void AddRosParentNames(FCarlaActor &Child);
+
   void PutActorToSleep(carla::rpc::ActorId ActorId)
   {
     ActorDispatcher->PutActorToSleep(ActorId, this);
@@ -329,7 +352,44 @@ public:
 
   FFrameData& GetFrameData() { return FrameData; }
 
+  /// Multi-GPU primary: the world state the frames sent so far carried.
+  FPrimaryWorldState& GetMultiGpuWorldState() { return MultiGpuWorldState; }
+
+  /// A scene light changed: Multi-GPU secondaries get its new state.
+  void MarkSceneLightChanged(int32 LightId)
+  {
+    if (bIsPrimaryServer)
+    {
+      MultiGpuWorldState.ChangedLights.Add(LightId);
+    }
+  }
+
   FSensorManager& GetSensorManager() { return SensorManager; }
+
+  // ===========================================================================
+  // -- Pedestrian navigation state (server-side walker navigation) -------------
+  // ===========================================================================
+
+  /// Probability that a walker whose navigation starts after this call is a
+  /// "crosser" (may traverse crosswalk/road nav areas). Legacy semantics of
+  /// carla.World.set_pedestrians_cross_factor.
+  void SetPedestriansCrossFactor(float InCrossFactor)
+  {
+    PedestriansCrossFactor = FMath::Clamp(InCrossFactor, 0.0f, 1.0f);
+  }
+
+  /// Seed the RNG behind the crosser draw (and any future navigation
+  /// randomness). Deterministic given the same seed and start order.
+  void SetPedestriansSeed(uint32 InSeed)
+  {
+    PedestriansNavRNG.Initialize(static_cast<int32>(InSeed));
+  }
+
+  /// Draw once per walker at navigation start: crosser or not.
+  bool DrawWalkerIsCrosser()
+  {
+    return PedestriansNavRNG.FRand() < PedestriansCrossFactor;
+  }
 
   bool bIsPrimaryServer = true;
 
@@ -372,6 +432,20 @@ private:
 
   }
 
+  /// Multi-GPU secondary: adopt the primary's clocks for the frame being
+  /// played. Absolute, not accumulated, so frames a secondary never played
+  /// (while it was loading) cause no drift.
+  void SetTimers(double InElapsedGameTime, double InVisualGameTime)
+  {
+    ElapsedGameTime = InElapsedGameTime;
+    SetVisualGameTime(InVisualGameTime);
+    #if defined(WITH_ROS2)
+    auto ROS2 = carla::ros2::ROS2::GetInstance();
+    if (ROS2->IsEnabled())
+      ROS2->SetTimestamp(GetElapsedGameTime());
+    #endif
+  }
+
   const uint64 Id = 0u;
 
   // simulation time
@@ -404,7 +478,13 @@ private:
 
   FIntVector CurrentMapOrigin;
 
+  float PedestriansCrossFactor = 0.0f;
+
+  FRandomStream PedestriansNavRNG = FRandomStream(0);
+
   FFrameData FrameData;
+
+  FPrimaryWorldState MultiGpuWorldState;
 
   FSensorManager SensorManager;
 };

@@ -44,10 +44,14 @@ private:
 	static bool JsonToFPropParameters(const TSharedPtr<FJsonObject> JsonObject, FPropParameters& OutPropParams);
 	static bool JsonToFPropParametersArray(const FString& JsonString, TArray<FPropParameters>& OutPropParamsArray);
 
+	virtual void ReleaseContentPack(const FString &MountPoint) override;
+
 protected:
-	UPROPERTY(EditAnywhere)
+	// Transient: GetDefinitions() rebuilds these from the JSON catalogs every
+	// episode, and a saved copy bakes a stale catalog into the map.
+	UPROPERTY(EditAnywhere, Transient)
 	TArray<FActorDefinition> Definitions;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Transient)
 	TArray<FPropParameters> PropsParams;
 
 private:

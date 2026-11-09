@@ -48,7 +48,7 @@ DEST_PORT_BASE = 2368
 
 CARLA_BIN = Path(
     "/mnt/dsk0/wk0/CARLA/T4Fork.rgl/CarlaUE5/Build/Package/"
-    "Carla-0.10.0-Linux-Shipping/Linux/CarlaUnreal.sh"
+    "Carla-1.0-Linux-Shipping/CarlaUnreal.sh"
 )
 
 ALL_MODELS = [

@@ -16,6 +16,8 @@
 
 #include <util/ue-header-guard-begin.h>
 #include "Actor/ActorBlueprintFunctionLibrary.h"
+#include "Async/ParallelFor.h"
+#include "Misc/App.h"
 #include <util/ue-header-guard-end.h>
 
 #include <random>
@@ -24,7 +26,8 @@
 
 static float FColorToGrayScaleFloat(FColor Color)
 {
-  return 0.2989 * Color.R + 0.587 * Color.G + 0.114 * Color.B;
+  const int32 Sum = 2989 * Color.R + 5870 * Color.G + 1140 * Color.B;
+  return static_cast<float>(Sum * 0.0001);
 }
 
 ADVSCamera::ADVSCamera(const FObjectInitializer &ObjectInitializer)
@@ -134,7 +137,9 @@ void ADVSCamera::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaTim
   TRACE_CPUPROFILER_EVENT_SCOPE(ADVSCamera::PostPhysTick);
   Super::PostPhysTick(World, TickType, DeltaTime);
   check(CaptureRenderTarget != nullptr);
-  if (!HasActorBegunPlay() || !IsValid(this) || !AreClientsListening())
+  // This path does not go through ASceneCaptureSensor::ShouldCaptureThisFrame(),
+  // so it needs its own check for a process without an RHI (-nullrhi).
+  if (!HasActorBegunPlay() || !IsValid(this) || !AreClientsListening() || !FApp::CanEverRender())
   {
     return;
   }
@@ -219,11 +224,17 @@ void ADVSCamera::ImageToGray(const TArray<FColor> &image)
   /** Reserve HxW elements **/
   last_image.SetNumUninitialized(image.Num());
 
-  /** Convert image to gray raw image values **/
-  for (size_t i = 0; i < image.Num(); ++i)
+  /** Convert image to gray raw image values, one row per task **/
+  const FColor *Src = image.GetData();
+  float *Dst = last_image.GetData();
+  const int32 Width = this->GetImageWidth();
+  ParallelFor(this->GetImageHeight(), [Src, Dst, Width](int32 Row)
   {
-    last_image[i] = FColorToGrayScaleFloat(image[i]);
-  }
+    for (int32 i = Row * Width; i < (Row + 1) * Width; ++i)
+    {
+      Dst[i] = FColorToGrayScaleFloat(Src[i]);
+    }
+  });
 }
 
 void ADVSCamera::ImageToLogGray(const TArray<FColor> &image)
@@ -235,11 +246,18 @@ void ADVSCamera::ImageToLogGray(const TArray<FColor> &image)
   /** Reserve HxW elements **/
   last_image.SetNumUninitialized(image.Num());
 
-  /** Convert image to gray raw image values **/
-  for (size_t i = 0; i < image.Num(); ++i)
+  /** Convert image to log gray values, one row per task **/
+  const FColor *Src = image.GetData();
+  float *Dst = last_image.GetData();
+  const int32 Width = this->GetImageWidth();
+  const float LogEps = this->config.log_eps;
+  ParallelFor(this->GetImageHeight(), [Src, Dst, Width, LogEps](int32 Row)
   {
-    last_image[i] = std::log(this->config.log_eps + (FColorToGrayScaleFloat(image[i]) / 255.0));
-  }
+    for (int32 i = Row * Width; i < (Row + 1) * Width; ++i)
+    {
+      Dst[i] = std::log(LogEps + (FColorToGrayScaleFloat(Src[i]) / 255.0));
+    }
+  });
 }
 
 ADVSCamera::DVSEventArray ADVSCamera::Simulation (float DeltaTime)

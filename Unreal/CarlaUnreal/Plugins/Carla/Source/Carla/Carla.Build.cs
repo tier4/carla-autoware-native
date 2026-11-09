@@ -27,9 +27,6 @@ public class Carla :
   [CommandLine("-ros2-demo")]
   bool EnableRos2Demo = false;
 
-  [CommandLine("-osm2odr")]
-  bool EnableOSM2ODR = false;
-
 
 
   public Carla(ReadOnlyTargetRules Target) :
@@ -38,6 +35,9 @@ public class Carla :
     PrivatePCHHeaderFile = "Carla.h";
     bEnableExceptions = true;
     bUseRTTI = true;
+    // UE 5.8 escalates -Wshadow to an error by default; keep it as a warning
+    // until the existing field-shadowing in V2X/PathLossModel et al. is cleaned up.
+    ShadowVariableWarningLevel = WarningLevel.Warning;
     
     void AddDynamicLibrary(string library)
     {
@@ -80,9 +80,6 @@ public class Carla :
           EnableRos2 = true;
           EnableRos2Demo = true;
           break;
-        case "OSM2ODR":
-          EnableOSM2ODR = true;
-          break;
         default:
           Console.WriteLine($"Unknown option \"{Trimmed}\".");
           break;
@@ -99,11 +96,9 @@ public class Carla :
     TestOptionalFeature(EnableCarSim, "CarSim support", "WITH_CARSIM");
     TestOptionalFeature(EnableChrono, "Chrono support", "WITH_CHRONO");
     TestOptionalFeature(EnablePytorch, "PyTorch support", "WITH_PYTORCH");
-    TestOptionalFeature(EnableOSM2ODR, "OSM2ODR support", "WITH_OSM2ODR");
 
     PrivateDependencyModuleNames.AddRange(new string[]
     {
-      "AIModule",
       "AssetRegistry",
       "CoreUObject",
       "Engine",
@@ -114,8 +109,10 @@ public class Carla :
       "Json",
       "JsonUtilities",
       "Landscape",
+      "NavigationSystem",
       "Slate",
       "SlateCore",
+      "InputCore",
       "PhysicsCore",
       "MeshConversion",
       "Chaos",
@@ -124,13 +121,20 @@ public class Carla :
 
     PublicDependencyModuleNames.AddRange(new string[]
     {
+      // AWalkerController (a public header, included via CarlaActor.h by
+      // dependent modules like CarlaTools) is an AAIController now, so the
+      // AIModule include paths must propagate to consumers.
+      "AIModule",
       "Core",
       "RenderCore",
       "RHI",
       "Renderer",
       "ProceduralMeshComponent",
       "MeshDescription",
-      "Projects"
+      "Projects",
+      // Runtime PCG scattering (street furniture) on AOpenDriveGenerator;
+      // PCG is an engine plugin, EnabledByDefault, no .uproject entry needed.
+      "PCG"
     });
 
     if (EnableCarSim)
@@ -143,16 +147,18 @@ public class Carla :
       PublicDependencyModuleNames.Add("CarSim");
 
     if (Target.Type == TargetType.Editor)
+    {
       PublicDependencyModuleNames.Add("UnrealEd");
+      // GeometryImporter::ImportObj (carla-digitaltwins port) uses IAssetTools.
+      PublicDependencyModuleNames.Add("AssetTools");
+      // SColorPicker (LightDefaultsEditorPanel, #if WITH_EDITOR only).
+      PrivateDependencyModuleNames.Add("AppFramework");
+    }
       
     PublicIncludePaths.Add(ModuleDirectory);
 
-    if (EnableOSM2ODR)
-    {
-      // @TODO
-      PublicAdditionalLibraries.Add("");
-      throw new NotImplementedException();
-    }
+    // OSM2ODR needs no extra library: the converter is compiled into
+    // libcarla-server, which this module already links.
 
     if (EnableChrono)
     {
@@ -175,29 +181,20 @@ public class Carla :
       string CarlaPluginSourcePath = Path.GetFullPath(ModuleDirectory);
       string CarlaPluginBinariesLinuxPath = Path.Combine(CarlaPluginSourcePath, "..", "..", "Binaries", "Linux");
       AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libcarla-ros2-native.so"));
-
-      // Detect DDS vendor by checking which libraries are present
-      bool hasCycloneDDS = File.Exists(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so"));
-      bool hasFastDDS = File.Exists(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so"));
-
-      if (hasCycloneDDS)
-      {
-        AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so"));
-        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so.0"));
-        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so.0.10.5"));
-      }
-
-      if (hasFastDDS)
-      {
-        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfoonathan_memory-0.7.4.so"));
-        AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so"));
-        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so.1"));
-        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so.1.1.0"));
-        AddDynamicLibrary(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so"));
-        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.11"));
-        RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.11.2"));
-      }
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfoonathan_memory-0.7.4.so"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so.2"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastcdr.so.2.2.7"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.14"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libfastrtps.so.2.14.6"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so.0"));
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "libddsc.so.0.10.5"));
+      // zenoh-c is statically linked into libcarla-ros2-native.so, so there is
+      // no Zenoh runtime .so to stage. Only the session config is a runtime
+      // dependency; it is resolved next to the shared library via dladdr.
+      RuntimeDependencies.Add(Path.Combine(CarlaPluginBinariesLinuxPath, "zenoh_session_config.json5"));
     }
-
   }
 }

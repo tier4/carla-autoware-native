@@ -8,7 +8,7 @@ coverage, distance range) across all eight supported LiDAR models.
 ## Prerequisites
 
 - Phase 1 shipping package built
-  (`Build/Package/Carla-0.10.0-Linux-Shipping/Linux/CarlaUnreal.sh`).
+  (`Build/Package/Carla-1.0-Linux-Shipping/CarlaUnreal.sh`).
 - `libRobotecGPULidar.so` with the UDP extension
   (`RglSetup.sh prepare --with-udp`).
 - CARLA Python wheel installed

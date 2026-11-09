@@ -9,6 +9,7 @@
 #include "carla/MsgPack.h"
 #include "carla/geom/Location.h"
 #include "carla/geom/Math.h"
+#include "carla/geom/RightHandedTransform.h"
 #include "carla/geom/Rotation.h"
 
 #ifdef LIBCARLA_INCLUDED_FROM_UE4
@@ -20,6 +21,14 @@
 namespace carla {
 namespace geom {
 
+  /// A rigid transform in **CARLA's / Unreal's left-handed frame**: x
+  /// forward, y right, z up, metres, with a `Rotation` in degrees.
+  ///
+  /// `GetMatrix()`, `GetForwardVector()` and friends are all in that frame --
+  /// they are *not* "uncorrected" right-handed math and must not be flipped.
+  /// To hand a pose to a ROS / REP-103 consumer, convert explicitly with
+  /// `ToRightHanded()`; see `RightHandedTransform` and
+  /// `Docs/coordinate_conventions.md`.
   class Transform {
   public:
 
@@ -43,7 +52,7 @@ namespace geom {
       : location(in_location),
         rotation() {}
 
-    Transform(const Location &in_location, const Rotation &in_rotation)
+    constexpr Transform(const Location &in_location, const Rotation &in_rotation)
       : location(in_location),
         rotation(in_rotation) {}
 
@@ -86,7 +95,11 @@ namespace geom {
       in_point = out_point;
     }
 
-    /// Computes the 4-matrix form of the transformation
+    /// Computes the 4-matrix form of the transformation. Sign convention
+    /// matches `Rotation::RotateVector` and the engine: `+pitch` puts
+    /// `+sin(pitch)` on row 2 column 0 (forward axis tilts up), `+roll`
+    /// puts `-cos(pitch) * sin(roll)` on row 2 column 1 (right axis tilts
+    /// down). Verified against rendered camera frames on UE5.8 (2026-08-27).
     std::array<float, 16> GetMatrix() const {
       const float yaw = rotation.yaw;
       const float cy = std::cos(Math::ToRadians(yaw));
@@ -109,7 +122,9 @@ namespace geom {
       return transform;
     }
 
-    /// Computes the 4-matrix form of the inverse transformation
+    /// Computes the 4-matrix form of the inverse transformation. Rows are
+    /// the transpose of the forward rotation; translation component pulled
+    /// from `InverseTransformPoint(origin)` to keep both helpers consistent.
     std::array<float, 16> GetInverseMatrix() const {
       const float yaw = rotation.yaw;
       const float cy = std::cos(Math::ToRadians(yaw));
@@ -133,6 +148,30 @@ namespace geom {
           0.0f, 0.0f, 0.0f, 1.0};
 
       return transform;
+    }
+
+    // =========================================================================
+    // -- Right-handed (ROS / FLU) boundary ------------------------------------
+    // =========================================================================
+
+    /// This transform expressed in a right-handed, x-forward / y-**left** /
+    /// z-up frame (ROS REP-103 "FLU").
+    ///
+    /// `location` becomes `(x, -y, z)` and `rotation` becomes
+    /// `(roll, -pitch, -yaw)`; equivalently the pose matrix becomes
+    /// `S * GetMatrix() * S` with `S = diag(1, -1, 1, 1)`.
+    constexpr RightHandedTransform ToRightHanded() const {
+      return RightHandedTransform(
+          location.ToRightHanded(),
+          rotation.ToRightHanded());
+    }
+
+    /// Inverse of `ToRightHanded()`: reads a right-handed (FLU) pose back into
+    /// CARLA's left-handed frame. The mapping is an involution.
+    static constexpr Transform FromRightHanded(const RightHandedTransform &rhs) {
+      return Transform(
+          Location::FromRightHanded(rhs.location),
+          Rotation::FromRightHanded(rhs.rotation));
     }
 
     // =========================================================================

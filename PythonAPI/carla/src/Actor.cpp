@@ -93,7 +93,7 @@ void export_actor() {
     .value("Dormant", cr::ActorState::Dormant)
   ;
 
-  class_<std::vector<int>>("vector_of_ints")
+  class_<std::vector<int>>("VectorOfInts")
       .def(vector_indexing_suite<std::vector<int>>())
       .def(self_ns::str(self_ns::self))
   ;
@@ -211,6 +211,11 @@ void export_actor() {
       .def("close_door", &cc::Vehicle::CloseDoor, (arg("door_idx")))
       .def("set_wheel_steer_direction", &cc::Vehicle::SetWheelSteerDirection, (arg("wheel_location")), (arg("angle_in_deg")))
       .def("get_wheel_steer_angle", &cc::Vehicle::GetWheelSteerAngle, (arg("wheel_location")))
+      .def("set_wheel_pitch_angle", &cc::Vehicle::SetWheelPitchAngle, (arg("wheel_location")), (arg("angle_in_deg")))
+      .def("get_wheel_pitch_angle", &cc::Vehicle::GetWheelPitchAngle, (arg("wheel_location")))
+      .def("set_wheel_suspension_offset", &cc::Vehicle::SetWheelSuspensionOffset, (arg("wheel_location")), (arg("offset")))
+      .def("get_wheel_suspension_offset", &cc::Vehicle::GetWheelSuspensionOffset, (arg("wheel_location")))
+      .def("set_wheel_animation_override", &cc::Vehicle::SetWheelAnimationOverride, (arg("enabled")))
       .def("get_light_state", CONST_CALL_WITHOUT_GIL(cc::Vehicle, GetLightState))
       .def("apply_physics_control", &cc::Vehicle::ApplyPhysicsControl, (arg("physics_control")))
       .def("get_physics_control", CONST_CALL_WITHOUT_GIL(cc::Vehicle, GetPhysicsControl))
@@ -225,9 +230,9 @@ void export_actor() {
       .def("get_traffic_light", &cc::Vehicle::GetTrafficLight)
       .def("enable_carsim", &cc::Vehicle::EnableCarSim, (arg("simfile_path") = ""))
       .def("use_carsim_road", &cc::Vehicle::UseCarSimRoad, (arg("enabled")))
-      .def("enable_chrono_physics", &cc::Vehicle::EnableChronoPhysics, (arg("max_substeps")=30, arg("max_substep_delta_time")=0.002, arg("vehicle_json")="", arg("powetrain_json")="", arg("tire_json")="", arg("base_json_path")=""))
+      .def("enable_chrono_physics", &cc::Vehicle::EnableChronoPhysics, (arg("max_substeps")=30, arg("max_substep_delta_time")=0.002, arg("vehicle_json")="", arg("powertrain_json")="", arg("tire_json")="", arg("base_json_path")=""))
       .def("get_failure_state", &cc::Vehicle::GetFailureState)
-      .def("get_vehicle_bone_world_transforms", &cc::Vehicle::GetVehicleBoneWorldTransforms)
+      .def("get_vehicle_bone_world_transforms", CALL_RETURNING_LIST(cc::Vehicle, GetVehicleBoneWorldTransforms))
       .def(self_ns::str(self_ns::self))
   ;
 
@@ -255,6 +260,9 @@ void export_actor() {
       "TrafficSign",
       no_init)
       .add_property("trigger_volume", CALL_RETURNING_COPY(cc::TrafficSign, GetTriggerVolume))
+      .def("get_stop_waypoints", CALL_RETURNING_LIST(cc::TrafficSign, GetStopWaypoints))
+      .def("get_affected_lane_waypoints", CALL_RETURNING_LIST(cc::TrafficSign, GetAffectedLaneWaypoints))
+      .def("get_opendrive_id", &cc::TrafficSign::GetSignId)
   ;
 
   enum_<cr::TrafficLightState>("TrafficLightState")
@@ -323,10 +331,7 @@ void export_actor() {
       .def("get_pole_index", &cc::TrafficLight::GetPoleIndex)
       .def("get_group_traffic_lights", &GetGroupTrafficLights)
       .def("reset_group", &cc::TrafficLight::ResetGroup)
-      .def("get_affected_lane_waypoints", CALL_RETURNING_LIST(cc::TrafficLight, GetAffectedLaneWaypoints))
       .def("get_light_boxes", &GetLightBoxes)
-      .def("get_opendrive_id", &cc::TrafficLight::GetOpenDRIVEID)
-      .def("get_stop_waypoints", CALL_RETURNING_LIST(cc::TrafficLight, GetStopWaypoints))
       .def(self_ns::str(self_ns::self))
   ;
 }

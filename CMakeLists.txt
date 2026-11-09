@@ -34,13 +34,12 @@ if (CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
   set (CMAKE_POLICY_VERSION_MINIMUM 3.5)
 endif ()
 
-set (CARLA_VERSION_MAJOR 0)
-set (CARLA_VERSION_MINOR 10)
-set (CARLA_VERSION_PATCH 0)
+set (CARLA_VERSION_MAJOR 1)
+set (CARLA_VERSION_MINOR 0)
 
 set (
   CARLA_VERSION 
-  ${CARLA_VERSION_MAJOR}.${CARLA_VERSION_MINOR}.${CARLA_VERSION_PATCH}
+  ${CARLA_VERSION_MAJOR}.${CARLA_VERSION_MINOR}
 )
 
 project (
@@ -89,6 +88,7 @@ include (${CARLA_WORKSPACE_PATH}/CMake/Util.cmake)
 include (${CARLA_WORKSPACE_PATH}/CMake/Options.cmake)
 include (${CARLA_WORKSPACE_PATH}/CMake/Common.cmake)
 include (${CARLA_WORKSPACE_PATH}/CMake/Dependencies.cmake)
+include (${CARLA_WORKSPACE_PATH}/CMake/ContentPacks.cmake)
 
 if (BUILD_CARLA_CLIENT OR BUILD_CARLA_SERVER)
   add_subdirectory (LibCarla)
@@ -171,6 +171,7 @@ endif ()
 if (BUILD_EXAMPLES)
   add_subdirectory (Examples)
 endif ()
+
 
 carla_add_custom_target (
   carla-help

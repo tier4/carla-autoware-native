@@ -21,7 +21,7 @@ import time
 # ============================================================
 CARLA_CMD = (
     "/mnt/dsk0/wk0/CARLA/T4ForkWithRGL/CarlaUE5/Build/Package/"
-    "Carla-0.10.0-Linux-Shipping/Linux/CarlaUnreal.sh --ros2 -ResY=640"
+    "Carla-1.0-Linux-Shipping/CarlaUnreal.sh --ros2 -ResY=640"
 )
 CARLA_CLIENT_SCRIPT = (
     "/mnt/dsk0/wk0/CARLA/T4ForkWithRGL/CarlaUE5/PythonAPI/examples/"

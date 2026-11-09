@@ -15,7 +15,7 @@
 set -u
 
 # ---- config (override via env) ----
-PKG_DIR="${PKG_DIR:-/mnt/dsk0/wk0/CARLA/T4Fork.RGL/CarlaUE5/Build/Package/Carla-0.10.0-Linux-Development/Linux}"
+PKG_DIR="${PKG_DIR:-/mnt/dsk0/wk0/CARLA/T4Fork.RGL/CarlaUE5/Build/Package/Carla-1.0-Linux-Development}"
 DEMO="${DEMO:-/mnt/dsk0/wk0/CARLA/T4Fork.RGL/CarlaUE5/PythonAPI/examples/rgl_test_autoware_demo.py}"
 MAP="${MAP:-Town10HD_Opt}"
 PORT="${PORT:-2000}"

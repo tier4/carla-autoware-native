@@ -46,12 +46,16 @@ private:
   static bool JsonToFVehicleParameters(const TSharedPtr<FJsonObject> JsonObject, FVehicleParameters& OutVehicleParams);
   static bool JsonToFVehicleParametersArray(const FString& JsonString, TArray<FVehicleParameters>& OutVehicleParamsArray);
 
-protected:
+  virtual void ReleaseContentPack(const FString &MountPoint) override;
 
-  UPROPERTY(EditAnywhere)
+protected:
+  // Transient: GetDefinitions() rebuilds these from the JSON catalogs every
+  // episode, and a saved copy bakes a stale catalog into the map.
+
+  UPROPERTY(EditAnywhere, Transient)
   TArray<FActorDefinition> Definitions;
-  UPROPERTY(EditAnywhere, BlueprintReadWrite)
+  UPROPERTY(EditAnywhere, BlueprintReadWrite, Transient)
   TArray<FVehicleParameters> VehiclesParams;
-  UPROPERTY(EditAnywhere, BlueprintReadWrite)
+  UPROPERTY(EditAnywhere, BlueprintReadWrite, Transient)
   TArray<FVehicleParameters> MineVehiclesParams;
 };

@@ -7,45 +7,39 @@ project (
   carla-ros2-native
 )
 
+set (CMAKE_CXX_STANDARD 20)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
+
 set (
   LIBCARLA_SOURCE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../../LibCarla/source
 )
 
-if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
-  file (
-    GLOB
-    LIBCARLA_ROS2_SOURCES
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/publishers/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/subscribers/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/listeners/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.cpp
-  )
-  file (
-    GLOB
-    LIBCARLA_ROS2_HEADERS
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/listeners/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types/*.h
-  )
-elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
-  file (
-    GLOB
-    LIBCARLA_ROS2_SOURCES
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/subscribers/*.cpp
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.c
-  )
-  file (
-    GLOB
-    LIBCARLA_ROS2_HEADERS
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers/*.h
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types/*.h
-  )
-endif()
+file (
+  GLOB
+  LIBCARLA_ROS2_SOURCES
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/middleware/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/middleware/fastdds/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/middleware/cyclonedds/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/middleware/zenoh/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/listeners/*.cpp
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.cpp
+)
+
+file (
+  GLOB
+  LIBCARLA_ROS2_HEADERS
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/middleware/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/middleware/fastdds/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/middleware/cyclonedds/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/middleware/zenoh/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/listeners/*.h
+  ${LIBCARLA_SOURCE_PATH}/carla/ros2/types/*.h
+)
 
 add_library (
   carla-ros2-native
@@ -54,49 +48,36 @@ add_library (
   ${LIBCARLA_ROS2_SOURCES}
 )
 
-if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
-  target_include_directories (
-    carla-ros2-native
-    SYSTEM PRIVATE
-    ${LIBCARLA_SOURCE_PATH}
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/fastdds/types
-    ${CMAKE_INSTALL_PREFIX}/include
-  )
-elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
-  target_include_directories (
-    carla-ros2-native
-    SYSTEM PRIVATE
-    ${LIBCARLA_SOURCE_PATH}
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/publishers
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/subscribers
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/publishers
-    ${LIBCARLA_SOURCE_PATH}/carla/ros2/dds/cyclonedds/types
-    ${CMAKE_INSTALL_PREFIX}/include
-    ${CMAKE_INSTALL_PREFIX}/include/ddsc
-  )
-endif()
+target_include_directories (
+  carla-ros2-native
+  SYSTEM PRIVATE
+  ${LIBCARLA_SOURCE_PATH}
+  ${CMAKE_INSTALL_PREFIX}/include
+)
 
 target_compile_definitions (
   carla-ros2-native
   PUBLIC
   BOOST_ASIO_ENABLE_BUFFER_DEBUGGING
+  PRIVATE
+  CARLA_ROS2_MIDDLEWARE_FASTDDS
+  CARLA_ROS2_MIDDLEWARE_CYCLONEDDS
+  CARLA_ROS2_MIDDLEWARE_ZENOH
 )
 
-if (CARLA_DDS_VENDOR STREQUAL "FastDDS")
-  target_link_libraries (
-    carla-ros2-native PUBLIC
-    ${CMAKE_INSTALL_PREFIX}/lib/libfastrtps.so
-  )
-elseif (CARLA_DDS_VENDOR STREQUAL "CycloneDDS")
-  target_link_libraries (
-    carla-ros2-native PUBLIC
-    ${CMAKE_INSTALL_PREFIX}/lib/libddsc.so
-  )
-endif()
+target_link_libraries (
+  carla-ros2-native PUBLIC
+  ${CMAKE_INSTALL_PREFIX}/lib/libfastrtps.so
+  ${CMAKE_INSTALL_PREFIX}/lib/libddsc.so
+  # zenoh-c is a static PIC archive (Rust); link it into the shared lib and
+  # pull in the system libraries the Rust runtime needs. dl is also required
+  # by ZenohSharedSession's dladdr-based config path resolution.
+  ${CMAKE_INSTALL_PREFIX}/lib/libzenohc.a
+  pthread
+  ${CMAKE_DL_LIBS}
+  m
+  rt
+)
 
 install (
   TARGETS

@@ -34,6 +34,10 @@ public:
 
   void SetOwner(AActor *Owner) override;
 
+  void GetMirrorState(carla::multigpu::SensorState &State) const override;
+
+  void SetMirrorState(const carla::multigpu::SensorState &State) override;
+
   virtual void PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaTime) override;
 
   const carla::geom::Vector3D ComputeAccelerometerNoise(
@@ -43,7 +47,13 @@ public:
       const FVector &Gyroscope);
 
   /// Accelerometer: measures linear acceleration in m/s^2
-  carla::geom::Vector3D ComputeAccelerometer(const float CurrentTime);
+  carla::geom::Vector3D ComputeAccelerometer(const float DeltaTime);
+
+  /// tier4: same as ComputeAccelerometer, but derives the time step from the
+  /// given simulation time and the time of the previous call. Used by
+  /// sensor.other.imu_highprecision, which does not call this every tick.
+  /// Returns zero on the first call (no previous time yet).
+  carla::geom::Vector3D ComputeAccelerometerAtTime(const float CurrentTime);
 
   /// Gyroscope: measures angular velocity in rad/sec
   virtual carla::geom::Vector3D ComputeGyroscope();
@@ -86,14 +96,16 @@ private:
   FVector BiasGyro;
 
   /// Used to compute the acceleration
-  TArray<FVector, TFixedAllocator<2>> PrevLocation{
-    FVector::OneVector * std::numeric_limits<float>::quiet_NaN(),
-    FVector::OneVector * std::numeric_limits<float>::quiet_NaN()
-  };
+  std::array<FVector, 2> PrevLocation;
 
   /// Used to compute the acceleration
-  float PrevDeltaTime{std::numeric_limits<float>::quiet_NaN()};
+  float PrevDeltaTime;
+
+  /// tier4: simulation time of the previous ComputeAccelerometerAtTime call.
   float PrevTime{std::numeric_limits<float>::quiet_NaN()};
+
+  /// Multi-GPU secondary: the primary IMU's rotation relative to its parent.
+  TOptional<FQuat> MirroredLocalRotation;
 
   /// Accelerometer value calculated after each PostPhysTick
   carla::geom::Vector3D AccelerometerValue;
@@ -103,4 +115,5 @@ private:
 
   /// Magnetometer value calculated after each PostPhysTick
   float CompassValue;
+	
 };

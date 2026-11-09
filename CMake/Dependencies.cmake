@@ -97,7 +97,6 @@ target_link_libraries (
 )
 
 
-
 # ==== ZLIB ====
 carla_dependency_option (ZLIB_BUILD_EXAMPLES OFF)
 carla_dependency_add (
@@ -117,7 +116,7 @@ if (WIN32)
 else ()
   carla_dependency_option (ZLIB_LIBRARY ${zlib_BINARY_DIR}/libz.a)
 endif ()
-carla_dependency_option (ZLIB_INCLUDE_DIRS ${zlib_SOURCE_DIR} ${zlib_BINARY_DIR})
+carla_dependency_option (ZLIB_INCLUDE_DIRS "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}")
 carla_dependency_option (ZLIB_LIBRARIES ${ZLIB_LIBRARY})
 
 
@@ -218,33 +217,6 @@ carla_dependency_add (
 
 
 
-if (ENABLE_OSM2ODR)
-  # ==== PROJ ====
-  carla_dependency_option (BUILD_TESTING OFF)
-  carla_dependency_option (ENABLE_TIFF OFF)
-  carla_dependency_option (ENABLE_CURL OFF)
-  carla_dependency_add (
-    proj
-    ${CARLA_PROJ_TAG}
-    https://github.com/OSGeo/PROJ/archive/refs/tags/${CARLA_PROJ_TAG}.zip
-    https://github.com/OSGeo/PROJ.git
-  )
-endif ()
-
-
-
-if (ENABLE_OSM2ODR)
-  # ==== XERCESC ====
-  carla_dependency_add (
-    xercesc
-    ${CARLA_XERCESC_TAG}
-    https://github.com/apache/xerces-c/archive/refs/tags/${CARLA_XERCESC_TAG}.zip
-    https://github.com/apache/xerces-c.git
-  )
-endif ()
-
-
-
 if (BUILD_OSM_WORLD_RENDERER)
   # ==== LUNASVG ====
   carla_dependency_add (
@@ -264,17 +236,6 @@ if (BUILD_OSM_WORLD_RENDERER)
 endif ()
 
 
-
-if (BUILD_CARLA_UNREAL AND ENABLE_STREETMAP)
-  # ==== STREETMAP ====
-  carla_dependency_add (
-    StreetMap
-    ${CARLA_STREETMAP_TAG}
-    https://github.com/carla-simulator/StreetMap/archive/refs/heads/${CARLA_STREETMAP_TAG}.zip
-    https://github.com/carla-simulator/StreetMap.git
-    SOURCE_DIR ${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Plugins/StreetMap
-  )
-endif ()
 
 if (BUILD_LIBCARLA_TESTS)
   # ==== GOOGLETEST ====

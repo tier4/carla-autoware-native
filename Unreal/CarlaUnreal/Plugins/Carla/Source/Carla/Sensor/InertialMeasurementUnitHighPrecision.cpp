@@ -226,7 +226,7 @@ static void EmitZOHSamples(
 {
   const int32 N = FMath::Max(1, FMath::RoundToInt(OutputRateHz * DeltaTime));
   const carla::geom::Vector3D G = Sensor->ComputeGyroscope();
-  const carla::geom::Vector3D A = Sensor->ComputeAccelerometer(
+  const carla::geom::Vector3D A = Sensor->ComputeAccelerometerAtTime(
       Sensor->GetWorld()->GetTimeSeconds());
   const float Compass = Sensor->ComputeCompass();
   for (int32 k = 0; k < N; ++k)
@@ -263,7 +263,7 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTick(
   }
 
   // No callback registered (no valid proxy): fall back to ZOH upsample.
-  // The base PrevLocation/PrevTime will be seeded by ComputeAccelerometer on
+  // The base PrevLocation/PrevTime will be seeded by ComputeAccelerometerAtTime on
   // the first call; the base NaN guard handles the first-sample transition.
   if (SubstepCallback == nullptr)
   {

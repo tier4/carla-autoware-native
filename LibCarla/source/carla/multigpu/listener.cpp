@@ -8,6 +8,7 @@
 #include "carla/multigpu/primary.h"
 
 #include "carla/Logging.h"
+#include "carla/Sockets.h"
 
 #include <boost/asio/post.hpp>
 
@@ -21,6 +22,9 @@ namespace multigpu {
       _acceptor(_io_context, std::move(ep)),
       _timeout(time_duration::seconds(1u)) {
         _acceptor.listen();
+        // Same fd-leak-into-forked-children concern as
+        // carla::streaming::detail::tcp::Server; see carla/Sockets.h.
+        carla::SetSocketCloseOnExec(_acceptor.native_handle());
       }
 
   Listener::~Listener() {
@@ -28,10 +32,14 @@ namespace multigpu {
   }
   
   void Listener::Stop() {
-    _acceptor.cancel();
-    _acceptor.close();
-    _io_context.stop();
-    _io_context.restart();
+    // Non-throwing: Stop() can run twice (explicitly, then again from
+    // ~Listener() if another reference outlives it); the throwing overloads
+    // raise on the second call, since the acceptor is already closed by then.
+    boost::system::error_code ec;
+    _acceptor.cancel(ec);
+    _acceptor.close(ec);
+    // io_context is owned by whoever constructed it (Router's ThreadPool);
+    // stopping/restarting it is not this class's responsibility.
   }
   
   void Listener::OpenSession(

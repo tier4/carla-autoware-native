@@ -47,41 +47,6 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS" : true
       }
-    },
-    {
-      "name": "Common-CycloneDDS",
-      "description": "ROS2 enabled with CycloneDDS",
-      "inherits": "Common",
-      "cacheVariables": {
-        "CARLA_DDS_VENDOR": "CycloneDDS"
-      },
-      "hidden": true
-    },
-    {
-      "name": "Development-CycloneDDS",
-      "inherits": "Common-CycloneDDS",
-      "cacheVariables":
-      {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_EXPORT_COMPILE_COMMANDS" : true
-      }
-    },
-    {
-      "name": "Release-CycloneDDS",
-      "inherits": "Common-CycloneDDS",
-      "cacheVariables":
-      {
-        "CMAKE_BUILD_TYPE": "Release"
-      }
-    },
-    {
-      "name": "Debug-CycloneDDS",
-      "inherits": "Common-CycloneDDS",
-      "cacheVariables":
-      {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS" : true
-      }
     }
   ]
 }

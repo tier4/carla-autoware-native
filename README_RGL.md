@@ -99,7 +99,8 @@ The script:
 1. Detects and wipes stale CMake caches under `Build/` (see
    [Stale cache detection](#stale-cache-detection)).
 2. Runs `cmake -G Ninja -S . -B Build --toolchain=$PWD/CMake/Toolchain.cmake
-   -DENABLE_ROS2=ON -DENABLE_RGL=ON -DCARLA_DDS_VENDOR=CycloneDDS …`.
+   -DENABLE_ROS2=ON -DENABLE_RGL=ON …`. The ROS 2 middleware is chosen when
+   the server starts (`-rmw=fastdds` by default, `-rmw=cyclonedds` for CycloneDDS).
 3. Invokes `cmake --build Build` and, if requested, the package target.
 
 `RclcppBridge` is built as an ExternalProject under `Build/` using the system
@@ -122,7 +123,7 @@ cmake --build Build --target launch              # UE5 editor
 ## Running a packaged build
 
 ```sh
-cd Build/Package/Carla-*-Linux-Shipping/Linux
+cd Build/Package/Carla-*-Linux-Shipping
 ./CarlaUnreal.sh --ros2
 ```
 

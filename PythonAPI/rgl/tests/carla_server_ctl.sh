@@ -3,7 +3,7 @@
 set -o pipefail
 # Default derived from the script location (PythonAPI/rgl/tests/ -> repo root), not a developer path.
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
-BIN=${CARLA_BIN:-$REPO/Build/Package/Carla-0.10.0-Linux-Shipping/Linux/CarlaUnreal.sh}
+BIN=${CARLA_BIN:-$REPO/Build/Package/Carla-1.0-Linux-Shipping/CarlaUnreal.sh}
 PORT=${CARLA_PORT:-2000}
 cmd=$1; label=$2; shift 2 || true
 pidf=/tmp/carla-${label}.pid; logf=/tmp/carla-${label}.log

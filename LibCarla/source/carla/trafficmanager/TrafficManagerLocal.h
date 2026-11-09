@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -17,6 +18,7 @@
 #include "carla/client/World.h"
 #include "carla/Memory.h"
 #include "carla/rpc/Command.h"
+#include "carla/rpc/EpisodeSettings.h"
 
 #include "carla/trafficmanager/AtomicActorSet.h"
 #include "carla/trafficmanager/InMemoryMap.h"
@@ -61,6 +63,8 @@ private:
   cc::World world;
   /// Set of all actors registered with traffic manager.
   AtomicActorSet registered_vehicles;
+  // Set containing the ids of the registered large vehicles
+  std::unordered_map<ActorId, std::pair<float, bool>> large_vehicles;
   /// State counter to track changes in registered actors.
   int registered_vehicles_state;
   /// List of vehicles registered with the traffic manager in
@@ -99,16 +103,17 @@ private:
   TrafficManagerServer server;
   /// Switch to turn on / turn off traffic manager.
   std::atomic<bool> run_traffic_manger{true};
-  /// Flags to signal step begin and end.
-  std::atomic<bool> step_begin{false};
-  std::atomic<bool> step_end{false};
-  /// Mutex for progressing synchronous execution.
-  std::mutex step_execution_mutex;
-  /// Condition variables for progressing synchronous execution.
-  std::condition_variable step_begin_trigger;
-  std::condition_variable step_end_trigger;
   /// Single worker thread for sequential execution of sub-components.
   std::unique_ptr<std::thread> worker_thread;
+  /// Last processed frame
+  size_t last_frame{0};
+  /// Cached episode settings; they only change through world.apply_settings.
+  rpc::EpisodeSettings episode_settings;
+  /// Simulation time of the last episode settings refresh.
+  double last_settings_update {-std::numeric_limits<double>::infinity()};
+  /// Starts at the limit so the first batch of an episode is waited for.
+  uint64_t unwaited_control_batches {
+      constants::WorldInfoRefresh::MAX_UNWAITED_CONTROL_BATCHES};
   /// Randomization seed.
   uint64_t seed {static_cast<uint64_t>(time(NULL))};
   /// Structure holding random devices per vehicle.
@@ -139,6 +144,9 @@ public:
   /// To start the TrafficManager.
   void Start();
 
+  /// To do one step of the TrafficManager.
+  void Step();
+
   /// Initiates thread to run the TrafficManager sequentially.
   void Run();
 
@@ -148,8 +156,8 @@ public:
   /// To release the traffic manager.
   void Release();
 
-  /// To reset the traffic manager.
-  void Reset();
+  /// To reset the traffic manager for the episode @a episode_id.
+  void Reset(uint64_t episode_id);
 
   /// This method registers a vehicle with the traffic manager.
   void RegisterVehicles(const std::vector<ActorPtr> &actor_list);
@@ -175,6 +183,12 @@ public:
   /// Method to set a global lane offset displacement from the center line.
   /// Positive values imply a right offset while negative ones mean a left one.
   void SetGlobalLaneOffset(float const offset);
+
+  /// Method to enable/disable the wide-turn manoeuvre for a single large vehicle.
+  void SetLargeVehicleWideTurn(const ActorPtr &actor, const bool enable);
+
+  /// Method to enable/disable the wide-turn manoeuvre globally for large vehicles.
+  void SetGlobalLargeVehicleWideTurn(const bool enable);
 
   /// Method to set the automatic management of the vehicle lights
   void SetUpdateVehicleLights(const ActorPtr &actor, const bool do_update);

@@ -65,7 +65,7 @@ void UTrafficLightController::EmptyTrafficLights()
 
 void UTrafficLightController::AddTrafficLight(UTrafficLightComponent * TrafficLight)
 {
-  TrafficLights.Add(TrafficLight);
+  TrafficLights.AddUnique(TrafficLight);
   TrafficLight->SetController(this);
 }
 
@@ -102,19 +102,19 @@ bool UTrafficLightController::IsCycleFinished() const
 void UTrafficLightController::SetTrafficLightsState(ETrafficLightState NewState)
 {
   SetCurrentLightState(NewState);
-  // Guard against stale/null entries: dynamically-built groups can hold
-  // references to components whose actors were destroyed (the UPROPERTY array
-  // is then nulled by GC). Mirrors the null-check in
-  // UTrafficLightComponent::SetLightState's Vehicles loop.
   for(auto *Light : TrafficLights)
   {
-    if (Light != nullptr)
+    // World Partition can stream out the cell that owns a light while its
+    // controller keeps running; skip entries the GC has invalidated.
+    if (IsValid(Light))
     {
       Light->SetLightState(NewState);
     }
   }
   for(FCarlaActor* Light : TrafficLightCarlaActors)
   {
+    // tier4: dynamically-built groups can hold entries whose actors were
+    // destroyed; skip them.
     if (Light != nullptr)
     {
       Light->SetTrafficLightState(NewState);

@@ -32,10 +32,17 @@ carla_option (
   ON
 )
 
+
 carla_option (
   BUILD_LIBCARLA_TESTS
   "Build LibCarla tests."
   ON
+)
+
+carla_option (
+  BUILD_LIBCARLA_MULTIGPU_TESTS
+  "Build the Multi-GPU LibCarla tests (test_multigpu_*). Off for now while the Multi-GPU work stabilises."
+  OFF
 )
 
 carla_option (
@@ -50,6 +57,12 @@ carla_option (
   ON
 )
 
+carla_string_option (
+  CARLA_PYTHON_VERSIONS
+  "Semicolon-separated list of Python versions (X.Y) to build the Python API wheel for, e.g. 3.10;3.11;3.12. The interpreter of each one is python<X.Y> in PATH or CARLA_PYTHON_<XY>_EXECUTABLE. Empty builds only for the Python CMake finds."
+  ""
+)
+
 carla_option (
   ENABLE_ROS2
   "Enable ROS2."
@@ -59,12 +72,6 @@ carla_option (
 carla_option (
   ENABLE_ROS2_DEMO
   "Enable ROS2 demo."
-  OFF
-)
-
-carla_option (
-  ENABLE_OSM2ODR
-  "Enable OSM2ODR."
   OFF
 )
 
@@ -140,12 +147,6 @@ carla_option (
   OFF
 )
 
-carla_option (
-  ENABLE_STREETMAP
-  "Whether to download the Streetmap UE plugin."
-  ON
-)
-
 
 
 # ================================
@@ -170,6 +171,15 @@ carla_string_option (
   CARLA_UNREAL_ENGINE_PATH
   "Path to the CARLA fork of Unreal Engine."
   "${CARLA_UNREAL_ENGINE_PATH_INFERRED}"
+)
+
+# A value passed with -D can hold Windows backslashes, which break the generated CMake files.
+cmake_path (
+  CONVERT
+  "${CARLA_UNREAL_ENGINE_PATH}"
+  TO_CMAKE_PATH_LIST
+  CARLA_UNREAL_ENGINE_PATH
+  NORMALIZE
 )
 
 carla_message ("Using ${CARLA_UNREAL_ENGINE_PATH} as Unreal Engine root path.")
@@ -231,6 +241,29 @@ carla_string_option (
   "Development"
 )
 
+# The engine's DLSSRRDenoiser plugin (DLSS Ray Reconstruction denoiser for
+# rt_lens + DLSS Super Resolution scene-capture upscaler) needs the NVIDIA
+# DLSS SDK both at build time (UnrealBuildTool reads the DLSS_SDK environment
+# variable and fails without it) and at runtime (NGX loads the model snippets
+# from $DLSS_SDK/lib/<platform>/rel). The SDK is NVIDIA-licensed and never
+# vendored; CMake/DLSS.cmake resolves this option into a validated path (or
+# fetches the SDK from NVIDIA's public repository) and injects DLSS_SDK into
+# every Unreal build, package, and launch command, so `cmake --build` works
+# from any shell without CarlaSetup.sh's exports.
+cmake_path (
+  CONVERT
+  "$ENV{DLSS_SDK}"
+  TO_CMAKE_PATH_LIST
+  CARLA_DLSS_SDK_PATH_INFERRED
+  NORMALIZE
+)
+
+carla_string_option (
+  CARLA_DLSS_SDK_PATH
+  "Path to a checkout of the NVIDIA DLSS SDK (github.com/NVIDIA/DLSS). \"disabled\" builds without DLSS support; empty resolves the DLSS_SDK environment variable and falls back to fetching into ~/SDKs/DLSS."
+  "${CARLA_DLSS_SDK_PATH_INFERRED}"
+)
+
 # Docs for UE5 build configurations:
 # https://docs.unrealengine.com/4.27/en-US/ProductionPipelines/DevelopmentSetup/BuildConfigurations/
 
@@ -267,6 +300,45 @@ carla_string_option (
   CARLA_PACKAGE_COMPRESSION
   "Package compression method: pigz (default, parallel gzip), zstd (parallel via pzstd), gzip (single-threaded)."
   "pigz"
+)
+
+# Cook errors (package load errors, handled ensures) make the cook commandlet
+# exit non-zero and UAT aborts BuildCookRun with Error_UnknownCookFailure (rc 25)
+# before anything is staged. This valve forwards -IgnoreCookErrors so a package
+# is still produced from a partially broken cook. Diagnostic use only: the
+# package ships whatever the cooker managed to save, never release one built
+# with it.
+carla_option (
+  CARLA_IGNORE_COOK_ERRORS
+  "Whether to pass -IgnoreCookErrors to UAT BuildCookRun so cook errors do not abort the package target (diagnostic safety valve, never for release builds)."
+  OFF
+)
+
+set (
+  CARLA_MAPS_TO_COOK
+  ""
+  CACHE STRING
+  "Override the cooked map list ('+'-separated full package paths, e.g. \
+\"/Game/Carla/Maps/Town10HD_Opt+/Game/Carla/Maps/Town15/Town15\"). \
+Empty means use the +MapsToCook list from DefaultGame.ini (the maps of the default package)."
+)
+
+set (
+  CARLA_BASE_RELEASE
+  ""
+  CACHE STRING
+  "Name of the release version the package target creates with UAT's \
+-createreleaseversion (the base a content pack's DLC cook is 'based on'). \
+Empty means carla-<CARLA_VERSION>-<UE_SYSTEM_NAME>, e.g. carla-1.0-Linux."
+)
+
+set (
+  CARLA_RELEASE_VERSION
+  ""
+  CACHE STRING
+  "Version string carla::version() reports (client and server), e.g. 1.0. \
+Set by the release CI. Empty means the git tag at HEAD if there is one, \
+otherwise <CARLA_VERSION>-<short commit hash>, with -dirty for local changes."
 )
 
 
@@ -434,24 +506,19 @@ carla_string_option (
   ${CARLA_LIBOSMSCOUT_VERSION}
 )
 
-# ==== STREETMAP ====
+# ==== FASTDDS ====
 
 carla_string_option (
-  CARLA_STREETMAP_VERSION
-  "Target StreetMap version."
-  ue5-dev-carla
+  CARLA_FASTDDS_VERSION
+  "Target Fast-DDS version."
+  2.14.6
 )
 
 carla_string_option (
-  CARLA_STREETMAP_TAG
-  "Target StreetMap git tag."
-  ${CARLA_STREETMAP_VERSION}
+  CARLA_FASTDDS_TAG
+  "Target Fast-DDS git tag."
+  v${CARLA_FASTDDS_VERSION}
 )
-
-# ==== DDS VENDOR SELECTION ====
-
-set (CARLA_DDS_VENDOR "FastDDS" CACHE STRING
-  "DDS vendor to use: FastDDS or CycloneDDS (default: FastDDS)")
 
 # ==== CYCLONEDDS ====
 
@@ -467,18 +534,18 @@ carla_string_option (
   ${CARLA_CYCLONEDDS_VERSION}
 )
 
-# ==== FASTDDS ====
+# ==== ZENOH-C ====
 
 carla_string_option (
-  CARLA_FASTDDS_VERSION
-  "Target Fast-DDS version."
-  2.11.2
+  CARLA_ZENOH_C_VERSION
+  "Target zenoh-c version."
+  1.8.0
 )
 
 carla_string_option (
-  CARLA_FASTDDS_TAG
-  "Target Fast-DDS git tag."
-  v${CARLA_FASTDDS_VERSION}
+  CARLA_ZENOH_C_TAG
+  "Target zenoh-c release tag."
+  ${CARLA_ZENOH_C_VERSION}
 )
 
 # ==== FASTCDR ====
@@ -486,7 +553,7 @@ carla_string_option (
 carla_string_option (
   CARLA_FASTCDR_VERSION
   "Target Fast-CDR version."
-  1.1.x
+  2.2.x
 )
 
 carla_string_option (

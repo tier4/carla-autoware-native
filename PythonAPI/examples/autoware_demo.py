@@ -1,3 +1,19 @@
+#!/usr/bin/env python3
+
+# Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
+# de Barcelona (UAB).
+#
+# This work is licensed under the terms of the MIT license.
+# For a copy, see <https://opensource.org/licenses/MIT>.
+
+"""Autoware sensor-kit demo (port of TIER IV's autoware-support example).
+
+Spawns an ego vehicle with an AWSIM-compatible sensor kit (VLP16-style lidar,
+traffic-light camera, IMU, GNSS, vehicle-status sensor), wires the sensors to
+Autoware's expected ROS 2 topic names via the ``ros_topic_name`` blueprint
+attribute, and runs a real-time-paced synchronous simulation loop.
+"""
+
 import argparse
 import json
 import math
@@ -5,11 +21,10 @@ import os
 import time
 import random
 
-import PyKDL as kdl
 import carla
 
 
-# Autoware post-process profile for traffic light recognition camera.
+# Autoware post-process profile for the traffic light recognition camera.
 # These values were originally hardcoded in ActorBlueprintFunctionLibrary.cpp
 # and are now managed as a JSON profile loaded by UPostProcessJsonUtils.
 AUTOWARE_POSTPROCESS_SETTINGS = {
@@ -65,7 +80,7 @@ def deploy_postprocess_profile(profile_name, settings):
 
     Deploys to both:
     - Source tree: {workspace}/Unreal/CarlaUnreal/Content/Carla/Config/PostProcess/
-    - Package builds found under: {workspace}/Build/Package/*/Linux/CarlaUnreal/Content/Carla/Config/PostProcess/
+    - Package builds found under: {workspace}/Build/Package/*/CarlaUnreal/Content/Carla/Config/PostProcess/
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     workspace_path = os.path.abspath(os.path.join(script_dir, "..", ".."))
@@ -85,17 +100,20 @@ def deploy_postprocess_profile(profile_name, settings):
     if os.path.isdir(package_base):
         import glob
         for pkg_content in glob.glob(os.path.join(
-            package_base, "*", "Linux", "CarlaUnreal", "Content",
+            package_base, "*", "CarlaUnreal", "Content",
             "Carla", "Config", "PostProcess"
         )):
             target_dirs.append(pkg_content)
 
     for config_dir in target_dirs:
-        os.makedirs(config_dir, exist_ok=True)
-        profile_path = os.path.join(config_dir, f"{profile_name}.json")
-        with open(profile_path, 'w') as f:
-            json.dump(settings, f, indent=2)
-        log_info(f"Deployed PostProcess profile: {profile_path}")
+        try:
+            os.makedirs(config_dir, exist_ok=True)
+            profile_path = os.path.join(config_dir, f"{profile_name}.json")
+            with open(profile_path, 'w') as f:
+                json.dump(settings, f, indent=2)
+            log_info(f"Deployed PostProcess profile: {profile_path}")
+        except OSError as error:
+            log_warning(f"Could not deploy PostProcess profile to {config_dir}: {error}")
 
 
 def log_info(text):
@@ -110,22 +128,53 @@ def log_error(text):
     print("[ERROR]: %s" % text)
 
 
+def _rpy_to_matrix(roll, pitch, yaw):
+    """3x3 rotation matrix for the RPY convention Rz(yaw) * Ry(pitch) * Rx(roll)."""
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    return [
+        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+        [-sp, cp * sr, cp * cr],
+    ]
+
+
+def _matrix_to_rpy(R):
+    """Inverse of _rpy_to_matrix (ZYX Euler extraction)."""
+    pitch = math.atan2(-R[2][0], math.hypot(R[0][0], R[1][0]))
+    yaw = math.atan2(R[1][0], R[0][0])
+    roll = math.atan2(R[2][1], R[2][2])
+    return roll, pitch, yaw
+
+
+def _mat_mul(A, B):
+    return [
+        [sum(A[i][k] * B[k][j] for k in range(3)) for j in range(3)]
+        for i in range(3)
+    ]
+
+
+def _mat_vec(A, v):
+    return [sum(A[i][k] * v[k] for k in range(3)) for i in range(3)]
+
+
 class ROS2:
     """
-	ROS2 coordinate system to CARLA coordinate system conversions
-	ROS2 uses right-handed system and CARLA uses left-handed system.
-	Also converts rotation units
-	- ROS2 uses radians
-	- CARLA uses degrees
-	https://github.com/carla-simulator/ros-bridge/blob/e9063d97ff5a724f76adbb1b852dc71da1dcfeec/carla_common/src/carla_common/transforms.py#L307-L310
-	"""
+    ROS2 coordinate system to CARLA coordinate system conversions.
+    ROS2 uses a right-handed system and CARLA uses a left-handed system.
+    Also converts rotation units:
+    - ROS2 uses radians
+    - CARLA uses degrees
+    https://github.com/carla-simulator/ros-bridge/blob/e9063d97ff5a724f76adbb1b852dc71da1dcfeec/carla_common/src/carla_common/transforms.py#L307-L310
+    """
 
+    @staticmethod
     def Location(x: float = 0.0, y: float = 0.0, z: float = 0.0):
         """In meters"""
-        return carla.Location(x=x,
-                              y=-y,
-                              z=z)
+        return carla.Location(x=x, y=-y, z=z)
 
+    @staticmethod
     def Rotation(roll: float = 0.0, pitch: float = 0.0, yaw: float = 0.0):
         """In radians"""
         return carla.Rotation(roll=math.degrees(roll),
@@ -133,15 +182,7 @@ class ROS2:
                               yaw=-math.degrees(yaw))
 
     class Transform:
-        """
-		Transform in ROS2 coordinate system
-		"""
-        x = 0.0
-        y = 0.0
-        z = 0.0
-        roll = 0.0
-        pitch = 0.0
-        yaw = 0.0
+        """Transform in the ROS2 coordinate system."""
 
         def __init__(self,
                      x: float = 0.0,
@@ -165,52 +206,77 @@ class ROS2:
                                                  pitch=self.pitch,
                                                  yaw=self.yaw))
 
-        def to_kdl(self):
-            return kdl.Frame(kdl.Rotation.RPY(self.roll, self.pitch, self.yaw),
-                             kdl.Vector(self.x, self.y, self.z))
-
-        @staticmethod
-        def from_kdl(F: kdl.Frame):
-            x, y, z = F.p[0], F.p[1], F.p[2]
-            roll, pitch, yaw = F.M.GetRPY()
-
-            return ROS2.Transform(x, y, z, roll, pitch, yaw)
+        def compose(self, other):
+            """Homogeneous-frame composition self * other (pure-python
+            replacement for the PyKDL frames the tier4 original used)."""
+            R1 = _rpy_to_matrix(self.roll, self.pitch, self.yaw)
+            R2 = _rpy_to_matrix(other.roll, other.pitch, other.yaw)
+            R = _mat_mul(R1, R2)
+            p = _mat_vec(R1, [other.x, other.y, other.z])
+            roll, pitch, yaw = _matrix_to_rpy(R)
+            return ROS2.Transform(self.x + p[0],
+                                  self.y + p[1],
+                                  self.z + p[2],
+                                  roll, pitch, yaw)
 
 
 def chain_transforms(transforms):
     """
-	:param transforms: list of ROS2.Transform
-	:return: ROS2.Transform
-	"""
-    F = transforms[0].to_kdl()
+    :param transforms: list of ROS2.Transform
+    :return: ROS2.Transform
+    """
+    result = transforms[0]
     for t in transforms[1:]:
-        F = F * t.to_kdl()
-    return ROS2.Transform.from_kdl(F)
+        result = result.compose(t)
+    return result
+
+
+def try_set_ros_topic_name(blueprint, topic_name):
+    """Sets the ros_topic_name attribute if the server exposes it.
+
+    The attribute is added by the Autoware-port ActorBlueprintFunctionLibrary
+    changes; warn instead of crashing when running against a server that does
+    not have them yet (the sensor then publishes on its default topic).
+    """
+    if blueprint.has_attribute("ros_topic_name"):
+        blueprint.set_attribute("ros_topic_name", topic_name)
+    else:
+        log_warning(
+            f"Blueprint '{blueprint.id}' has no 'ros_topic_name' attribute; "
+            f"'{topic_name}' not applied (server predates the Autoware port?)")
 
 
 def generate_vlp16_blueprint(blueprint_library):
     """Generates a blueprint for VLP16
 
-	The following assumptions were made based on the configuration in AWSIM:
-	- 10 Hz publish frequency
-	- 0.2 deg horizontal resolution"""
+    The following assumptions were made based on the configuration in AWSIM:
+    - 10 Hz publish frequency
+    - 0.2 deg horizontal resolution"""
 
     blueprint = blueprint_library.find("sensor.lidar.ray_cast")
 
-    # The following values are taken from VLP16 datasheet
+    # The following values are taken from the VLP16 datasheet
     blueprint.set_attribute("channels", "16")
     blueprint.set_attribute("range", "100.0")
     blueprint.set_attribute("upper_fov", "10.0")
     blueprint.set_attribute("lower_fov", "-20.0")
 
-    # Calculated as: horizontal_fov / horizontal_resolution / sensor_tick * channels
+    # Calculated as: horizontal_fov / horizontal_resolution / sensor_tick * channels,
+    # assuming the 10 Hz rotation_frequency set below.
     blueprint.set_attribute("points_per_second", "288000")
 
     blueprint.set_attribute("sensor_tick", "0.1")
+    blueprint.set_attribute("rotation_frequency", "10.0")
+
+    # Disable CARLA's default random per-tick point dropout (45% general rate
+    # by default): re-rolled every frame, it destabilizes the point cluster on
+    # perfectly static objects enough for a tracker to read it as motion.
+    blueprint.set_attribute("dropoff_general_rate", "0.0")
+    blueprint.set_attribute("dropoff_zero_intensity", "0.0")
 
     # ROS settings
     blueprint.set_attribute("ros_name", "velodyne_top")  # frame_id
-    blueprint.set_attribute("ros_topic_name", "/sensing/lidar/top/pointcloud_raw_ex")
+    try_set_ros_topic_name(blueprint, "/sensing/lidar/top/pointcloud_raw_ex")
 
     return blueprint
 
@@ -218,10 +284,10 @@ def generate_vlp16_blueprint(blueprint_library):
 def generate_traffic_light_camera_blueprint(blueprint_library):
     """Generates a traffic light camera
 
-	The following assumptions were made based on the configuration in AWSIM:
-	- 10 Hz publish frequency
-	- 1920 x 1080 image resolution
-	- 90 deg horizontal field of view"""
+    The following assumptions were made based on the configuration in AWSIM:
+    - 10 Hz publish frequency
+    - 1920 x 1080 image resolution
+    - 90 deg horizontal field of view"""
 
     blueprint = blueprint_library.find("sensor.camera.rgb")
 
@@ -229,11 +295,31 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
     blueprint.set_attribute("image_size_x", "1920")
     blueprint.set_attribute("image_size_y", "1080")
     blueprint.set_attribute("sensor_tick", "0.1")
-    blueprint.set_attribute("post_process_profile", "autoware_demo")
+    if blueprint.has_attribute("post_process_profile"):
+        blueprint.set_attribute("post_process_profile", "autoware_demo")
 
     # ROS settings
     blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_optical_link")  # frame_id
-    blueprint.set_attribute("ros_topic_name", "/sensing/camera/traffic_light")
+    try_set_ros_topic_name(blueprint, "/sensing/camera/traffic_light")
+
+    return blueprint
+
+
+def generate_front_camera_blueprint(blueprint_library):
+    """Generates a forward-facing camera for visualization (e.g. RViz)"""
+
+    blueprint = blueprint_library.find("sensor.camera.rgb")
+
+    blueprint.set_attribute("fov", "90.0")
+    blueprint.set_attribute("image_size_x", "1280")
+    blueprint.set_attribute("image_size_y", "720")
+    blueprint.set_attribute("sensor_tick", "0.1")
+    if blueprint.has_attribute("post_process_profile"):
+        blueprint.set_attribute("post_process_profile", "autoware_demo")
+
+    # ROS settings
+    blueprint.set_attribute("ros_name", "front_camera/camera_optical_link")  # frame_id
+    try_set_ros_topic_name(blueprint, "/sensing/camera/front")
 
     return blueprint
 
@@ -247,7 +333,7 @@ def generate_imu_blueprint(blueprint_library):
 
     # ROS settings
     blueprint.set_attribute("ros_name", "tamagawa/imu_link")  # frame_id
-    blueprint.set_attribute("ros_topic_name", "/sensing/imu/tamagawa/imu_raw")
+    try_set_ros_topic_name(blueprint, "/sensing/imu/tamagawa/imu_raw")
 
     return blueprint
 
@@ -269,21 +355,29 @@ def generate_gnss_blueprint(blueprint_library, is_mgrs_enabled):
             log_error("Cannot spawn Carla GNSS sensor!")
         return None
 
-    blueprint.set_attribute("sensor_tick", "1.0")
+    # Capture EVERY sim tick (sensor_tick 0.0). Classical only needs GNSS to
+    # seed localization init (1 Hz was fine), but the e2e path derives
+    # ground-truth kinematic_state from GNSS pose + twist and
+    # carla_state_publisher gates on pose/twist stamp freshness (0.2 s):
+    # - a slow tick leaves the pose a full period stale (gate rejects all);
+    # - sensor_tick == dt drifts: float accumulation skips a capture every
+    #   few hundred ticks and the stamp falls cumulatively behind.
+    blueprint.set_attribute("sensor_tick", "0.0")
 
     # ROS settings
     blueprint.set_attribute("ros_name", "map")  # frame_id
-    blueprint.set_attribute("ros_topic_name", "/sensing/gnss")
+    try_set_ros_topic_name(blueprint, "/sensing/gnss")
 
     return blueprint
 
 
 def spawn_sensors(world, base_link, ego, args):
-    """Spawns sensors relatively to the provided base_link actor
+    """Spawns sensors relative to the provided base_link actor
 
-	Positioning of the sensors is taken from the URDF for awsim_sensor_kit_description package at:
-	https://github.com/autowarefoundation/autoware_launch/tree/0.45.3/sensor_kit/awsim_sensor_kit_launch/awsim_sensor_kit_description
-	"""
+    Positioning of the sensors is taken from the URDF for the
+    awsim_sensor_kit_description package at:
+    https://github.com/autowarefoundation/autoware_launch/tree/0.45.3/sensor_kit/awsim_sensor_kit_launch/awsim_sensor_kit_description
+    """
 
     blueprint_library = world.get_blueprint_library()
 
@@ -294,7 +388,6 @@ def spawn_sensors(world, base_link, ego, args):
         = generate_traffic_light_camera_blueprint(blueprint_library)
     imu_blueprint = generate_imu_blueprint(blueprint_library)
     gnss_receiver_blueprint = generate_gnss_blueprint(blueprint_library, args.mgrs_off)
-    vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
 
     base_link_to_sensor_kit_transform = ROS2.Transform(
         x=0.9,
@@ -325,6 +418,15 @@ def spawn_sensors(world, base_link, ego, args):
         attach_to=sensor_kit)
     traffic_light_left_camera.enable_for_ros()
 
+    # Spawn front camera (visualization; not part of the AWSIM sensor kit)
+    front_camera_blueprint = generate_front_camera_blueprint(blueprint_library)
+    sensor_kit_to_front_camera_transform = ROS2.Transform(x=0.3, z=-0.3)
+    front_camera = world.spawn_actor(
+        front_camera_blueprint,
+        sensor_kit_to_front_camera_transform.to_carla(),
+        attach_to=sensor_kit)
+    front_camera.enable_for_ros()
+
     # Spawn IMU
     # NOTE: IMU is mounted to Ego directly, because this is required for angular velocity to work
     pivot_to_base_link_transform = ROS2.Transform(x=-1.39706787)
@@ -346,36 +448,53 @@ def spawn_sensors(world, base_link, ego, args):
     imu.enable_for_ros()
 
     # Spawn GNSS receiver
-    sensor_kit_to_gnss_receiver_transform = ROS2.Transform(x=-0.1, z=-0.2)
-    gnss_receiver = world.spawn_actor(
-        gnss_receiver_blueprint,
-        sensor_kit_to_gnss_receiver_transform.to_carla(),
-        attach_to=sensor_kit)
-    gnss_receiver.enable_for_ros()
+    if gnss_receiver_blueprint is not None:
+        sensor_kit_to_gnss_receiver_transform = ROS2.Transform(x=-0.1, z=-0.2)
+        gnss_receiver = world.spawn_actor(
+            gnss_receiver_blueprint,
+            sensor_kit_to_gnss_receiver_transform.to_carla(),
+            attach_to=sensor_kit)
+        gnss_receiver.enable_for_ros()
 
     # Spawn Vehicle Status Sensor
-    vehicle_status_sensor = world.spawn_actor(
-        vehicle_status_blueprint,
-        carla.Transform(),
-        attach_to=base_link)  # Attach to base_link with no offset, because velocities should come from rear axle
-
-
-# # NOTE: Enable for ros is not needed, because this sensor uses a global publisher
-# vehicle_status_sensor.enable_for_ros()
+    # NOTE: enable_for_ros is not needed, because this sensor uses a global publisher.
+    try:
+        vehicle_status_blueprint = blueprint_library.find("sensor.other.vehicle_status")
+        world.spawn_actor(
+            vehicle_status_blueprint,
+            carla.Transform(),
+            attach_to=base_link)  # Attach to base_link with no offset, because velocities should come from rear axle
+    except Exception:
+        log_warning(
+            "Blueprint 'sensor.other.vehicle_status' unavailable; "
+            "/vehicle/status/* reports will not be published "
+            "(server predates the Autoware port?)")
 
 
 def spawn_ego_with_sensors(world, spawn_point, args):
     """Spawns a controllable vehicle with a basic sensor configuration
 
-	The sensor configuration is compatible with the one for Lexus RX450h in AWSIM.
-	The vehicle itself is replaced by Lincoln MKZ available in CARLA."""
+    The sensor configuration is compatible with the one for the Lexus RX450h
+    in AWSIM. The vehicle itself is replaced by the Lincoln MKZ available in
+    CARLA."""
 
     blueprint_library = world.get_blueprint_library()
 
-    ego_blueprint = blueprint_library.find("vehicle.lincoln.mkz")
+    try:
+        ego_blueprint = blueprint_library.find("vehicle.lincoln.mkz")
+    except Exception:
+        ego_blueprint = blueprint_library.filter("vehicle.lincoln.mkz*")[0]
     ego_blueprint.set_attribute("role_name", "ego")
-    # Ego uses acceleration control from Autoware /control/command/control_cmd (not ackermann)
-    ego_blueprint.set_attribute("ros_topic_name", "/carla/input")  # Fallback; Autoware control_cmd has priority
+    # Ego uses acceleration control from Autoware /control/command/control_cmd (not ackermann).
+    # The opt-in attribute registers the vehicle for the Autoware interface
+    # (/vehicle/status/* publishers + /control/command/* subscribers).
+    if ego_blueprint.has_attribute("ros2_autoware_control"):
+        ego_blueprint.set_attribute("ros2_autoware_control", "true")
+    else:
+        log_warning(
+            "Blueprint has no 'ros2_autoware_control' attribute; the ego will not be "
+            "registered for the Autoware vehicle interface (server predates the port?)")
+    try_set_ros_topic_name(ego_blueprint, "/carla/input")  # Fallback; Autoware control_cmd has priority
 
     ego = world.spawn_actor(ego_blueprint, spawn_point)
 
@@ -423,7 +542,8 @@ class TimeStepData:
 
 def get_current_map_name(client):
     """
-    Fetches active world from client to avoid stale pointer errors, and returns active world map name.
+    Fetches the active world from the client to avoid stale pointer errors,
+    and returns the active world map name.
     :returns: Active world map name (not a path).
     """
     world = client.get_world()
@@ -432,17 +552,16 @@ def get_current_map_name(client):
 
 def apply_world_settings(client, time_step_info, map_name=None, force_map_reload=False):
     """
-	Stores all settings related to the simulation world.
-	\nDefault: applies synchronous mode + fixed time-step.
+    Stores all settings related to the simulation world.
+    Default: applies synchronous mode + fixed time-step.
 
+    :param client: Connected client to the Carla server instance.
+    :param time_step_info: Instance of TimeStepData.
+    :param map_name: Map to load and apply settings to.
+    :param force_map_reload: Forces the map to be reloaded. The reload action cleans up the scene.
 
-	:param client: Connected client to the Carla server instance.
-	:param time_step_info: Instance of TimeStepData.
-	:param map_name: Map to load and apply settings to.
-	:param force_map_reload: Forces map to be reloaded. Reload action cleans up the scene.
-
-	:returns: world instance (possibly new) after loading a map
-	"""
+    :returns: world instance (possibly new) after loading a map
+    """
 
     # Get current world reference
     world = client.get_world()
@@ -462,7 +581,6 @@ def apply_world_settings(client, time_step_info, map_name=None, force_map_reload
         current_map = map_name
     else:
         print(f"Map '{map_name}' is already loaded — skipping reload.")
-
 
     print(f'Loaded map: {current_map if map_name is None else map_name}')
 
@@ -488,10 +606,13 @@ def apply_world_settings(client, time_step_info, map_name=None, force_map_reload
 
     # Apply settings
     world.apply_settings(settings)
-    # client.reload_world(False)  # reload map keeping the world settings
 
-    # Disable TF publishing in CARLA to avoid conflicts.
-    world.set_publish_tf(False) # Autoware will be publishing TF information based on the URDF files of the vehicle and sensor kit.
+    # Disable TF publishing in CARLA to avoid conflicts: Autoware publishes TF
+    # information based on the URDF files of the vehicle and sensor kit.
+    if hasattr(world, "set_publish_tf"):
+        world.set_publish_tf(False)
+    else:
+        log_warning("World.set_publish_tf unavailable; CARLA keeps publishing TF")
 
     return world
 
@@ -504,31 +625,31 @@ def run_sync_simulation_loop(world,
                              follow_ego=False,
                              target_sim_dt=0.01):
     """
-	Runs a real-time simulation loop for a synchronous simulation environment.
+    Runs a real-time simulation loop for a synchronous simulation environment.
 
-	The loop advances the simulation world in fixed time steps determined by
-	`target_time_scale`, maintaining real-time pacing. It adjusts for timing
-	and can optionally resynchronize if the simulation falls behind.
+    The loop advances the simulation world in fixed time steps determined by
+    `target_time_scale`, maintaining real-time pacing. It adjusts for timing
+    and can optionally resynchronize if the simulation falls behind.
 
-	Notes
-	-----
-	- This function runs indefinitely until interrupted (e.g., with Ctrl+C).
-	- When interrupted, it restores the world to asynchronous mode to prevent crashes.
+    Notes
+    -----
+    - This function runs indefinitely until interrupted (e.g., with Ctrl+C).
+    - When interrupted, it restores the world to asynchronous mode to prevent crashes.
 
-	:param world: The simulation world instance.
-	:param ego: The main vehicle actor - player pawn.
-	:param target_time_scale: The simulation speed multiplier.
-	    Higher values make the simulation run faster, and lower to run slower relative to real time
-	    (2.0 = twice real-time speed, 0.5 = half the real-time speed).
-	:param acceptable_lag: The maximum acceptable delay in seconds between real time and simulation time.
-	    If the loop falls behind by more than this value, a warning is logged.
-	:param should_resync: If True, when lag exceeds the acceptable threshold,
-	    the loop resets its internal schedule to the current wall time,
-	    causing the next tick to run immediately to catch up to real time.
-	:param follow_ego: If True, moves the spectator camera to follow the ego actor each tick.
-	:param target_sim_dt: Fixed simulation step (in seconds).
-	    Used together with `target_time_scale` to determine real-time pacing between ticks.
-	"""
+    :param world: The simulation world instance.
+    :param ego: The main vehicle actor - player pawn.
+    :param target_time_scale: The simulation speed multiplier.
+        Higher values make the simulation run faster, and lower to run slower relative to real time
+        (2.0 = twice real-time speed, 0.5 = half the real-time speed).
+    :param acceptable_lag: The maximum acceptable delay in seconds between real time and simulation time.
+        If the loop falls behind by more than this value, a warning is logged.
+    :param should_resync: If True, when lag exceeds the acceptable threshold,
+        the loop resets its internal schedule to the current wall time,
+        causing the next tick to run immediately to catch up to real time.
+    :param follow_ego: If True, moves the spectator camera to follow the ego actor each tick.
+    :param target_sim_dt: Fixed simulation step (in seconds).
+        Used together with `target_time_scale` to determine real-time pacing between ticks.
+    """
 
     real_dt = target_sim_dt / target_time_scale
     frame_count = 0
@@ -582,9 +703,16 @@ def parse_hz_rate(value):
         raise argparse.ArgumentTypeError("hz_rate must be an integer or 'None'.")
 
 
+def parse_timeout(value):
+    seconds = float(value)
+    if seconds <= 0:
+        raise argparse.ArgumentTypeError("--timeout must be a positive number of seconds.")
+    return seconds
+
+
 def main():
     argparser = argparse.ArgumentParser(
-        description='CARLA Automatic Control Client')
+        description='CARLA Autoware sensor-kit demo')
     argparser.add_argument(
         '-v', '--verbose', action='store_true', dest='debug',
         help='Print debug information')
@@ -593,7 +721,7 @@ def main():
         help='IP of the host server (default: 127.0.0.1)')
     argparser.add_argument(
         '-p', '--port', metavar='P', default=2000, type=int,
-        help='TCP port of the host server (default: 2000)')
+        help='TCP port of the CARLA RPC server (default: 2000)')
     argparser.add_argument(
         '--time_scale', metavar='T', default=1.0, type=float,
         help='Simulation timescale (default: 1.0)')
@@ -609,7 +737,7 @@ def main():
         '--load_map',
         nargs='?',
         const='Town10HD_Opt',  # used when flag present but no value
-        help="Load the provided map by it's name."
+        help="Load the provided map by its name."
     )
     argparser.add_argument(
         '--force_reload', action='store_true',
@@ -632,14 +760,22 @@ def main():
     argparser.add_argument(
         '--list_maps', action='store_true',
         help='Lists only available maps and exit. Omit applying world setting and ego spawn.')
+    argparser.add_argument(
+        '--spawn_index', type=int, default=None,
+        help='Index into the ego spawn point list; random choice if omitted.')
+    argparser.add_argument(
+        '--timeout', type=parse_timeout, default=60.0,
+        help='RPC timeout in seconds (default: 60). A cold simulator start on UE 5.8 can '
+             'take longer than a minute to answer get_world(); raise this when the map is '
+             'still loading.')
     args = argparser.parse_args()
 
-    # Deploy PostProcess profiles before connecting to server
+    # Deploy PostProcess profiles before connecting to the server
     deploy_postprocess_profile("autoware_demo", AUTOWARE_POSTPROCESS_SETTINGS)
 
     # Get Client info
     client = carla.Client(args.host, args.port)
-    client.set_timeout(60.0)
+    client.set_timeout(args.timeout)
 
     if args.list_maps:
         print("Available maps")
@@ -666,16 +802,22 @@ def main():
         f"\tpure step execution: {time_step_info.is_pure_step_execution_enabled()}"
     )
 
-
-    # Spawn Ego
+    # Spawn Ego. Prefer the level's dedicated ego spawn points (Autoware-port
+    # RPC); fall back to the map's regular spawn points when the API or the
+    # server-side RPC is unavailable.
+    spawn_points = []
     try:
         spawn_points = world.get_ego_spawn_points()
-    except AttributeError:
-        # Fallback when get_ego_spawn_points is not available (e.g. standard carla package)
+    except (AttributeError, RuntimeError) as error:
+        log_warning(f"get_ego_spawn_points unavailable ({error}); using map spawn points")
+    if not spawn_points:
         spawn_points = world.get_map().get_spawn_points()
     if not spawn_points:
         raise RuntimeError("No spawn points available. Load a map that provides spawn points.")
-    spawn_point = random.choice(spawn_points)
+    if args.spawn_index is not None:
+        spawn_point = spawn_points[args.spawn_index % len(spawn_points)]
+    else:
+        spawn_point = random.choice(spawn_points)
     ego = spawn_ego_with_sensors(world, spawn_point, args)
 
     world.tick()  # tick to process the changes (settings, ego + sensors spawn)

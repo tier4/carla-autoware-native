@@ -101,7 +101,7 @@ namespace carla {
         return std::all_of(
           std::begin(cmp),
           std::end(cmp),
-          std::identity());
+          [](bool b) noexcept { return b; });
       }
 
       inline bool operator!=(const VehiclePhysicsControl& rhs) const {
@@ -113,6 +113,10 @@ namespace carla {
       static VehiclePhysicsControl FromFVehiclePhysicsControl(
         const FVehiclePhysicsControl& Control) {
         VehiclePhysicsControl Out = { };
+        // torque_curve and steering_curve carry non-empty defaults (see the
+        // member initializers above); clear them or the real keys get
+        // appended after the default ones, producing an unsorted curve.
+        Out.torque_curve.clear();
         Out.torque_curve.reserve(Control.TorqueCurve.GetNumKeys());
         for (auto& Key : Control.TorqueCurve.GetConstRefOfKeys())
           Out.torque_curve.push_back(geom::Vector2D(Key.Time, Key.Value));
@@ -149,6 +153,7 @@ namespace carla {
           Control.InertiaTensorScale.Z);
         Out.sleep_threshold = Control.SleepThreshold;
         Out.sleep_slope_limit = Control.SleepSlopeLimit;
+        Out.steering_curve.clear();
         Out.steering_curve.reserve(Control.SteeringCurve.GetNumKeys());
         for (auto& Key : Control.SteeringCurve.GetConstRefOfKeys())
           Out.steering_curve.push_back(geom::Vector2D(Key.Time, Key.Value));

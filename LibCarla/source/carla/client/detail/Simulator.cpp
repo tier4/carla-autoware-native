@@ -81,6 +81,11 @@ namespace detail {
       _gc_policy(enable_garbage_collection ?
         GarbageCollectionPolicy::Enabled : GarbageCollectionPolicy::Disabled) {}
 
+  Simulator::~Simulator() {
+    // Join first, or ~Episode can run on a stream thread while _client dies.
+    _client.StopStreaming();
+  }
+
   // ===========================================================================
   // -- Load a new episode -----------------------------------------------------
   // ===========================================================================
@@ -107,6 +112,15 @@ namespace detail {
       auto episode = GetCurrentEpisode();
 
       if (episode.GetId() != id) {
+        // Wait for the stream thread to reset the Traffic Manager for it.
+        const auto deadline = std::chrono::steady_clock::now() + _client.GetTimeout().to_chrono();
+        while (!_episode->IsEpisodeChangeHandled()) {
+          if (std::chrono::steady_clock::now() > deadline) {
+            log_warning("the Traffic Manager has not finished resetting for the new episode");
+            break;
+          }
+          std::this_thread::sleep_for(10ms);
+        }
         return episode;
       }
     }
@@ -157,7 +171,15 @@ EpisodeProxy Simulator::GetCurrentEpisode() {
 
   SharedPtr<Map> Simulator::GetCurrentMap() {
     DEBUG_ASSERT(_episode != nullptr);
-    if (!_cached_map || _episode->HasMapChangedSinceLastCall()) {
+    // Check-and-refetch must be atomic: the Traffic Manager refreshes the map
+    // from its own thread on an episode change, and a caller that ran while
+    // that refresh was still downloading the OpenDRIVE found the change flag
+    // already consumed and the cache still holding the previous map. The
+    // cache is also keyed on the episode id, so a missed change flag cannot
+    // leave a stale map behind either.
+    std::lock_guard<std::mutex> lock(_cached_map_mutex);
+    const auto episode_id = _episode->GetId();
+    if (!_cached_map || _cached_map_episode_id != episode_id || _episode->HasMapChangedSinceLastCall()) {
       rpc::MapInfo map_info = _client.GetMapInfo();
       std::string map_name;
       std::string map_base_path;
@@ -177,6 +199,7 @@ EpisodeProxy Simulator::GetCurrentEpisode() {
       if (FileTransfer::FileExists(XODRFolder) == false) _client.GetRequiredFiles();
       _open_drive_file = _client.GetMapData();
       _cached_map = MakeShared<Map>(map_info, _open_drive_file);
+      _cached_map_episode_id = episode_id;
     }
 
     return _cached_map;
@@ -300,6 +323,11 @@ EpisodeProxy Simulator::GetCurrentEpisode() {
     nav->Tick(_episode);
   }
 
+  bool Simulator::IsNavigationServerSide() {
+    DEBUG_ASSERT(_episode != nullptr);
+    return _episode->CreateNavigationIfMissing()->IsServerSide();
+  }
+
   void Simulator::RegisterAIController(const WalkerAIController &controller) {
     auto walker = controller.GetParent();
     if (walker == nullptr) {
@@ -325,18 +353,39 @@ EpisodeProxy Simulator::GetCurrentEpisode() {
   std::optional<geom::Location> Simulator::GetRandomLocationFromNavigation() {
     DEBUG_ASSERT(_episode != nullptr);
     auto nav = _episode->CreateNavigationIfMissing();
+    if (nav->IsServerSide()) {
+      // The server samples the loaded navmesh; the sentinel z = -1e6 means it
+      // found no point (e.g. tiles still streaming in), so try a few times
+      // before giving up like the legacy path does (empty optional).
+      constexpr int attempts = 3;
+      for (int i = 0; i < attempts; ++i) {
+        auto location = _client.GetRandomLocationFromNavigation();
+        if (location.z > -9.0e5f) {
+          return location;
+        }
+      }
+      return {};
+    }
     return nav->GetRandomLocation();
   }
 
   void Simulator::SetPedestriansCrossFactor(float percentage) {
     DEBUG_ASSERT(_episode != nullptr);
     auto nav = _episode->CreateNavigationIfMissing();
+    if (nav->IsServerSide()) {
+      _client.SetPedestriansCrossFactor(percentage);
+      return;
+    }
     nav->SetPedestriansCrossFactor(percentage);
   }
 
   void Simulator::SetPedestriansSeed(unsigned int seed) {
     DEBUG_ASSERT(_episode != nullptr);
     auto nav = _episode->CreateNavigationIfMissing();
+    if (nav->IsServerSide()) {
+      _client.SetPedestriansSeed(seed);
+      return;
+    }
     nav->SetPedestriansSeed(seed);
   }
 
@@ -366,6 +415,9 @@ EpisodeProxy Simulator::GetCurrentEpisode() {
     _episode->RegisterActor(actor);
     const auto gca = (gc == GarbageCollectionPolicy::Inherit ? _gc_policy : gc);
     auto result = ActorFactory::MakeActor(GetCurrentEpisode(), actor, gca);
+    // Snapshots up to (and including) this frame predate the spawn; see
+    // Simulator::GetActorState.
+    static_cast<ActorState &>(*result)._spawn_frame = _episode->GetState()->GetFrame();
     log_debug(
         result->GetDisplayId(),
         "created",
@@ -435,6 +487,10 @@ EpisodeProxy Simulator::GetCurrentEpisode() {
 
   void Simulator::UnSubscribeFromGBuffer(Actor &actor, uint32_t gbuffer_id) {
     _client.UnSubscribeFromGBuffer(actor.GetId(), gbuffer_id);
+  }
+
+  void Simulator::Send(const Sensor &sensor, const rpc::CustomV2XBytes &data) {
+    _client.Send(sensor.GetId(), data);
   }
 
   void Simulator::FreezeAllTrafficLights(bool frozen) {

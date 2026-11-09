@@ -1,4 +1,7 @@
 // Copyright (c) 2026 TIER IV, Inc.
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
 
 #pragma once
 
@@ -41,7 +44,14 @@ public:
   // Activate the component setting the target acceleration (in vehicle local space, e.g. X=forward)
   virtual void Activate(FVector Acceleration, bool bReset=false);
 
-  // Update the target acceleration without resetting internal state.
+  // Deactivate the component
+  virtual void Deactivate() override;
+
+  // tier4: optional shaping of the acceleration command (first-order lag on the
+  // target, then a jerk limit on the applied acceleration). Both are off by
+  // default; while they are off the component behaves exactly as upstream.
+
+  // Update the target acceleration without resetting the integrated state.
   // Acceleration is in vehicle local space. Units: cm/s^2.
   void SetTargetAcceleration(const FVector& Acceleration);
 
@@ -52,35 +62,41 @@ public:
   // Set first-order lag time constant on the acceleration target. Units: seconds. Use <= 0 to disable.
   void SetFirstOrderLagTau(float InTauS) { TargetLagTauS = InTauS; }
 
-  // Deactivate the component
-  virtual void Deactivate() override;
+  // True when a jerk limit or a first-order lag is set.
+  bool IsShapingEnabled() const
+  {
+    return JerkLimitPosCmps3 > 0.0f || JerkLimitNegCmps3 > 0.0f || TargetLagTauS > 0.0f;
+  }
 
 private:
-  // Desired target acceleration in vehicle local space (e.g. X forward, Y right, Z up). Units: cm/s^2
+  // Target acceleration in vehicle local space (e.g. X forward, Y right, Z up). Units: cm/s^2
   UPROPERTY(Category = "Vehicle Acceleration Control", VisibleAnywhere)
-  FVector DesiredTargetAcceleration;
-
-  // Filtered target acceleration after first-order lag. Units: cm/s^2.
-  FVector FilteredTargetAcceleration;
-
-  // Acceleration actually applied after jerk limiting. Units: cm/s^2.
-  FVector AppliedAcceleration;
-
-  // Maximum jerk (acceleration rate) limits. Units: cm/s^3.
-  // Note: Neg limit is a positive magnitude used when the acceleration decreases (diff < 0).
-  UPROPERTY(Category = "Vehicle Acceleration Control", EditAnywhere)
-  float JerkLimitPosCmps3 = 300.0f; // default: 3.0 m/s^3
-
-  UPROPERTY(Category = "Vehicle Acceleration Control", EditAnywhere)
-  float JerkLimitNegCmps3 = 500.0f; // default: 5.0 m/s^3
+  FVector TargetAcceleration;
 
   /// Integrated forward speed [cm/s] under our control; lateral component is left to physics for cornering
-  float ControlledForwardSpeed;
+  float ControlledForwardSpeed = 0.0f;
 
-  UPrimitiveComponent* PrimitiveComponent;
-  AActor* OwnerVehicle;
+  UPROPERTY(Transient, DuplicateTransient)
+  TObjectPtr<UPrimitiveComponent> PrimitiveComponent;
 
-  // First-order lag time constant for target acceleration. Units: seconds. Use <= 0 to disable.
+  UPROPERTY(Transient, DuplicateTransient)
+  TObjectPtr<AActor> OwnerVehicle;
+
+  // tier4: target after the optional first-order lag. Units: cm/s^2.
+  FVector FilteredTargetAcceleration = FVector::ZeroVector;
+
+  // tier4: acceleration actually applied after the optional jerk limit. Units: cm/s^2.
+  FVector AppliedAcceleration = FVector::ZeroVector;
+
+  // tier4: maximum jerk (acceleration rate) limits. Units: cm/s^3. <= 0 disables (default).
+  // The Neg limit is a positive magnitude used when the acceleration decreases.
+  UPROPERTY(Category = "Vehicle Acceleration Control", EditAnywhere)
+  float JerkLimitPosCmps3 = 0.0f;
+
+  UPROPERTY(Category = "Vehicle Acceleration Control", EditAnywhere)
+  float JerkLimitNegCmps3 = 0.0f;
+
+  // tier4: first-order lag time constant for the target acceleration. Units: seconds. <= 0 disables (default).
   float TargetLagTauS = 0.0f;
 
 };

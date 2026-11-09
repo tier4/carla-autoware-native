@@ -29,7 +29,6 @@
 #include <util/ue-header-guard-begin.h>
 #include "Components/BoxComponent.h"
 #include "Engine/StaticMeshActor.h"
-#include "VehicleAnimationInstance.h"
 #include <util/ue-header-guard-end.h>
 
 #include <util/disable-ue4-macros.h>
@@ -68,21 +67,6 @@ std::pair<int, FCarlaActor*>CarlaReplayerHelper::TryToCreateReplayerActor(
   }
   else if (SpawnSensors || !ActorDesc.Id.StartsWith("sensor."))
   {
-    // check if an actor of that type already exist with same id
-    if (Episode->GetActorRegistry().Contains(DesiredId))
-    {
-      auto* CarlaActor = Episode->FindCarlaActor(DesiredId);
-      const FActorDescription *desc = &CarlaActor->GetActorInfo()->Description;
-      if (desc->Id == ActorDesc.Id)
-      {
-        // we don't need to create, actor of same type already exist
-        // relocate
-        FRotator Rot = FRotator::MakeFromEuler(Rotation);
-        FTransform Trans2(Rot, Location, FVector(1, 1, 1));
-        CarlaActor->SetActorGlobalTransform(Trans2);
-        return std::pair<int, FCarlaActor*>(2, CarlaActor);
-      }
-    }
     // create the transform
     FRotator Rot = FRotator::MakeFromEuler(Rotation);
     FTransform Trans(Rot, FVector(0, 0, 100000), FVector(1, 1, 1));
@@ -128,7 +112,7 @@ FCarlaActor *CarlaReplayerHelper::FindTrafficSignAt(FVector Location)
   // through all actors in registry
   for (auto It = Registry.begin(); It != Registry.end(); ++It)
   {
-    FCarlaActor* CarlaActor = It.Value().Get();
+    FCarlaActor* CarlaActor = It->Value.Get();
     if (CarlaActor->GetActorType() == FCarlaActor::ActorType::TrafficLight ||
         CarlaActor->GetActorType() == FCarlaActor::ActorType::TrafficSign)
     {
@@ -332,29 +316,54 @@ bool CarlaReplayerHelper::ProcessReplayerPosition(CarlaRecorderPosition Pos1, Ca
   return false;
 }
 
-void CarlaReplayerHelper::ProcessReplayerAnimVehicleWheels(CarlaRecorderAnimWheels VehicleAnimWheels)
+// The spin from one frame to the next. A wheel can turn more than half a turn
+// between frames, so the whole turns come from the distance travelled.
+static float GetWheelSpinDelta(float Spin1, float Spin2, float Travel, float Radius)
+{
+  const float Delta = FMath::UnwindDegrees(Spin2 - Spin1);
+  if (Radius <= UE_KINDA_SMALL_NUMBER)
+  {
+    return Delta;
+  }
+  const float Expected = -FMath::RadiansToDegrees(Travel / Radius);
+  return Delta + 360.0f * FMath::RoundToFloat((Expected - Delta) / 360.0f);
+}
+
+void CarlaReplayerHelper::ProcessReplayerAnimVehicleWheels(
+    const CarlaRecorderAnimWheels &Wheels1,
+    const CarlaRecorderAnimWheels &Wheels2,
+    double Per,
+    float Travel)
 {
   check(Episode != nullptr)
-  FCarlaActor *CarlaActor = Episode->FindCarlaActor(VehicleAnimWheels.DatabaseId);
+  FCarlaActor *CarlaActor = Episode->FindCarlaActor(Wheels2.DatabaseId);
   if (CarlaActor == nullptr)
     return;
   if (CarlaActor->GetActorType() != FCarlaActor::ActorType::Vehicle)
     return;
   ACarlaWheeledVehicle* CarlaVehicle = Cast<ACarlaWheeledVehicle>(CarlaActor->GetActor());
   check(CarlaVehicle != nullptr)
-  USkeletalMeshComponent* SkeletalMesh = CarlaVehicle->GetMesh();
-  check(SkeletalMesh != nullptr)
-  UVehicleAnimationInstance* VehicleAnim = Cast<UVehicleAnimationInstance>(SkeletalMesh->GetAnimInstance());
-  check(VehicleAnim != nullptr)
+  // Without it the wheels cannot be posed, and roll on their own instead.
+  if (!CarlaVehicle->HasCarlaVehicleAnimation())
+    return;
 
-#if 0 // @CARLAUE5
-  for (uint32_t i = 0; i < VehicleAnimWheels.WheelValues.size(); ++i)
+  // Released in ProcessReplayerFinish.
+  CarlaVehicle->SetWheelAnimationOverride(true);
+  const float Alpha = static_cast<float>(Per);
+  const bool bSameWheels = Wheels1.WheelValues.size() == Wheels2.WheelValues.size();
+  for (size_t i = 0; i < Wheels2.WheelValues.size(); ++i)
   {
-    const WheelInfo& Element = VehicleAnimWheels.WheelValues[i];
-    VehicleAnim->SetWheelRotYaw(static_cast<uint8>(Element.Location), Element.SteeringAngle);
-    VehicleAnim->SetWheelPitchAngle(static_cast<uint8>(Element.Location), Element.TireRotation);
+    const WheelInfo& Element2 = Wheels2.WheelValues[i];
+    const WheelInfo& Element1 = bSameWheels ? Wheels1.WheelValues[i] : Element2;
+    const int32 WheelIndex = static_cast<int32>(Element2.Location);
+    if (!CarlaVehicle->HasWheel(WheelIndex))
+      continue;
+    const float Spin = Element1.TireRotation + Alpha * GetWheelSpinDelta(
+        Element1.TireRotation, Element2.TireRotation, Travel, CarlaVehicle->GetWheelRadius(WheelIndex));
+    CarlaVehicle->SetWheelSteerDirection(Element2.Location,
+        FMath::Lerp(Element1.SteeringAngle, Element2.SteeringAngle, Alpha));
+    CarlaVehicle->SetWheelPitchAngle(Element2.Location, FMath::UnwindDegrees(Spin));
   }
-#endif
 }
 
 // reposition the camera
@@ -499,6 +508,10 @@ void CarlaReplayerHelper::ProcessReplayerLightScene(CarlaRecorderLightScene Ligh
       CarlaLight->SetLightColor(LightScene.Color);
       CarlaLight->SetLightOn(LightScene.bOn);
       CarlaLight->SetLightType(static_cast<ELightType>(LightScene.Type));
+      // The replayer mutates light state server-side, outside any client
+      // request; without dirty-marking, connected clients keep serving stale
+      // is_on/intensity values from their LightManager cache.
+      CarlaLightSubsystem->SetClientStatesdirty("");
     }
   }
 }
@@ -569,6 +582,17 @@ bool CarlaReplayerHelper::ProcessReplayerFinish(bool bApplyAutopilot, bool bIgno
         {
             // stop all vehicles
             SetActorSimulatePhysics(CarlaActor, true);
+            if (auto* CarlaVehicle = Cast<ACarlaWheeledVehicle>(CarlaActor->GetActor()))
+            {
+              CarlaVehicle->SetWheelAnimationOverride(false);
+            }
+            // ProcessReplayerEventAdd also disabled collision on replayed
+            // vehicles; restore it or they are left permanently undrivable
+            // (no wheel contact) after the replay ends.
+            if (CarlaActor->GetActor())
+            {
+              CarlaActor->GetActor()->SetActorEnableCollision(true);
+            }
             SetActorVelocity(CarlaActor, FVector(0, 0, 0));
             FVehicleControl Control;
             Control.Throttle = 0.0f;

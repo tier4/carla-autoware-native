@@ -321,7 +321,10 @@ void ARGLLidar::RglDrawLidarPoints(UWorld* World)
     static constexpr float POINT_SIZE = 5.0f;
     static constexpr uint8 DEPTH_PRIORITY = SDPG_World;
 
-    if (!World || !World->PersistentLineBatcher)
+    // UE 5.8 replaced UWorld::PersistentLineBatcher with GetLineBatcher().
+    ULineBatchComponent* LineBatcher =
+        World ? World->GetLineBatcher(UWorld::ELineBatcherType::WorldPersistent) : nullptr;
+    if (LineBatcher == nullptr)
     {
         return;
     }
@@ -332,7 +335,6 @@ void ARGLLidar::RglDrawLidarPoints(UWorld* World)
         return;
     }
 
-    ULineBatchComponent* LineBatcher = World->PersistentLineBatcher;
     const int32 MaxPoints = FMath::Max(1, FMath::RoundToInt(PointCount * RglLidarDrawPointRate));
     const int32 Step = FMath::Max(1, PointCount / MaxPoints);
 

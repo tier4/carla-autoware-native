@@ -63,5 +63,10 @@ public:
     return StaticName;
   }
 private:
+  // Presimulate is only requested to get registered (see above); nothing to do
+  // here. UE 5.8's ISimCallbackObject::OnPreSimulate_Internal() default is
+  // check(false), so the override is required.
+  virtual void OnPreSimulate_Internal() override {}
+
   virtual void OnPostIntegrate_Internal() override;
 };

@@ -90,12 +90,12 @@ public:
 
   AActor *GetActor()
   {
-    return TheActor;
+    return TheActor.Get();
   }
 
   const AActor *GetActor() const
   {
-    return TheActor;
+    return TheActor.Get();
   }
 
   const FActorInfo *GetActorInfo() const
@@ -125,7 +125,8 @@ public:
 
   void AddChildren(IdType ChildId)
   {
-    Children.Add(ChildId);
+    // A Multi-GPU secondary replays an attachment again on every resync.
+    Children.AddUnique(ChildId);
   }
 
   void RemoveChildren(IdType ChildId)
@@ -136,6 +137,53 @@ public:
   const TArray<IdType>& GetChildren() const
   {
     return Children;
+  }
+
+  /// Multi-GPU secondary: the id the primary gave the actor this one mirrors.
+  void SetPrimaryActorId(IdType InPrimaryActorId)
+  {
+    PrimaryActorId = InPrimaryActorId;
+  }
+
+  /// The id clients know this actor by: the primary's for a mirror on a
+  /// Multi-GPU secondary, this actor's own id everywhere else.
+  IdType GetPrimaryActorId() const
+  {
+    return (PrimaryActorId != 0u) ? PrimaryActorId : Id;
+  }
+
+  /// Multi-GPU secondary: the primary's velocities of the actor this one
+  /// mirrors, in the world frame (cm/s and rad/s), of primary frame @a Frame.
+  /// A mirror never moves on its own, so its body has none of its own, and
+  /// the velocity getters report these instead.
+  void SetMirroredKinematics(const FVector &Velocity, const FVector &AngularVelocityRadians, uint64 Frame)
+  {
+    bHasMirroredKinematics = true;
+    MirroredVelocity = Velocity;
+    MirroredAngularVelocity = AngularVelocityRadians;
+    MirroredKinematicsFrame = Frame;
+  }
+
+  void ClearMirroredKinematics()
+  {
+    bHasMirroredKinematics = false;
+    MirroredVelocity = FVector::ZeroVector;
+    MirroredAngularVelocity = FVector::ZeroVector;
+  }
+
+  bool HasMirroredKinematics() const
+  {
+    return bHasMirroredKinematics;
+  }
+
+  uint64 GetMirroredKinematicsFrame() const
+  {
+    return MirroredKinematicsFrame;
+  }
+
+  FVector GetMirroredAngularVelocityInRadians() const
+  {
+    return MirroredAngularVelocity;
   }
 
   void SetAttachmentType(carla::rpc::AttachmentType InAttachmentType)
@@ -204,7 +252,7 @@ public:
       const FTransform& Transform,
       ETeleportType Teleport = ETeleportType::TeleportPhysics);
 
-  FVector GetActorVelocity() const;
+  virtual FVector GetActorVelocity() const;
 
   FVector GetActorAngularVelocity() const;
 
@@ -229,6 +277,33 @@ public:
   virtual ECarlaServerResponse SetActorCollisions(bool bEnabled);
 
   virtual ECarlaServerResponse SetActorEnableGravity(bool bEnabled);
+
+  // Components, bones and sockets. Dormant actors answer from the rig recorded
+  // when they were put to sleep, so the results do not depend on streaming.
+  ECarlaServerResponse GetActorComponentNames(TArray<FString>& Names) const;
+
+  ECarlaServerResponse GetActorComponentWorldTransform(
+      const FString& ComponentName, FTransform& Transform) const;
+
+  ECarlaServerResponse GetActorComponentRelativeTransform(
+      const FString& ComponentName, FTransform& Transform) const;
+
+  ECarlaServerResponse GetActorBoneNames(TArray<FString>& Names) const;
+
+  ECarlaServerResponse GetActorBoneWorldTransforms(TArray<FTransform>& Transforms) const;
+
+  ECarlaServerResponse GetActorBoneRelativeTransforms(TArray<FTransform>& Transforms) const;
+
+  ECarlaServerResponse GetActorSocketNames(TArray<FString>& Names) const;
+
+  ECarlaServerResponse GetActorSocketWorldTransforms(TArray<FTransform>& Transforms) const;
+
+  ECarlaServerResponse GetActorSocketRelativeTransforms(TArray<FTransform>& Transforms) const;
+
+  ECarlaServerResponse GetActorRigSnapshot(FActorRigSnapshot& Rig) const;
+
+  ECarlaServerResponse ToWorld(
+      const TArray<FTransform>& Relative, TArray<FTransform>& Transforms) const;
 
   // Vehicle functions
   virtual ECarlaServerResponse EnableActorConstantVelocity(const FVector&)
@@ -297,6 +372,31 @@ public:
   }
 
   virtual ECarlaServerResponse GetWheelSteerAngle(const EVehicleWheelLocation&, float&)
+  {
+    return ECarlaServerResponse::ActorTypeMismatch;
+  }
+
+  virtual ECarlaServerResponse SetWheelPitchAngle(const EVehicleWheelLocation&, float)
+  {
+    return ECarlaServerResponse::ActorTypeMismatch;
+  }
+
+  virtual ECarlaServerResponse GetWheelPitchAngle(const EVehicleWheelLocation&, float&)
+  {
+    return ECarlaServerResponse::ActorTypeMismatch;
+  }
+
+  virtual ECarlaServerResponse SetWheelSuspensionOffset(const EVehicleWheelLocation&, float)
+  {
+    return ECarlaServerResponse::ActorTypeMismatch;
+  }
+
+  virtual ECarlaServerResponse GetWheelSuspensionOffset(const EVehicleWheelLocation&, float&)
+  {
+    return ECarlaServerResponse::ActorTypeMismatch;
+  }
+
+  virtual ECarlaServerResponse SetWheelAnimationOverride(bool)
   {
     return ECarlaServerResponse::ActorTypeMismatch;
   }
@@ -466,13 +566,31 @@ private:
 
   friend class FActorRegistry;
 
-  AActor *TheActor = nullptr;
+  /// Weak: World Partition can stream out (destroy) the actor without going
+  /// through the episode, so a raw pointer here dangles and the per-frame
+  /// state serialization crashes on a freed vtable. Weak reads back null and
+  /// the callers' existing null-checks take over.
+  TWeakObjectPtr<AActor> TheActor = nullptr;
 
   TSharedPtr<const FActorInfo> Info = nullptr;
 
   IdType Id = 0u;
 
   IdType ParentId = 0u;
+
+  IdType PrimaryActorId = 0u;
+
+protected:
+
+  bool bHasMirroredKinematics = false;
+
+  FVector MirroredVelocity = FVector::ZeroVector;
+
+  FVector MirroredAngularVelocity = FVector::ZeroVector;
+
+  uint64 MirroredKinematicsFrame = 0u;
+
+private:
 
   carla::rpc::ActorState State = carla::rpc::ActorState::Invalid;
 
@@ -531,6 +649,22 @@ public:
 
   virtual ECarlaServerResponse GetWheelSteerAngle(
       const EVehicleWheelLocation& WheelLocation, float& Angle);
+
+  virtual ECarlaServerResponse SetWheelPitchAngle(
+      const EVehicleWheelLocation& WheelLocation, float AngleInDeg) final;
+
+  virtual ECarlaServerResponse GetWheelPitchAngle(
+      const EVehicleWheelLocation& WheelLocation, float& Angle) final;
+
+  /// Offset in meters.
+  virtual ECarlaServerResponse SetWheelSuspensionOffset(
+      const EVehicleWheelLocation& WheelLocation, float Offset) final;
+
+  /// Offset in meters.
+  virtual ECarlaServerResponse GetWheelSuspensionOffset(
+      const EVehicleWheelLocation& WheelLocation, float& Offset) final;
+
+  virtual ECarlaServerResponse SetWheelAnimationOverride(bool bEnabled) final;
 
   virtual ECarlaServerResponse SetActorSimulatePhysics(bool bSimulatePhysics) final;
 
@@ -633,6 +767,16 @@ public:
 
   virtual ECarlaServerResponse SetActorEnableGravity(bool bEnabled) final;
 
+  /// Walkers move via UCharacterMovementComponent (kinematic sweeps driven
+  /// by AddMovementInput), not physics simulation. AActor::GetVelocity()
+  /// (via APawn::GetVelocity()) prefers the root component's physics-body
+  /// velocity whenever the root is simulating physics, which for walker
+  /// Blueprints configured for ragdoll death is often true even while
+  /// idle -- so the base FCarlaActor::GetActorVelocity() path can report
+  /// near-zero while the walker is actually moving briskly. Read the
+  /// movement component's own tracked velocity directly instead.
+  virtual FVector GetActorVelocity() const final;
+
   virtual ECarlaServerResponse ApplyControlToWalker(const FWalkerControl&) final;
 
   virtual ECarlaServerResponse GetWalkerControl(FWalkerControl&) final;
@@ -659,3 +803,8 @@ public:
       UWorld* World);
 
 };
+
+/// Angular velocity of @a Actor in the world frame, in rad/s: on a Multi-GPU
+/// secondary the primary's (a mirror has no motion of its own), elsewhere its
+/// root body's.
+FVector CarlaGetActorAngularVelocityInRadians(const AActor &Actor);

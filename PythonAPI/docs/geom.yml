@@ -39,8 +39,12 @@
         Computes the squared length of the vector.
     # --------------------------------------
     - def_name: make_unit_vector
-      return: carla.Vector3D
+      return: carla.Vector2D
       params:
+      - param_name: epsilon
+        type: float
+        doc: >
+          Length below which the vector is considered null and returned unchanged. Defaults to the machine epsilon for floats.
       doc: >
         Returns a vector with the same direction and unitary length.
     # --------------------------------------
@@ -133,6 +137,10 @@
     - def_name: make_unit_vector
       return: carla.Vector3D
       params:
+      - param_name: epsilon
+        type: float
+        doc: >
+          Length below which the vector is considered null and returned unchanged. Defaults to the machine epsilon for floats.
       doc: >
         Returns a vector with the same direction and unitary length.
     # --------------------------------------
@@ -320,6 +328,21 @@
       doc: >
         Returns a Location with the absolute value of the components x, y and z.
     # --------------------------------------
+    - def_name: to_right_handed
+      return: carla.RightHandedVector3D
+      doc: >
+        Converts this location to a right-handed, x-forward / y-**left** / z-up frame (ROS REP-103 "FLU") by mirroring the Y axis: `(x, y, z)` becomes `(x, -y, z)`. See [Coordinate conventions](core_coordinate_conventions.md).
+    # --------------------------------------
+    - def_name: from_right_handed
+      params:
+      - param_name: location
+        type: carla.RightHandedVector3D
+        doc: >
+          Location in the right-handed (FLU) frame.
+      return: carla.Location
+      doc: >
+        Reads a right-handed (FLU) location back into CARLA's left-handed frame. Inverse of `to_right_handed()`; the mapping is its own inverse. This method is static.
+    # --------------------------------------
 
 
   - class_name: Rotation
@@ -328,8 +351,7 @@
       Class that represents a 3D rotation and therefore, an orientation in space. CARLA uses the Unreal Engine coordinates system. This is a Z-up left-handed system.  <br>
 
       <br>The constructor method follows a specific order of declaration: `(pitch, yaw, roll)`, which corresponds to `(Y-rotation,Z-rotation,X-rotation)`.  <br>
-      <br>![UE4_Rotation](https://d26ilriwvtzlb.cloudfront.net/8/83/BRMC_9.jpg)
-      *Unreal Engine's coordinates system*
+      <br>The frame, the rotation order and how to convert to a right-handed (FLU) convention are described in [Coordinate conventions](core_coordinate_conventions.md).
     # - PROPERTIES -------------------------
     instance_variables:
     - var_name: pitch
@@ -349,6 +371,16 @@
         X-axis rotation angle.
     # - METHODS ----------------------------
     methods:
+    - def_name: get_normalized
+      return: carla.Rotation
+      doc: >
+        Returns the rotation with every angle wrapped into its standard range.
+    # --------------------------------------
+    - def_name: get_normalized
+      return: carla.Rotation
+      doc: >
+        Returns the rotation with every angle wrapped into its standard range.
+    # --------------------------------------
     - def_name: __init__
       params:
       - param_name: pitch
@@ -389,6 +421,21 @@
       doc: >
         Computes the vector pointing upwards according to the rotation of the object.
     # --------------------------------------
+    - def_name: to_right_handed
+      return: carla.RightHandedRotation
+      doc: >
+        Converts this rotation to a right-handed, x-forward / y-**left** / z-up frame (ROS REP-103 "FLU"). Mirroring the Y axis negates **pitch and yaw** and leaves roll alone, so `(roll, pitch, yaw) = (10, 20, 30)` becomes `(10, -20, -30)`. See [Coordinate conventions](core_coordinate_conventions.md).
+    # --------------------------------------
+    - def_name: from_right_handed
+      params:
+      - param_name: rotation
+        type: carla.RightHandedRotation
+        doc: >
+          Rotation in the right-handed (FLU) frame.
+      return: carla.Rotation
+      doc: >
+        Reads a right-handed (FLU) rotation back into CARLA's left-handed frame. Inverse of `to_right_handed()`; the mapping is its own inverse. This method is static.
+    # --------------------------------------
     - def_name: __eq__
       return: bool
       params:
@@ -410,6 +457,105 @@
         Parses the axis' orientations to string.
     # --------------------------------------
 
+  - class_name: Quaternion
+    # - DESCRIPTION ------------------------
+    doc: >
+      Rotation expressed as a quaternion, an alternative to carla.Rotation that does not suffer from gimbal lock and interpolates smoothly.
+    # - PROPERTIES -------------------------
+    instance_variables:
+    - var_name: x
+      type: float
+      doc: >
+        X component of the vector part.
+    - var_name: 'y'
+      type: float
+      doc: >
+        Y component of the vector part.
+    - var_name: z
+      type: float
+      doc: >
+        Z component of the vector part.
+    - var_name: w
+      type: float
+      doc: >
+        Scalar part.
+    # - METHODS ----------------------------
+    methods:
+    - def_name: __init__
+      params:
+      - param_name: x
+        type: float
+        default: 0.0
+      - param_name: 'y'
+        type: float
+        default: 0.0
+      - param_name: z
+        type: float
+        default: 0.0
+      - param_name: w
+        type: float
+        default: 1.0
+      return: carla.Quaternion
+      doc: >
+        Builds a quaternion from its components. A carla.Rotation can be passed instead.
+    # --------------------------------------
+    - def_name: conjugate
+      return: carla.Quaternion
+      doc: >
+        Returns the quaternion with its vector part negated.
+    # --------------------------------------
+    - def_name: get_forward_vector
+      return: carla.Vector3D
+      doc: >
+        Returns the unit vector pointing forward in the rotation's frame.
+    # --------------------------------------
+    - def_name: get_right_vector
+      return: carla.Vector3D
+      doc: >
+        Returns the unit vector pointing right in the rotation's frame.
+    # --------------------------------------
+    - def_name: get_up_vector
+      return: carla.Vector3D
+      doc: >
+        Returns the unit vector pointing up in the rotation's frame.
+    # --------------------------------------
+    - def_name: inverse
+      return: carla.Quaternion
+      doc: >
+        Returns the quaternion that undoes this rotation.
+    # --------------------------------------
+    - def_name: length
+      return: float
+      doc: >
+        Returns the norm of the quaternion.
+    # --------------------------------------
+    - def_name: rotator
+      return: carla.Rotation
+      doc: >
+        Returns the same rotation as pitch, yaw and roll.
+    # --------------------------------------
+    - def_name: to_right_handed_rotation
+      return: carla.RightHandedRotation
+      doc: >
+        Returns the same rotation in a right-handed frame.
+    # --------------------------------------
+    - def_name: unit_quaternion
+      return: carla.Quaternion
+      doc: >
+        Returns the quaternion scaled to unit length.
+    # --------------------------------------
+    - def_name: __eq__
+      params:
+      - param_name: other
+        type: carla.Quaternion
+    # --------------------------------------
+    - def_name: __ne__
+      params:
+      - param_name: other
+        type: carla.Quaternion
+    # --------------------------------------
+    - def_name: __str__
+    # --------------------------------------
   - class_name: Transform
     # - DESCRIPTION ------------------------
     doc: >
@@ -446,7 +592,7 @@
     # --------------------------------------
     - def_name: transform_vector
       params:
-      - param_name: in_vector
+      - param_name: in_point
         type: carla.Vector3D
         doc: >
           Vector to which the transformation will be applied.
@@ -478,6 +624,21 @@
       doc: >
         Computes the 4-matrix representation of the inverse transformation.
     # --------------------------------------
+    - def_name: to_right_handed
+      return: carla.RightHandedTransform
+      doc: >
+        Converts this transform to a right-handed, x-forward / y-**left** / z-up frame (ROS REP-103 "FLU"). The location becomes `(x, -y, z)` and the rotation `(roll, -pitch, -yaw)`; equivalently the pose matrix becomes `S * get_matrix() * S` with `S = diag(1, -1, 1, 1)`. See [Coordinate conventions](core_coordinate_conventions.md).
+    # --------------------------------------
+    - def_name: from_right_handed
+      params:
+      - param_name: transform
+        type: carla.RightHandedTransform
+        doc: >
+          Transform in the right-handed (FLU) frame.
+      return: carla.Transform
+      doc: >
+        Reads a right-handed (FLU) transform back into CARLA's left-handed frame. Inverse of `to_right_handed()`; the mapping is its own inverse. This method is static.
+    # --------------------------------------
     - def_name: __eq__
       return: bool
       params:
@@ -493,6 +654,185 @@
         type: carla.Transform
       doc: >
         Returns __True__ if any location and rotation are not equal for this and `other`.
+    # --------------------------------------
+    - def_name: __str__
+      return: str
+      doc: >
+        Parses both location and rotation to string.
+    # --------------------------------------
+
+  - class_name: RightHandedVector3D
+    # - DESCRIPTION ------------------------
+    doc: >
+      A 3D vector in a **right-handed** frame: x forward, y **left**, z up (ROS [REP-103](https://www.ros.org/reps/rep-0103.html) "FLU").  <br>
+
+      <br>This is a boundary type. The simulator never returns one; you get it from `carla.Location.to_right_handed()` and hand it back with `carla.Location.from_right_handed()`. See [Coordinate conventions](core_coordinate_conventions.md).
+    # - PROPERTIES -------------------------
+    instance_variables:
+    - var_name: x
+      type: float
+      var_units: meters
+      doc: >
+        Forward component.
+    - var_name: 'y'
+      type: float
+      var_units: meters
+      doc: >
+        **Left** component. This is the one whose sign differs from `carla.Vector3D`.
+    - var_name: z
+      type: float
+      var_units: meters
+      doc: >
+        Up component.
+    # - METHODS ----------------------------
+    methods:
+    - def_name: __init__
+      params:
+      - param_name: x
+        type: float
+        default: 0.0
+      - param_name: 'y'
+        type: float
+        default: 0.0
+      - param_name: z
+        type: float
+        default: 0.0
+    # --------------------------------------
+    - def_name: to_left_handed
+      return: carla.Vector3D
+      doc: >
+        This vector back in CARLA's left-handed frame: `(x, -y, z)`.
+    # --------------------------------------
+    - def_name: __str__
+      return: str
+      doc: >
+        Parses the components to string.
+    # --------------------------------------
+
+  - class_name: RightHandedRotation
+    # - DESCRIPTION ------------------------
+    doc: >
+      Euler angles of a rotation in a **right-handed** frame: x forward, y **left**, z up (ROS [REP-103](https://www.ros.org/reps/rep-0103.html) "FLU"), every axis turned by the right-hand rule.  <br>
+
+      <br>The three angles compose as the intrinsic Z-Y-X sequence `Rz(yaw) * Ry(pitch) * Rx(roll)` with the standard right-handed elementary matrices — the same thing `scipy.spatial.transform.Rotation.from_euler("xyz", ...)` and `tf2::Quaternion::setRPY` mean by "roll pitch yaw".  <br>
+
+      <br>This is **not** `carla.Rotation`. Get one from `carla.Rotation.to_right_handed()`; see [Coordinate conventions](core_coordinate_conventions.md).
+    # - PROPERTIES -------------------------
+    instance_variables:
+    - var_name: roll
+      type: float
+      var_units: degrees
+      doc: >
+        Rotation about the forward (+X) axis, right-hand rule. Same sign as `carla.Rotation.roll`.
+    - var_name: pitch
+      type: float
+      var_units: degrees
+      doc: >
+        Rotation about the left (+Y) axis, right-hand rule. **Opposite** sign to `carla.Rotation.pitch`.
+    - var_name: yaw
+      type: float
+      var_units: degrees
+      doc: >
+        Rotation about the up (+Z) axis, right-hand rule. **Opposite** sign to `carla.Rotation.yaw`.
+    # - METHODS ----------------------------
+    methods:
+    - def_name: __init__
+      params:
+      - param_name: roll
+        type: float
+        default: 0.0
+        param_units: degrees
+      - param_name: pitch
+        type: float
+        default: 0.0
+        param_units: degrees
+      - param_name: yaw
+        type: float
+        default: 0.0
+        param_units: degrees
+    # --------------------------------------
+    - def_name: get_quaternion
+      return: carla.Quaternion
+      doc: >
+        This rotation as a right-handed `(x, y, z, w)` quaternion.
+    # --------------------------------------
+    - def_name: __eq__
+      return: bool
+      params:
+      - param_name: other
+        type: carla.RightHandedRotation
+      doc: >
+        Returns __True__ if all three angles are equal.
+    # --------------------------------------
+    - def_name: __ne__
+      return: bool
+      params:
+      - param_name: other
+        type: carla.RightHandedRotation
+      doc: >
+        Returns __True__ if any of the three angles differ.
+    # --------------------------------------
+    - def_name: __str__
+      return: str
+      doc: >
+        Parses the angles to string.
+    # --------------------------------------
+
+  - class_name: RightHandedTransform
+    # - DESCRIPTION ------------------------
+    doc: >
+      A location and a rotation in a **right-handed** frame: x forward, y **left**, z up (ROS [REP-103](https://www.ros.org/reps/rep-0103.html) "FLU").  <br>
+
+      <br>This is the explicit boundary type between CARLA's left-handed world and every right-handed consumer (ROS 2 / tf2, NVIDIA ClipGT rigs, scipy, Open3D). Build one with `carla.Transform.to_right_handed()` and go back with `carla.Transform.from_right_handed()`; the handedness change then happens exactly once, here, instead of at every call site.  <br>
+
+      <br>See [Coordinate conventions](core_coordinate_conventions.md).
+    # - PROPERTIES -------------------------
+    instance_variables:
+    - var_name: location
+      type: carla.RightHandedVector3D
+      var_units: meters
+      doc: >
+        Translation in the right-handed frame.
+    - var_name: rotation
+      type: carla.RightHandedRotation
+      var_units: degrees (roll, pitch, yaw)
+      doc: >
+        Orientation in the right-handed frame, applied as intrinsic Z-Y-X.
+    # - METHODS ----------------------------
+    methods:
+    - def_name: __init__
+      params:
+      - param_name: location
+        type: carla.RightHandedVector3D
+      - param_name: rotation
+        type: carla.RightHandedRotation
+        param_units: degrees (roll, pitch, yaw)
+    # --------------------------------------
+    - def_name: get_quaternion
+      return: carla.Quaternion
+      doc: >
+        The orientation as a right-handed `(x, y, z, w)` quaternion. This is the value the ROS 2 bridge publishes for the equivalent `carla.Transform`.
+    # --------------------------------------
+    - def_name: get_matrix
+      return: list(list(float))
+      doc: >
+        The 4-matrix representation of this pose in the right-handed frame. Equal, element for element, to `S * carla.Transform.get_matrix() * S` with `S = diag(1, -1, 1, 1)`.
+    # --------------------------------------
+    - def_name: __eq__
+      return: bool
+      params:
+      - param_name: other
+        type: carla.RightHandedTransform
+      doc: >
+        Returns __True__ if both location and rotation are equal for this and `other`.
+    # --------------------------------------
+    - def_name: __ne__
+      return: bool
+      params:
+      - param_name: other
+        type: carla.RightHandedTransform
+      doc: >
+        Returns __True__ if any of location and rotation are not equal for this and `other`.
     # --------------------------------------
     - def_name: __str__
       return: str
@@ -540,12 +880,12 @@
     - def_name: contains
       return: bool
       params:
-      - param_name: world_point
+      - param_name: point
         type: carla.Location
         param_units: meters
         doc: >
           The point in world space to be checked.
-      - param_name: transform
+      - param_name: bbox_transform
         type: carla.Transform
         doc: >
           Contains location and rotation needed to convert this object's local space to world space.
@@ -560,7 +900,7 @@
     - def_name: get_world_vertices
       return: list(carla.Location)
       params:
-      - param_name: transform
+      - param_name: bbox_transform
         type: carla.Transform
         doc: >
           Contains location and rotation needed to convert this object's local space to world space.

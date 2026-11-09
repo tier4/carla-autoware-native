@@ -116,34 +116,6 @@ private:
 
 public:
 
-  /// Low quality Road Materials. Uses slots name to set material for each part
-  /// of the road for low quality.
-  ///
-  /// @todo Move Low quality vars to a generic map of structs with the quality
-  /// level as key.
-  UPROPERTY(Category = "Quality Settings/Low",
-      BlueprintReadOnly,
-      EditAnywhere,
-      config,
-      DisplayName = "Road Materials List for Low Quality")
-  TArray<FStaticMaterial> LowRoadMaterials;
-
-  /// Distance at which the light function should be completely faded to
-  /// DisabledBrightness. This is useful for hiding aliasing from light
-  /// functions applied in the distance.
-  UPROPERTY(Category = "Quality Settings/Low", BlueprintReadOnly, EditAnywhere, config)
-  float LowLightFadeDistance  = 1000.0f;
-
-  /// Default low distance for all primitive components.
-  UPROPERTY(Category = "Quality Settings/Low", BlueprintReadOnly, EditAnywhere, config,
-      meta = (ClampMin = "5000.0", ClampMax = "20000.0", UIMin = "5000.0", UIMax = "20000.0"))
-  float LowStaticMeshMaxDrawDistance = 10000.0f;
-
-  /// Default low distance for roads meshes.
-  UPROPERTY(Category = "Quality Settings/Low", BlueprintReadOnly, EditAnywhere, config,
-      meta = (ClampMin = "5000.0", ClampMax = "20000.0", UIMin = "5000.0", UIMax = "20000.0"))
-  float LowRoadPieceMeshMaxDrawDistance = 15000.0f;
-
   /// EPIC quality Road Materials. Uses slots name to set material for each part
   /// of the road for Epic quality.
   UPROPERTY(Category = "Quality Settings/Epic",
@@ -160,6 +132,84 @@ public:
       config,
       DisplayName = "Enable ROS2")
   bool ROS2 = false;
+
+  /// Default ROS2 topic visibility on startup. When true, every topic offered by
+  /// the implementation is visible from the beginning; when false, only the
+  /// sensors/actors explicitly enabled via EnableForROS calls are visible.
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "ROS2 Topics Visible On Startup")
+  bool ROS2TopicVisibility = true;
+
+  /// DDS middleware (RMW) used by the native ROS2 connector. Accepted values:
+  /// "fastdds" (default) and "cyclonedds". Set via the --rmw= command-line
+  /// argument, or RmwName in the [CARLA/Server] section of the CARLA settings
+  /// file (the command line wins). CycloneDDS is only available on Linux.
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "ROS2 RMW")
+  FString RmwName = TEXT("fastdds");
+
+  /// tier4: leaf of every ROS2 camera image topic. "image" (default) keeps
+  /// upstream's <base>/image; e.g. "image_raw" for Autoware. Set via
+  /// -ros2-camera-image-topic=<leaf> or ROS2CameraImageTopic in the
+  /// [CARLA/Server] section of the CARLA settings file (the command line wins).
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "ROS2 Camera Image Topic")
+  FString ROS2CameraImageTopic = TEXT("image");
+
+  /// tier4: optional QoS of the ROS2 sensor data topics, "<reliable|best_effort>[:<depth>]"
+  /// (e.g. "best_effort:1"). Empty (default) keeps the middleware default, as upstream.
+  /// Set via -ros2-camera-qos= / -ros2-lidar-qos= / -ros2-imu-qos= or ROS2CameraQos /
+  /// ROS2LidarQos / ROS2ImuQos in the [CARLA/Server] section of the CARLA settings file.
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "ROS2 Camera QoS")
+  FString ROS2CameraQos;
+
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "ROS2 Lidar QoS")
+  FString ROS2LidarQos;
+
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "ROS2 IMU QoS")
+  FString ROS2ImuQos;
+
+  /// tier4: ellipsoid of the Transverse Mercator projection built from an
+  /// Autoware map's MGRS georeference (AAutowareGameModeBase). "sphere"
+  /// (default) keeps upstream's behaviour; "wgs84" uses the WGS84 ellipsoid,
+  /// which matches Autoware's map projection. Set via -autoware-ellipsoid=
+  /// or AutowareEllipsoid in the [CARLA/Server] section of the CARLA settings file.
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "Autoware MGRS Ellipsoid")
+  FString AutowareEllipsoid = TEXT("sphere");
+
+  /// ROS2 domain id. Set via --ros-domain-id=<N> on the command line.
+  /// -1 (the default) keeps each middleware's native default domain.
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "ROS2 Domain ID")
+  int32 ROS2DomainId = -1;
 
   /// @}
 };

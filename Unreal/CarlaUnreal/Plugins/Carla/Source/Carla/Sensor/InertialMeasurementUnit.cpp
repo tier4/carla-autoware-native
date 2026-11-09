@@ -7,7 +7,9 @@
 #include "Carla/Sensor/InertialMeasurementUnit.h"
 #include "Carla.h"
 #include "Carla/Actor/ActorBlueprintFunctionLibrary.h"
+#include "Carla/Actor/CarlaActor.h"
 #include "Carla/Game/CarlaStatics.h"
+#include "Carla/MapGen/LargeMapManager.h"
 #include "Carla/Sensor/WorldObserver.h"
 #include "Carla/Vehicle/CarlaWheeledVehicle.h"
 
@@ -61,7 +63,8 @@ static FVector FIMU_GetActorAngularVelocityInRadians(
 
   if (RootComponent != nullptr) {
       const FQuat ActorGlobalRotation = RootComponent->GetComponentTransform().GetRotation();
-      const FVector GlobalAngularVelocity = RootComponent->GetPhysicsAngularVelocityInRadians();
+      // The primary's on a Multi-GPU secondary, whose mirror has no motion of its own.
+      const FVector GlobalAngularVelocity = CarlaGetActorAngularVelocityInRadians(Actor);
       AngularVelocity = ActorGlobalRotation.UnrotateVector(GlobalAngularVelocity);
   } else {
       AngularVelocity = FVector::ZeroVector;
@@ -101,21 +104,15 @@ const carla::geom::Vector3D AInertialMeasurementUnit::ComputeGyroscopeNoise(
   };
 }
 
-carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(const float CurrentTime)
+carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(
+    const float DeltaTime)
 {
-  if (!FMath::IsFinite(PrevTime)) {
-    PrevTime = CurrentTime;
-    return {};
-  }
-
-  const float DeltaTime = CurrentTime - PrevTime;
-
   // Used to convert from UE4's cm to meters
   constexpr float TO_METERS = 1e-2;
   // Gravity is configured per-simulation on the game mode; fall back to
-  // Autoware-compatible -9.81 m/s^2 if the CARLA game mode is unavailable.
+  // Earth's ~9.81 m/s^2 if the CARLA game mode is unavailable.
   ACarlaGameModeBase* GameMode = UCarlaStatics::GetGameMode(GetWorld());
-  const float GRAVITY = (GameMode != nullptr) ? GameMode->IMUSensorGravity : -9.81f;
+  const float GRAVITY = (GameMode != nullptr) ? GameMode->IMUSensorGravity : 9.81f;
 
   // 2nd derivative of the polynomic (quadratic) interpolation
   // using the point in current time and two previous steps:
@@ -134,17 +131,10 @@ carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(const float
   const FVector C = Y0 / ( H1 * (H1AndH2) );
   FVector FVectorAccelerometer = TO_METERS * -2.0f * ( A - B - C );
 
-  // If data from previous steps is not set - set it and do not return the calculated data
-  const bool bMissingPrev =
-      PrevLocation[0].ContainsNaN() || PrevLocation[1].ContainsNaN() || !FMath::IsFinite(PrevDeltaTime);
-
   // Update the previous locations
   PrevLocation[0] = PrevLocation[1];
   PrevLocation[1] = CurrentLocation;
   PrevDeltaTime = DeltaTime;
-  PrevTime = CurrentTime;
-
-  if (bMissingPrev) return {};
 
   // Add gravitational acceleration
   FVectorAccelerometer.Z += GRAVITY;
@@ -161,13 +151,34 @@ carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometer(const float
   return Accelerometer;
 }
 
+carla::geom::Vector3D AInertialMeasurementUnit::ComputeAccelerometerAtTime(
+    const float CurrentTime)
+{
+  if (!FMath::IsFinite(PrevTime))
+  {
+    PrevTime = CurrentTime;
+    return {};
+  }
+  const float DeltaTime = CurrentTime - PrevTime;
+  PrevTime = CurrentTime;
+  if (DeltaTime <= 0.0f)
+  {
+    // Called twice for the same simulation time: no time step to differentiate over.
+    return {};
+  }
+  return ComputeAccelerometer(DeltaTime);
+}
+
 carla::geom::Vector3D AInertialMeasurementUnit::ComputeGyroscope()
 {
   check(GetOwner() != nullptr);
   const FVector AngularVelocity =
       FIMU_GetActorAngularVelocityInRadians(*GetOwner());
 
-  const FQuat SensorLocalRotation =
+  // A Multi-GPU mirror is attached rigidly: the primary's rotation relative
+  // to the parent, which a spring arm keeps on its own.
+  const FQuat SensorLocalRotation = MirroredLocalRotation.IsSet() ?
+      MirroredLocalRotation.GetValue() :
       RootComponent->GetRelativeTransform().GetRotation();
 
   const FVector FVectorGyroscope =
@@ -202,7 +213,15 @@ float AInertialMeasurementUnit::ComputeCompass()
 void AInertialMeasurementUnit::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaTime)
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(AInertialMeasurementUnit::PostPhysTick);
-  AccelerometerValue = ComputeAccelerometer(World->GetTimeSeconds());
+  // The parent vehicle can be destroyed before this sensor (client-side
+  // destruction order is not guaranteed); the sensor then receives one more
+  // PostPhysTick with a null owner and the gyroscope owner dereference would
+  // assert, taking down the whole server. Skip the measurement instead.
+  if (GetOwner() == nullptr)
+  {
+    return;
+  }
+  AccelerometerValue = ComputeAccelerometer(DeltaTime);
   GyroscopeValue = ComputeGyroscope();
   CompassValue = ComputeCompass();
 
@@ -282,4 +301,54 @@ float AInertialMeasurementUnit::GetCompassValue() const
 void AInertialMeasurementUnit::BeginPlay()
 {
   Super::BeginPlay();
+}
+
+/// World-frame location, the same on every server (a large map rebases each
+/// server's local origin on its own).
+static std::array<double, 3> FIMU_ToWorld(const AActor &Sensor, const FVector &Local)
+{
+  const ALargeMapManager *LargeMap = UCarlaStatics::GetLargeMapManager(Sensor.GetWorld());
+  const FVector World = (LargeMap != nullptr) ? LargeMap->LocalToGlobalLocation(Local) : Local;
+  return {World.X, World.Y, World.Z};
+}
+
+static FVector FIMU_ToLocal(const AActor &Sensor, const std::array<double, 3> &World)
+{
+  const FVector Location(World[0], World[1], World[2]);
+  const ALargeMapManager *LargeMap = UCarlaStatics::GetLargeMapManager(Sensor.GetWorld());
+  return (LargeMap != nullptr) ? LargeMap->GlobalToLocalLocation(Location) : Location;
+}
+
+void AInertialMeasurementUnit::GetMirrorState(carla::multigpu::SensorState &State) const
+{
+  if (RandomEngine != nullptr)
+  {
+    State.random_engine = RandomEngine->GetState();
+  }
+  carla::multigpu::ImuHistory History;
+  History.older_location = FIMU_ToWorld(*this, PrevLocation[0]);
+  History.last_location = FIMU_ToWorld(*this, PrevLocation[1]);
+  History.last_delta_seconds = PrevDeltaTime;
+  State.imu_history = History;
+  const FQuat LocalRotation = RootComponent->GetRelativeTransform().GetRotation();
+  State.imu_local_rotation = std::array<double, 4>{LocalRotation.X, LocalRotation.Y, LocalRotation.Z, LocalRotation.W};
+}
+
+void AInertialMeasurementUnit::SetMirrorState(const carla::multigpu::SensorState &State)
+{
+  if (State.random_engine && (RandomEngine != nullptr))
+  {
+    RandomEngine->SetState(*State.random_engine);
+  }
+  if (State.imu_history)
+  {
+    PrevLocation[0] = FIMU_ToLocal(*this, State.imu_history->older_location);
+    PrevLocation[1] = FIMU_ToLocal(*this, State.imu_history->last_location);
+    PrevDeltaTime = State.imu_history->last_delta_seconds;
+  }
+  if (State.imu_local_rotation)
+  {
+    const auto &Rotation = *State.imu_local_rotation;
+    MirroredLocalRotation = FQuat(Rotation[0], Rotation[1], Rotation[2], Rotation[3]);
+  }
 }

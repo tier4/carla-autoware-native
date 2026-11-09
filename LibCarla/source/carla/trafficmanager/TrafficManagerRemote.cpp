@@ -80,7 +80,11 @@ void TrafficManagerRemote::Release() {
   Stop();
 }
 
-void TrafficManagerRemote::Reset() {
+void TrafficManagerRemote::Reset(uint64_t episode_id) {
+  // Every client alive in the process reports the change; reset once.
+  if (episodeProxyTM.GetId() == episode_id) {
+    return;
+  }
   Stop();
 
   carla::client::detail::EpisodeProxy episode_proxy = episodeProxyTM.Lock()->GetCurrentEpisode();
@@ -129,6 +133,16 @@ void TrafficManagerRemote::SetLaneOffset(const ActorPtr &_actor, const float off
 
 void TrafficManagerRemote::SetGlobalLaneOffset(const float offset) {
   client.SetGlobalLaneOffset(offset);
+}
+
+void TrafficManagerRemote::SetLargeVehicleWideTurn(const ActorPtr &_actor, const bool enable) {
+  carla::rpc::Actor actor(_actor->Serialize());
+
+  client.SetLargeVehicleWideTurn(actor, enable);
+}
+
+void TrafficManagerRemote::SetGlobalLargeVehicleWideTurn(const bool enable) {
+  client.SetGlobalLargeVehicleWideTurn(enable);
 }
 
 void TrafficManagerRemote::SetUpdateVehicleLights(const ActorPtr &_actor, const bool do_update) {

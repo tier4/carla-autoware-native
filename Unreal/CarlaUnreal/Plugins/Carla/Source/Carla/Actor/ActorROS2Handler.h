@@ -18,11 +18,13 @@ class ActorROS2Handler
         ActorROS2Handler(AActor *Actor, std::string RosName) : _Actor(Actor), _RosName(RosName) {};
 
         void operator()(carla::ros2::VehicleControl &Source);
-        void operator()(carla::ros2::VehicleAckermannControl &Source);
+        void operator()(carla::ros2::AckermannControl &Source);
         void operator()(carla::ros2::VehicleAccelerationControl &Source);
         void operator()(carla::ros2::MessageControl Message);
 
-        static bool FlattenSteeringCurve(AActor * Actor);
+        /// Flatten the vehicle's steering curve to 1.0 at all speeds so the
+        /// Autoware steering command maps 1:1 to wheel angle (tier4 port).
+        static bool FlattenSteeringCurve(AActor *Actor);
 
     private:
         AActor *_Actor {nullptr};

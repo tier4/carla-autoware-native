@@ -44,7 +44,7 @@ public:
 
   static void Release();
 
-  static void Reset();
+  static void Reset(uint64_t episode_id);
 
   static void Tick();
 
@@ -212,6 +212,22 @@ public:
     }
   }
 
+  /// Method to enable/disable the wide-turn manoeuvre for a single large vehicle.
+  void SetLargeVehicleWideTurn(const ActorPtr &actor, const bool enable) {
+    TrafficManagerBase* tm_ptr = GetTM(_port);
+    if(tm_ptr != nullptr){
+      tm_ptr->SetLargeVehicleWideTurn(actor, enable);
+    }
+  }
+
+  /// Method to enable/disable the wide-turn manoeuvre globally for large vehicles.
+  void SetGlobalLargeVehicleWideTurn(const bool enable) {
+    TrafficManagerBase* tm_ptr = GetTM(_port);
+    if(tm_ptr != nullptr){
+      tm_ptr->SetGlobalLargeVehicleWideTurn(enable);
+    }
+  }
+
   /// Set the automatic management of the vehicle lights
   void SetUpdateVehicleLights(const ActorPtr &actor, const bool do_update){
     TrafficManagerBase* tm_ptr = GetTM(_port);
@@ -288,9 +304,11 @@ public:
 
   /// Method to switch traffic manager into synchronous execution.
   void SetSynchronousMode(bool mode) {
-    TrafficManagerBase* tm_ptr = GetTM(_port);
-    if(tm_ptr != nullptr){
-      tm_ptr->SetSynchronousMode(mode);
+    // Serialized with Reset() and Tick(): all of them touch the worker thread.
+    std::scoped_lock<std::mutex> lock(_mutex);
+    auto it = _tm_map.find(_port);
+    if (it != _tm_map.end()) {
+      it->second->SetSynchronousMode(mode);
     }
   }
 

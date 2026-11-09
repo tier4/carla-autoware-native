@@ -12,9 +12,11 @@
 
 #include "Walker/WalkerBase.h"
 #include "Carla/Game/Tagger.h"
+#include "Carla/Traffic/TrafficLightManager.h"
 #include "Carla/Vehicle/CustomTerrainPhysicsComponent.h"
 
 #include <util/ue-header-guard-begin.h>
+#include "Engine/Engine.h"
 #include "Engine/WorldComposition.h"
 #if WITH_EDITOR
 #include "EditorViewportClient.h"
@@ -61,9 +63,20 @@ ALargeMapManager::~ALargeMapManager()
 void ALargeMapManager::BeginPlay()
 {
   Super::BeginPlay();
-  RegisterTilesInWorldComposition();
 
   UWorld* World = GetWorld();
+  if (World->GetWorldPartition() != nullptr || World->WorldComposition == nullptr)
+  {
+    // World Partition world (or no WorldComposition at all): the engine
+    // streams cells natively with absolute double-precision coordinates, and
+    // every code path below assumes a valid WorldComposition. Retire quietly.
+    UE_LOG(LogCarla, Warning, TEXT(
+        "LargeMapManager present in a World Partition world; destroying the "
+        "legacy tile manager (native streaming takes over)."));
+    Destroy();
+    return;
+  }
+  RegisterTilesInWorldComposition();
   /// Setup delegates
   // Origin rebase
   FCoreDelegates::PreWorldOriginOffset.AddUObject(this, &ALargeMapManager::PreWorldOriginOffset);
@@ -145,6 +158,7 @@ void ALargeMapManager::OnLevelAddedToWorld(ULevel* InLevel, UWorld* InWorld)
   LM_LOG(Warning, "OnLevelAddedToWorld");
   ATagger::TagActorsInLevel(*InLevel, true);
 
+  AdjustSignsHeightToGround();
 
   //FDebug::DumpStackTraceToLog(ELogVerbosity::Log);
 }
@@ -155,6 +169,20 @@ void ALargeMapManager::OnLevelRemovedFromWorld(ULevel* InLevel, UWorld* InWorld)
   //FDebug::DumpStackTraceToLog(ELogVerbosity::Log);
   FCarlaMapTile& Tile = GetCarlaMapTile(InLevel);
   Tile.TilesSpawned = false;
+}
+
+void ALargeMapManager::AdjustSignsHeightToGround()
+{
+  // Look the manager up read-only (do not spawn one) so this streaming
+  // callback has no side effects when there is no manager. The generated
+  // signs live in the persistent level, not in the tile, so the manager
+  // checks all of them and skips the ones that are already on the ground.
+  AActor* ManagerActor = UGameplayStatics::GetActorOfClass(
+      GetWorld(), ATrafficLightManager::StaticClass());
+  if (ATrafficLightManager* Manager = Cast<ATrafficLightManager>(ManagerActor))
+  {
+    Manager->SnapSignsToGround();
+  }
 }
 
 void ALargeMapManager::RegisterInitialObjects()
@@ -209,6 +237,8 @@ void ALargeMapManager::OnActorSpawned(
       // Wait until the pending levels changes are finished to avoid spawning
       // the car without ground underneath
       World->FlushLevelStreaming();
+
+      AdjustSignsHeightToGround();
 
       IsHeroVehicle = true;
     }
@@ -477,6 +507,10 @@ void ALargeMapManager::RegisterTilesInWorldComposition()
 {
   UWorld* World = GetWorld();
   UWorldComposition* WorldComposition = World->WorldComposition;
+  if (WorldComposition == nullptr)
+  {
+    return;
+  }
   World->ClearStreamingLevels();
   WorldComposition->TilesStreaming.Empty();
   WorldComposition->GetTilesList().Empty();
@@ -933,6 +967,13 @@ void ALargeMapManager::CheckIfRebaseIsNeeded()
   if (GEditor && !GEditor->IsPlayingSessionInEditor())
   {
     UWorld* World = GetWorld();
+    // Only World Composition maps are rebased this way. World Partition maps
+    // (upstream's large towns since UE 5.8) stream by themselves and must not
+    // have their origin moved.
+    if (World == nullptr || World->GetWorldPartition() != nullptr || World->WorldComposition == nullptr)
+    {
+      return;
+    }
     for (FEditorViewportClient* VC : GEditor->GetAllViewportClients())
     {
       if (!VC || !VC->IsLevelEditorClient()) continue;
@@ -1111,7 +1152,8 @@ void ALargeMapManager::PrintMapInfo()
   ULevel* CurrentLevel = World->GetCurrentLevel();
 
   FString Output = "";
-  Output += FString::Printf(TEXT("Num levels in world composition: %d\n"), World->WorldComposition->TilesStreaming.Num());
+  Output += FString::Printf(TEXT("Num levels in world composition: %d\n"),
+      World->WorldComposition ? World->WorldComposition->TilesStreaming.Num() : 0);
   Output += FString::Printf(TEXT("Num levels loaded: %d\n"), Levels.Num() );
   Output += FString::Printf(TEXT("Num tiles loaded: %d\n"), CurrentTilesLoaded.Num() );
   Output += FString::Printf(TEXT("Tiles loaded: [ "));

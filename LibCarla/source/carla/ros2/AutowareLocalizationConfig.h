@@ -9,6 +9,14 @@
 namespace carla {
 namespace ros2 {
 
+/// tier4: sensorless Autoware localization ("ground truth" pose published
+/// instead of running Autoware's localization stack). Filled from the
+/// sensor.other.vehicle_status attributes. Disabled by default.
+///
+/// The CARLA world pose of the ego is mapped into the Autoware (lanelet) map
+/// frame through one anchor pair (a map pose and the CARLA pose of the same
+/// point) plus a scale and two yaw corrections. The anchor is map specific, so
+/// the defaults are neutral and the values are passed per spawn.
 struct AutowareLocalizationConfig
 {
   bool enabled = false;

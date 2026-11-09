@@ -9,10 +9,24 @@ else ()
 endif ()
 make_directory (${CARLA_PACKAGE_ARCHIVE_PATH}/Tools)
 # @TODO Temporary hack:
+# The packaged binary looks for RecastBuilder at FPaths::RootDir()/Tools, the
+# archive root once FlattenPackageLayout.cmake has run (CarlaEpisode.cpp
+# BuildRecastBuilderFile).
 file (COPY_FILE ${CARLA_BUILD_PATH}/_deps/recastnavigation-build/RecastBuilder/RecastBuilder${EXE_EXT} ${CARLA_PACKAGE_ARCHIVE_PATH}/Tools/RecastBuilder${EXE_EXT})
+# FCarlaModule::AddShaderSearchPaths maps /Plugin/Carla to <plugin>/Shaders at
+# startup; the plugin is staged without its Shaders folder, and the shader-based
+# sensors need the .usf/.ush sources at runtime.
+cmake_path (GET CARLA_UE_PROJECT_PATH PARENT_PATH CARLA_UE_PROJECT_DIR)
+file (
+  COPY ${CARLA_UE_PROJECT_DIR}/Plugins/Carla/Shaders/
+  DESTINATION ${CARLA_PACKAGE_ARCHIVE_PATH}/CarlaUnreal/Plugins/Carla/Shaders/)
 
 make_directory (${CARLA_PACKAGE_ARCHIVE_PATH}/PythonAPI/carla/dist)
-file (GLOB PYTHON_WHL_FILES ${CARLA_BUILD_PATH}/PythonAPI/dist/carla-*.whl)
+# Every wheel the build made, one per Python version in CARLA_PYTHON_VERSIONS:
+if (NOT CARLA_PYTHON_API_DIST_PATH)
+  set (CARLA_PYTHON_API_DIST_PATH ${CARLA_BUILD_PATH}/PythonAPI/dist)
+endif ()
+file (GLOB PYTHON_WHL_FILES ${CARLA_PYTHON_API_DIST_PATH}/carla-*.whl)
 file (COPY ${PYTHON_WHL_FILES} DESTINATION ${CARLA_PACKAGE_ARCHIVE_PATH}/PythonAPI/carla/dist/)
 file (COPY_FILE ${CARLA_WORKSPACE_PATH}/Docs/python_api.md ${CARLA_PACKAGE_ARCHIVE_PATH}/PythonAPI/python_api.md)
 file (COPY ${CARLA_WORKSPACE_PATH}/PythonAPI/carla/agents/ DESTINATION ${CARLA_PACKAGE_ARCHIVE_PATH}/PythonAPI/carla/agents/)

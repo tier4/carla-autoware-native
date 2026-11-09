@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
+// de Barcelona (UAB).
+//
+// This work is licensed under the terms of the MIT license.
+// For a copy, see <https://opensource.org/licenses/MIT>.
+
+#include "carla/ros2/publishers/BasicPublisher.h"
+
+#include "carla/Logging.h"
+#include "carla/ros2/publishers/PublisherImpl.h"
+#include "carla/ros2/types/msg/String.h"
+
+namespace carla {
+namespace ros2 {
+
+namespace {
+constexpr const char *kBasicPublisherTopic = "rt/basic_publisher_example";
+}  // namespace
+
+struct BasicPublisherMsgTraits {
+  using msg_type = msg::String;
+};
+
+BasicPublisher::BasicPublisher()
+  : BasePublisher(kBasicPublisherTopic, ""),
+    _impl(std::make_shared<PublisherImpl<BasicPublisherMsgTraits>>()) {}
+
+BasicPublisher::~BasicPublisher() = default;
+
+bool BasicPublisher::Init() {
+  return _impl->Init(kBasicPublisherTopic);
+}
+
+bool BasicPublisher::Publish() {
+  return _impl->Publish();
+}
+
+void BasicPublisher::SetData(const std::string &msg) {
+  _impl->GetMessage()->data = msg;
+}
+
+}  // namespace ros2
+}  // namespace carla

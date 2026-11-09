@@ -16,6 +16,7 @@
 #include "Carla/Vehicle/MovementComponents/ChronoMovementComponent.h"
 #include "Carla/Traffic/TrafficLightBase.h"
 #include "Carla/Game/CarlaStatics.h"
+#include "Carla/Game/CarlaEpisode.h"
 
 #include <util/disable-ue4-macros.h>
 #include <carla/rpc/AckermannControllerSettings.h>
@@ -160,7 +161,10 @@ void FCarlaActor::PutActorToSleep(UCarlaEpisode* CarlaEpisode)
   {
     ActorData->RecordActorData(this, CarlaEpisode);
   }
-  TheActor->Destroy();
+  if (AActor* Actor = TheActor.Get())
+  {
+    Actor->Destroy();
+  }
   TheActor = nullptr;
 }
 
@@ -209,7 +213,15 @@ FTransform FCarlaActor::GetActorGlobalTransform() const
   }
   else
   {
-    FTransform Transform = GetActor()->GetActorTransform();
+    const AActor* Actor = GetActor();
+    if (Actor == nullptr)
+    {
+      // Streamed out by World Partition behind the registry's back; there is
+      // no live transform to read. Identity beats dereferencing null until
+      // stream-out converts these entries to dormant.
+      return FTransform::Identity;
+    }
+    FTransform Transform = Actor->GetActorTransform();
     ALargeMapManager* LargeMap =
         UCarlaStatics::GetLargeMapManager(World);
     if (LargeMap)
@@ -361,6 +373,10 @@ void FCarlaActor::SetActorGlobalTransform(
 
 FVector FCarlaActor::GetActorVelocity() const
 {
+  if (bHasMirroredKinematics)
+  {
+    return MirroredVelocity;
+  }
   if (IsDormant())
   {
     return ActorData->Velocity;
@@ -373,6 +389,10 @@ FVector FCarlaActor::GetActorVelocity() const
 
 FVector FCarlaActor::GetActorAngularVelocity() const
 {
+  if (bHasMirroredKinematics)
+  {
+    return FMath::RadiansToDegrees(MirroredAngularVelocity);
+  }
   if (IsDormant())
   {
     return ActorData->AngularVelocity;
@@ -610,6 +630,165 @@ ECarlaServerResponse FCarlaActor::SetActorEnableGravity(bool bEnabled)
   return ECarlaServerResponse::Success;
 }
 
+ECarlaServerResponse FCarlaActor::GetActorRigSnapshot(FActorRigSnapshot& Rig) const
+{
+  if (IsDormant())
+  {
+    const FActorData* Data = GetActorData();
+    if (Data == nullptr)
+    {
+      return ECarlaServerResponse::MissingActor;
+    }
+    Rig = Data->Rig;
+    return ECarlaServerResponse::Success;
+  }
+  const AActor* Actor = GetActor();
+  if (Actor == nullptr)
+  {
+    return ECarlaServerResponse::NullActor;
+  }
+  Rig = FActorRigSnapshot::FromActor(Actor);
+  return ECarlaServerResponse::Success;
+}
+
+// The rig holds actor-relative transforms; GetActorLocalTransform serves the
+// actor transform for dormant actors too, so world space works in both states.
+ECarlaServerResponse FCarlaActor::ToWorld(
+    const TArray<FTransform>& Relative, TArray<FTransform>& Transforms) const
+{
+  const FTransform ActorToWorld = GetActorLocalTransform();
+  Transforms.Reset(Relative.Num());
+  for (const FTransform& Transform : Relative)
+  {
+    Transforms.Add(Transform * ActorToWorld);
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FCarlaActor::GetActorComponentNames(TArray<FString>& Names) const
+{
+  FActorRigSnapshot Rig;
+  const ECarlaServerResponse Response = GetActorRigSnapshot(Rig);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  Names = Rig.ComponentNames;
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FCarlaActor::GetActorComponentWorldTransform(
+    const FString& ComponentName, FTransform& Transform) const
+{
+  const ECarlaServerResponse Response = GetActorComponentRelativeTransform(ComponentName, Transform);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  Transform = Transform * GetActorLocalTransform();
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FCarlaActor::GetActorComponentRelativeTransform(
+    const FString& ComponentName, FTransform& Transform) const
+{
+  FActorRigSnapshot Rig;
+  const ECarlaServerResponse Response = GetActorRigSnapshot(Rig);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  const int32 Index = Rig.ComponentNames.IndexOfByKey(ComponentName);
+  if (Index == INDEX_NONE)
+  {
+    return ECarlaServerResponse::ComponentNotFound;
+  }
+  Transform = Rig.ComponentTransforms[Index];
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FCarlaActor::GetActorBoneNames(TArray<FString>& Names) const
+{
+  FActorRigSnapshot Rig;
+  const ECarlaServerResponse Response = GetActorRigSnapshot(Rig);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  if (Rig.BoneNames.Num() == 0)
+  {
+    return ECarlaServerResponse::ComponentNotFound;
+  }
+  Names = Rig.BoneNames;
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FCarlaActor::GetActorBoneRelativeTransforms(
+    TArray<FTransform>& Transforms) const
+{
+  FActorRigSnapshot Rig;
+  const ECarlaServerResponse Response = GetActorRigSnapshot(Rig);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  if (Rig.BoneNames.Num() == 0)
+  {
+    return ECarlaServerResponse::ComponentNotFound;
+  }
+  Transforms = Rig.BoneTransforms;
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FCarlaActor::GetActorBoneWorldTransforms(
+    TArray<FTransform>& Transforms) const
+{
+  TArray<FTransform> Relative;
+  const ECarlaServerResponse Response = GetActorBoneRelativeTransforms(Relative);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  return ToWorld(Relative, Transforms);
+}
+
+ECarlaServerResponse FCarlaActor::GetActorSocketNames(TArray<FString>& Names) const
+{
+  FActorRigSnapshot Rig;
+  const ECarlaServerResponse Response = GetActorRigSnapshot(Rig);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  Names = Rig.SocketNames;
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FCarlaActor::GetActorSocketRelativeTransforms(
+    TArray<FTransform>& Transforms) const
+{
+  FActorRigSnapshot Rig;
+  const ECarlaServerResponse Response = GetActorRigSnapshot(Rig);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  Transforms = Rig.SocketTransforms;
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FCarlaActor::GetActorSocketWorldTransforms(
+    TArray<FTransform>& Transforms) const
+{
+  TArray<FTransform> Relative;
+  const ECarlaServerResponse Response = GetActorSocketRelativeTransforms(Relative);
+  if (Response != ECarlaServerResponse::Success)
+  {
+    return Response;
+  }
+  return ToWorld(Relative, Transforms);
+}
+
 // FVehicleActor functions ---------------------
 
 ECarlaServerResponse FVehicleActor::EnableActorConstantVelocity(const FVector& Velocity)
@@ -823,6 +1002,21 @@ ECarlaServerResponse FVehicleActor::SetVehicleLightState(
   return ECarlaServerResponse::Success;
 }
 
+// Why the wheel's pose cannot be set, or Success if it can.
+static ECarlaServerResponse CanSetWheelPose(
+    const ACarlaWheeledVehicle& Vehicle, const EVehicleWheelLocation& WheelLocation)
+{
+  if (!Vehicle.HasWheel(static_cast<int32>(WheelLocation)))
+  {
+    return ECarlaServerResponse::WheelNotFound;
+  }
+  if (!Vehicle.IsWheelAnimationOverridden())
+  {
+    return ECarlaServerResponse::WheelAnimationOverrideDisabled;
+  }
+  return ECarlaServerResponse::Success;
+}
+
 ECarlaServerResponse FVehicleActor::SetWheelSteerDirection(
     const EVehicleWheelLocation& WheelLocation, float AngleInDeg)
 {
@@ -834,6 +1028,11 @@ ECarlaServerResponse FVehicleActor::SetWheelSteerDirection(
     auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
     if(Vehicle == nullptr){
       return ECarlaServerResponse::NotAVehicle;
+    }
+    const ECarlaServerResponse Response = CanSetWheelPose(*Vehicle, WheelLocation);
+    if (Response != ECarlaServerResponse::Success)
+    {
+      return Response;
     }
     Vehicle->SetWheelSteerDirection(WheelLocation, AngleInDeg);
   }
@@ -853,8 +1052,109 @@ ECarlaServerResponse FVehicleActor::GetWheelSteerAngle(
     if(Vehicle == nullptr){
       return ECarlaServerResponse::NotAVehicle;
     }
-
+    if (!Vehicle->HasWheel(static_cast<int32>(WheelLocation)))
+    {
+      return ECarlaServerResponse::WheelNotFound;
+    }
     Angle = Vehicle->GetWheelSteerAngle(WheelLocation);
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::SetWheelPitchAngle(
+    const EVehicleWheelLocation& WheelLocation, float AngleInDeg)
+{
+  if (!IsDormant())
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    const ECarlaServerResponse Response = CanSetWheelPose(*Vehicle, WheelLocation);
+    if (Response != ECarlaServerResponse::Success)
+    {
+      return Response;
+    }
+    Vehicle->SetWheelPitchAngle(WheelLocation, AngleInDeg);
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::GetWheelPitchAngle(
+    const EVehicleWheelLocation& WheelLocation, float& Angle)
+{
+  Angle = 0.0f;
+  if (!IsDormant())
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    if (!Vehicle->HasWheel(static_cast<int32>(WheelLocation)))
+    {
+      return ECarlaServerResponse::WheelNotFound;
+    }
+    Angle = Vehicle->GetWheelPitchAngle(WheelLocation);
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::SetWheelSuspensionOffset(
+    const EVehicleWheelLocation& WheelLocation, float Offset)
+{
+  if (!IsDormant())
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    const ECarlaServerResponse Response = CanSetWheelPose(*Vehicle, WheelLocation);
+    if (Response != ECarlaServerResponse::Success)
+    {
+      return Response;
+    }
+    Vehicle->SetWheelSuspensionOffset(WheelLocation, Offset * UE_M_TO_CM);
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::GetWheelSuspensionOffset(
+    const EVehicleWheelLocation& WheelLocation, float& Offset)
+{
+  Offset = 0.0f;
+  if (!IsDormant())
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    if (!Vehicle->HasWheel(static_cast<int32>(WheelLocation)))
+    {
+      return ECarlaServerResponse::WheelNotFound;
+    }
+    Offset = Vehicle->GetWheelSuspensionOffset(WheelLocation) * UE_CM_TO_M;
+  }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::SetWheelAnimationOverride(bool bEnabled)
+{
+  if (!IsDormant())
+  {
+    auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+    if (Vehicle == nullptr)
+    {
+      return ECarlaServerResponse::NotAVehicle;
+    }
+    if (bEnabled && !Vehicle->HasCarlaVehicleAnimation())
+    {
+      return ECarlaServerResponse::WheelAnimationNotSupported;
+    }
+    Vehicle->SetWheelAnimationOverride(bEnabled);
   }
   return ECarlaServerResponse::Success;
 }
@@ -1327,6 +1627,36 @@ ECarlaServerResponse FWalkerActor::SetWalkerState(
   return ECarlaServerResponse::Success;
 }
 
+FVector FWalkerActor::GetActorVelocity() const
+{
+  if (bHasMirroredKinematics)
+  {
+    return MirroredVelocity;
+  }
+  if (IsDormant())
+  {
+    return GetActorData()->Velocity;
+  }
+
+  // Walkers move via UCharacterMovementComponent (AWalkerController::Tick
+  // drives it through AddMovementInput, a kinematic sweep), not physics
+  // simulation. AActor::GetVelocity() (APawn::GetVelocity()) prefers the
+  // root component's physics-body velocity whenever the root capsule is
+  // simulating physics -- true for walker Blueprints set up for ragdoll
+  // death even while walking normally -- which reports that near-zero
+  // physics-body velocity instead of the character's actual movement
+  // speed. Read the movement component's own tracked velocity directly.
+  auto* Character = Cast<ACharacter>(GetActor());
+  if (Character != nullptr)
+  {
+    if (auto* MovementComponent = Character->GetCharacterMovement())
+    {
+      return MovementComponent->Velocity;
+    }
+  }
+  return GetActor()->GetVelocity();
+}
+
 ECarlaServerResponse FWalkerActor::GetWalkerControl(
     FWalkerControl& Control)
 {
@@ -1546,4 +1876,19 @@ ECarlaServerResponse FWalkerActor::SetActorDead()
     UE_LOG(LogCarla, Warning, TEXT("Walker starting life span by dead"));
   }
   return ECarlaServerResponse::Success;
+}
+
+FVector CarlaGetActorAngularVelocityInRadians(const AActor &Actor)
+{
+  UCarlaEpisode *Episode = UCarlaStatics::GetCurrentEpisode(Actor.GetWorld());
+  if ((Episode != nullptr) && !Episode->bIsPrimaryServer)
+  {
+    const FCarlaActor *View = Episode->FindCarlaActor(const_cast<AActor *>(&Actor));
+    if ((View != nullptr) && View->HasMirroredKinematics())
+    {
+      return View->GetMirroredAngularVelocityInRadians();
+    }
+  }
+  const auto *Root = Cast<UPrimitiveComponent>(Actor.GetRootComponent());
+  return (Root != nullptr) ? Root->GetPhysicsAngularVelocityInRadians() : FVector::ZeroVector;
 }

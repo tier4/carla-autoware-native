@@ -1,5 +1,6 @@
 
 #include "carla/trafficmanager/Constants.h"
+#include "carla/trafficmanager/TrafficManagerGeometry.h"
 
 #include "carla/trafficmanager/LocalizationStage.h"
 
@@ -19,6 +20,7 @@ LocalizationStage::LocalizationStage(
   const SimulationState &simulation_state,
   TrackTraffic &track_traffic,
   const LocalMapPtr &local_map,
+  std::unordered_map<ActorId, std::pair<float, bool>> &large_vehicles,
   Parameters &parameters,
   std::vector<ActorId>& marked_for_removal,
   LocalizationFrame &output_array,
@@ -31,7 +33,8 @@ LocalizationStage::LocalizationStage(
     parameters(parameters),
     marked_for_removal(marked_for_removal),
     output_array(output_array),
-    random_device(random_device){}
+    random_device(random_device),
+    large_vehicles(large_vehicles) {}
 
 void LocalizationStage::Update(const unsigned long index) {
 
@@ -107,6 +110,30 @@ void LocalizationStage::Update(const unsigned long index) {
   // Initializing buffer if it is empty.
   if (waypoint_buffer.empty()) {
     SimpleWaypointPtr closest_waypoint = local_map->GetWaypoint(vehicle_location);
+    if (closest_waypoint == nullptr) {
+      // The map has no drivable waypoint at all (EmptyMap, or an OpenDRIVE
+      // file without roads): there is nothing to localize this vehicle
+      // against. Leave output.localized false so TrafficManagerLocal::Step
+      // skips the stages that assume a non-empty waypoint buffer.
+      output_array.at(index).localized = false;
+      return;
+    }
+    // Prefer a waypoint whose lane direction matches the vehicle heading.
+    // The nearest waypoint can belong to the opposing lane — or the vehicle
+    // may have been spun around (collision, player driving, bad resume
+    // pose) — and a buffer seeded against the heading makes the controller
+    // chase a target behind the vehicle at full lock and full throttle.
+    if (cg::Math::Dot(closest_waypoint->GetForwardVector(), heading_vector) < 0.0f) {
+      float best_dot = 0.0f;
+      for (const SimpleWaypointPtr &candidate :
+           local_map->GetWaypointsInDelta(vehicle_location, 8u, 4.0f)) {
+        const float dot = cg::Math::Dot(candidate->GetForwardVector(), heading_vector);
+        if (dot > best_dot) {
+          best_dot = dot;
+          closest_waypoint = candidate;
+        }
+      }
+    }
     PushWaypoint(actor_id, track_traffic, waypoint_buffer, closest_waypoint);
   }
 
@@ -215,9 +242,11 @@ void LocalizationStage::Update(const unsigned long index) {
     }
   }
   ExtendAndFindSafeSpace(actor_id, is_at_junction_entrance, waypoint_buffer);
+  HandleLargeVehicleJunction(actor_id, is_at_junction_entrance, waypoint_buffer);
 
   // Editing output array
   LocalizationData &output = output_array.at(index);
+  output.localized = true;
   output.is_at_junction_entrance = is_at_junction_entrance;
 
   if (is_at_junction_entrance) {
@@ -239,7 +268,7 @@ void LocalizationStage::ExtendAndFindSafeSpace(const ActorId actor_id,
 
   SimpleWaypointPtr junction_end_point = nullptr;
   SimpleWaypointPtr safe_point_after_junction = nullptr;
-
+  
   if (is_at_junction_entrance
       && vehicles_at_junction_entrance.find(actor_id) == vehicles_at_junction_entrance.end()) {
 
@@ -321,14 +350,105 @@ void LocalizationStage::ExtendAndFindSafeSpace(const ActorId actor_id,
   }
 }
 
+void LocalizationStage::HandleLargeVehicleJunction(const ActorId actor_id,
+                                                   const bool is_at_junction_entrance,
+                                                   Buffer &waypoint_buffer) {
+
+  if (large_vehicles.find(actor_id) == large_vehicles.end()) {
+    return;
+  }
+
+  SimpleWaypointPtr current_waypoint{nullptr};
+  const bool is_at_junction{waypoint_buffer.front()->CheckJunction()};
+
+  if (is_at_junction_entrance
+      && large_vehicles_at_junction_entrance.find(actor_id) == large_vehicles_at_junction_entrance.end()
+      && large_vehicles_at_junction.find(actor_id) == large_vehicles_at_junction.end()) {
+
+    large_vehicles_at_junction_entrance.insert(actor_id);
+
+    const SimpleWaypointPtr first_waypoint = waypoint_buffer.front();
+    const SimpleWaypointPtr last_waypoint = waypoint_buffer.back();
+    const SimpleWaypointPtr middle_waypoint = waypoint_buffer.at(waypoint_buffer.size() / 2);
+
+    const float radius = GetThreePointCircleRadius(
+        first_waypoint->GetLocation(),
+        middle_waypoint->GetLocation(),
+        last_waypoint->GetLocation());
+
+    if (radius > LARGE_VEHICLES_JUNCTION_MAX_RADIUS) {
+      return;  // Straight path; no offset needed.
+    }
+
+    bool entered_junction{false};
+    float junction_length{0.0f};
+    bool is_straight_path{true};
+
+    for (unsigned long i = 0u; i < waypoint_buffer.size(); ++i) {
+      current_waypoint = waypoint_buffer.at(i);
+
+      if (!entered_junction && current_waypoint->CheckJunction()) {
+        entered_junction = true;
+      }
+
+      if (i > 0 && entered_junction) {
+        const SimpleWaypointPtr prev_waypoint = waypoint_buffer.at(i - 1);
+        const float new_distance = current_waypoint->Distance(prev_waypoint->GetLocation());
+        junction_length += new_distance;
+
+        if (is_straight_path) {
+          const RoadOption junction_type = current_waypoint->GetRoadOption();
+          if (junction_type == RoadOption::Right) {
+            large_vehicles[actor_id].second = true;
+            is_straight_path = false;
+          } else if (junction_type == RoadOption::Left) {
+            large_vehicles[actor_id].second = false;
+            is_straight_path = false;
+          }
+        }
+      }
+
+      if (entered_junction && !current_waypoint->CheckJunction()) {
+        break;
+      }
+    }
+    if (!is_straight_path) {
+      large_vehicles[actor_id].first = junction_length;
+    }
+
+  }
+  else if (
+      is_at_junction
+      && large_vehicles_at_junction_entrance.find(actor_id) != large_vehicles_at_junction_entrance.end()) {
+
+    large_vehicles_at_junction_entrance.erase(actor_id);
+    large_vehicles_at_junction.insert(actor_id);
+  }
+  else if (
+      !is_at_junction
+      && large_vehicles_at_junction.find(actor_id) != large_vehicles_at_junction.end()) {
+
+    large_vehicles_at_junction.erase(actor_id);
+    if (large_vehicles.find(actor_id) != large_vehicles.end()) {
+      large_vehicles[actor_id].first = 0.0f;
+    }
+  }
+}
+
 void LocalizationStage::RemoveActor(ActorId actor_id) {
     last_lane_change_swpt.erase(actor_id);
+    vehicles_at_junction_entrance.erase(actor_id);
     vehicles_at_junction.erase(actor_id);
+    large_vehicles_at_junction_entrance.erase(actor_id);
+    large_vehicles_at_junction.erase(actor_id);
 }
 
 void LocalizationStage::Reset() {
   last_lane_change_swpt.clear();
+  vehicles_at_junction_entrance.clear();
   vehicles_at_junction.clear();
+  large_vehicles_at_junction_entrance.clear();
+  large_vehicles_at_junction.clear();
 }
 
 SimpleWaypointPtr LocalizationStage::AssignLaneChange(const ActorId actor_id,

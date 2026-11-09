@@ -2,6 +2,7 @@
 #include "Components/SplineComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "KismetProceduralMeshLibrary.h"
+#include "ProceduralMeshComponent.h"
 
 
 // ========================= Actor boilerplate =========================
@@ -104,7 +105,7 @@ void AMeshToSplineActor::BuildIslands(const TArray<int32>& Tris, TArray<TArray<i
 
 		while (Q.Num())
 		{
-			const int32 cur = Q.Pop(false);
+			const int32 cur = Q.Pop(EAllowShrinking::No);
 			Comp.Add(cur);
 			for (int32 nb : Adj[cur])
 			{

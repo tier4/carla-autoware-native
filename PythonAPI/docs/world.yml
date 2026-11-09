@@ -71,12 +71,12 @@
       - param_name: wildcard_pattern
         type: str
       doc: >
-        Filters a list of Actors matching `wildcard_pattern` against their variable __<font color="#f8805a">type_id</font>__ (which identifies the blueprint used to spawn them). Matching follows [fnmatch](https://docs.python.org/2/library/fnmatch.html) standard.  
+        Filters a list of Actors matching `wildcard_pattern` against their variable __<font color="#f8805a">type_id</font>__ (which identifies the blueprint used to spawn them). Matching follows [fnmatch](https://docs.python.org/3/library/fnmatch.html) standard.  
     # --------------------------------------
     - def_name: find
       return: carla.Actor
       params:
-      - param_name: actor_id
+      - param_name: id
         type: int
       doc: >
         Finds an actor using its identifier and returns it or <b>None</b> if it is not present. 
@@ -107,7 +107,7 @@
   - class_name: WorldSettings
     # - DESCRIPTION ------------------------
     doc: >
-      The simulation has some advanced configuration options that are contained in this class and can be managed using carla.World and its methods. These allow the user to choose between client-server synchrony/asynchrony, activation of "no rendering mode" and either if the simulation should run with a fixed or variable time-step. Check [this](adv_synchrony_timestep.md) out if you want to learn about it. 
+      The simulation has some advanced configuration options that are contained in this class and can be managed using carla.World and its methods. These allow the user to choose between client-server synchrony/asynchrony, activation of "no rendering mode" and either if the simulation should run with a fixed or variable time-step. Check [this](core_synchrony.md) out if you want to learn about it. 
     # - PROPERTIES -------------------------
     instance_variables:
     - var_name: synchronous_mode
@@ -125,11 +125,11 @@
     - var_name: substepping
       type: bool
       doc: >
-        Enable the physics substepping. This option allows computing some physics substeps between two render frames. If synchronous mode is set, the number of substeps and its time interval are fixed and computed are so they fulfilled the requirements of carla.WorldSettings.max_substep and carla.WorldSettings.max_substep_delta_time. These last two parameters need to be compatible with carla.WorldSettings.fixed_delta_seconds. Enabled by default.
+        Enable the physics substepping. This option allows computing some physics substeps between two render frames. If synchronous mode is set, the number of substeps and its time interval are fixed and computed are so they fulfilled the requirements of carla.WorldSettings.max_substeps and carla.WorldSettings.max_substep_delta_time. These last two parameters need to be compatible with carla.WorldSettings.fixed_delta_seconds. Enabled by default.
     - var_name: max_substep_delta_time
       type: float
       doc: >
-       Maximum delta time of the substeps. If the carla.WorldSettingsmax_substep is high enough, the substep delta time would be always below or equal to this value. By default, the value is set to 0.01.
+       Maximum delta time of the substeps. If the carla.WorldSettings.max_substeps is high enough, the substep delta time would be always below or equal to this value. By default, the value is set to 0.01.
     - var_name: max_substeps
       type: int
       doc: >
@@ -155,8 +155,16 @@
     - var_name: spectator_as_ego
       type: bool
       doc: >
-        Used for large maps only. Defines the influence of the spectator on tile loading in Large Maps. By default, the spectator will provoke loading of neighboring tiles in the absence of an ego actor. This might be inconvenient for applications that immediately spawn an ego actor. 
-    
+        Used for large maps only. Defines the influence of the spectator on tile loading in Large Maps. By default, the spectator will provoke loading of neighboring tiles in the absence of an ego actor. This might be inconvenient for applications that immediately spawn an ego actor.
+    - var_name: adjust_signs_height_to_ground
+      type: bool
+      doc: >
+        When enabled, OpenDRIVE-generated traffic signs and traffic lights are moved onto the ground below them after spawning, and their trigger volumes keep their position. Only generated actors are moved, never signs placed by hand in the level. It is false by default. Enabling it also adjusts the signs that are already spawned, so it can be enabled at any time. Disabling it stops further adjustment but does not move adjusted signs back. On a World Partition map the ground streams in around the streaming source, so each sign is adjusted when the cell below it becomes resident. The flag is kept by a map load with `reset_settings=False`, and it reads true on a map whose traffic light manager enables it.
+    - var_name: deterministic_collisions
+      type: bool
+      doc: >
+        When enabled, collisions repeat exactly from one run to the next, so a synchronous simulation that contains them does too. By default the physics engine can detect a contact one frame earlier or later depending on how fast the server runs, and the same crash then ends differently. It is false by default because it costs physics time: around 15-25% more per tick with a hundred vehicles in no-rendering mode, and no measurable difference with rendering. It takes effect when a map is loaded, so apply it and then call carla.Client.reload_world or carla.Client.load_world with `reset_settings=False`; a load with `reset_settings=True` turns it off again. See the snippet of carla.WorldSettings.__init__ and [Physics determinism](core_synchrony.md#physics-determinism).
+
     # - METHODS ----------------------------
     methods:
     - def_name: __init__
@@ -204,8 +212,18 @@
         type: bool
         default: True
         doc: >
-          Used for large maps only. Defines the influence of the spectator on tile loading in Large Maps. 
-        
+          Used for large maps only. Defines the influence of the spectator on tile loading in Large Maps.
+      - param_name: adjust_signs_height_to_ground
+        type: bool
+        default: False
+        doc: >
+          Set this to true to move OpenDRIVE-generated traffic signs and traffic lights onto the ground below them after spawning.
+      - param_name: deterministic_collisions
+        type: bool
+        default: False
+        doc: >
+          Set this to true for collisions that repeat exactly between runs. Takes effect at the next map load that keeps the settings (`reset_settings=False`).
+
       doc: >
         Creates an object containing desired settings that could later be applied through carla.World and its method __<font color="#7fb800">apply_settings()</font>__.
     # --------------------------------------
@@ -281,10 +299,10 @@
         With this fixed attachment the object follow its parent position strictly. This is the recommended attachment to retrieve precise data from the simulation.  
     - var_name: SpringArm
       doc: >
-        An attachment that expands or retracts the position of the actor, depending on its parent. This attachment is only recommended to record videos from the simulation where a smooth movement is needed. SpringArms are an Unreal Engine component so [check the UE docs](https://docs.unrealengine.com/en-US/Gameplay/HowTo/UsingCameras/SpringArmComponents/index.html) to learn more about them. <br><b style="color:red;">Warning:</b> The <b>SpringArm</b> attachment presents weird behaviors when an actor is spawned with a relative translation in the Z-axis (e.g. <code>child_location = Location(0,0,2)</code>).  
+        An attachment that expands or retracts the position of the actor, depending on its parent. This attachment is only recommended to record videos from the simulation where a smooth movement is needed. SpringArms are an Unreal Engine component so [check the UE docs](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-spring-arm-components-in-unreal-engine) to learn more about them. <br><b style="color:red;">Warning:</b> The <b>SpringArm</b> attachment presents weird behaviors when an actor is spawned with a relative translation in the Z-axis (e.g. <code>child_location = Location(0,0,2)</code>).  
     - var_name: SpringArmGhost
       doc: >
-        An attachment like the previous one but that does not make the collision test, and that means that it does not expands or retracts the position of the actor. The term **ghost** is because then the camera can cross walls and other geometries. This attachment is only recommended to record videos from the simulation where a smooth movement is needed. SpringArms are an Unreal Engine component so [check the UE docs](https://docs.unrealengine.com/en-US/Gameplay/HowTo/UsingCameras/SpringArmComponents/index.html) to learn more about them. <br><b style="color:red;">Warning:</b> The <b>SpringArm</b> attachment presents weird behaviors when an actor is spawned with a relative translation in the Z-axis (e.g. <code>child_location = Location(0,0,2)</code>).  
+        An attachment like the previous one but that does not make the collision test, and that means that it does not expands or retracts the position of the actor. The term **ghost** is because then the camera can cross walls and other geometries. This attachment is only recommended to record videos from the simulation where a smooth movement is needed. SpringArms are an Unreal Engine component so [check the UE docs](https://dev.epicgames.com/documentation/en-us/unreal-engine/using-spring-arm-components-in-unreal-engine) to learn more about them. <br><b style="color:red;">Warning:</b> The <b>SpringArm</b> attachment presents weird behaviors when an actor is spawned with a relative translation in the Z-axis (e.g. <code>child_location = Location(0,0,2)</code>).  
     # --------------------------------------
 
   - class_name: LabelledPoint
@@ -467,15 +485,61 @@
         Responsible for creating different shapes for debugging. Take a look at its class to learn more about it. 
     # - METHODS ----------------------------
     methods:    
+    - def_name: is_weather_enabled
+      return: bool
+      doc: >
+        Returns whether the map has a weather actor, and so whether the weather can be read and set.
+    # --------------------------------------
+    - def_name: set_publish_tf
+      params:
+      - param_name: publish_tf
+        type: bool
+        doc: >
+          True publishes actor transforms to the tf topic, False stops it.
+      doc: >
+        Enables or disables publishing actor transforms through the native ROS 2 interface.
+    # --------------------------------------
+    - def_name: get_publish_tf
+      return: bool
+      doc: >
+        Returns whether the native ROS 2 interface publishes actor transforms to the tf topic.
+    # --------------------------------------
+    - def_name: set_imu_sensor_gravity
+      params:
+      - param_name: gravity
+        type: float
+        param_units: m/s<sup>2</sup>
+        doc: >
+          Gravity magnitude the IMU sensors will report.
+      doc: >
+        Sets the gravity magnitude the IMU sensors report. It does not change the physics of the simulation.
+    # --------------------------------------
+    - def_name: get_imu_sensor_gravity
+      return: float
+      return_units: m/s<sup>2</sup>
+      doc: >
+        Returns the gravity magnitude the IMU sensors report.
+    # --------------------------------------
+    - def_name: get_ego_spawn_points
+      return: list(carla.Transform)
+      doc: >
+        Returns the recommended spawn points for the ego vehicle. Empty when the map defines none.
+    # --------------------------------------
     - def_name: apply_settings
       return: int
       params:
-      - param_name: world_settings
+      - param_name: settings
         type: carla.WorldSettings
+      - param_name: seconds
+        type: float
+        default: 0.0
+        param_units: seconds
+        doc: >
+          Time to wait for the settings to be applied. A value of 0 waits indefinitely.
       doc: >
         This method applies settings contained in an object to the simulation running and returns the ID of the frame they were implemented. 
       warning: >
-        If synchronous mode is enabled, and there is a Traffic Manager running, this must be set to sync mode too. Read [this](adv_traffic_manager.md#synchronous-mode) to learn how to do it. 
+        If synchronous mode is enabled, and there is a Traffic Manager running, this must be set to sync mode too. Read [this](core_traffic_manager.md#synchronous-mode) to learn how to do it. 
     # --------------------------------------
     - def_name: on_tick
       return: int
@@ -485,7 +549,7 @@
         doc: > 
           Function with a snapshot as compulsory parameter that will be called when the client receives a tick.  
       doc: >
-        This method is used in [__asynchronous__ mode](https://carla.readthedocs.io/en/latest/adv_synchrony_timestep/). It starts callbacks from the client for the function defined as `callback`, and returns the ID of the callback. The function will be called everytime the server ticks. It requires a carla.WorldSnapshot as argument, which can be retrieved from __<font color="#7fb800">wait_for_tick()</font>__. Use __<font color="#7fb800">remove_on_tick()</font>__ to stop the callbacks.
+        This method is used in [__asynchronous__ mode](core_synchrony.md). It starts callbacks from the client for the function defined as `callback`, and returns the ID of the callback. The function will be called everytime the server ticks. It requires a carla.WorldSnapshot as argument, which can be retrieved from __<font color="#7fb800">wait_for_tick()</font>__. Use __<font color="#7fb800">remove_on_tick()</font>__ to stop the callbacks.
     # --------------------------------------
     - def_name: remove_on_tick
       params:
@@ -506,9 +570,9 @@
         doc: > 
           Maximum time the server should wait for a tick. It is set to <code>10.0</code> by default.   
       doc: >
-        This method is used in [__synchronous__ mode](https://carla.readthedocs.io/en/latest/adv_synchrony_timestep/), when the server waits for a client tick before computing the next frame. This method will send the tick, and give way to the server. It returns the ID of the new frame computed by the server. 
+        This method is used in [__synchronous__ mode](core_synchrony.md), when the server waits for a client tick before computing the next frame. This method will send the tick, and give way to the server. It returns the ID of the new frame computed by the server. 
       note: > 
-        If no tick is received in synchronous mode, the simulation will freeze. Also, if many ticks are received from different clients, there may be synchronization issues. Please read the docs about [synchronous mode](https://carla.readthedocs.io/en/latest/adv_synchrony_timestep/) to learn more.  
+        If no tick is received in synchronous mode, the simulation will freeze. Also, if many ticks are received from different clients, there may be synchronization issues. Please read the docs about [synchronous mode](core_synchrony.md) to learn more.  
     # --------------------------------------
     - def_name: wait_for_tick
       return: carla.WorldSnapshot
@@ -520,7 +584,7 @@
         doc: > 
           Maximum time the server should wait for a tick. It is set to <code>10.0</code> by default.   
       doc: >
-        This method is used in [__asynchronous__ mode](https://carla.readthedocs.io/en/latest/adv_synchrony_timestep/). It makes the client wait for a server tick. When the next frame is computed, the server will tick and return a snapshot describing the new state of the world. 
+        This method is used in [__asynchronous__ mode](core_synchrony.md). It makes the client wait for a server tick. When the next frame is computed, the server will tick and return a snapshot describing the new state of the world. 
     # --------------------------------------
     - def_name: spawn_actor
       return: carla.Actor
@@ -538,7 +602,7 @@
         default: None
         doc: > 
           The parent object that the spawned actor will follow around. 
-      - param_name: attachment 
+      - param_name: attachment_type
         type: carla.AttachmentType
         default: Rigid
         doc: > 
@@ -562,7 +626,7 @@
         default: None
         doc: > 
           The parent object that the spawned actor will follow around. 
-      - param_name: attachment 
+      - param_name: attachment_type
         type: carla.AttachmentType
         default: Rigid
         doc: > 
@@ -601,14 +665,14 @@
     # --------------------------------------
     - def_name: get_level_bbs
       params:
-      - param_name: actor_type
+      - param_name: bb_type
         type: carla.CityObjectLabel
         default: Any
         doc: > 
           Semantic tag of the elements contained in the bounding boxes that are returned. 
       return: array(carla.BoundingBox)
       doc: >
-        Returns an array of bounding boxes with location and rotation in world space. The method returns all the bounding boxes in the level by default, but the query can be filtered by semantic tags with the argument `actor_type`. 
+        Returns an array of bounding boxes with location and rotation in world space. The method returns all the bounding boxes in the level by default, but the query can be filtered by semantic tags with the argument `bb_type`. 
     # --------------------------------------
     - def_name: get_environment_objects
       params:
@@ -635,10 +699,28 @@
       doc: >
         Enable or disable a set of EnvironmentObject identified by their id. These objects will appear or disappear from the level.
     # --------------------------------------
-    # - def_name: get_lightmanager
-    #   return: carla.LightManager
-    #   doc: >
-    #     Returns an instance of carla.LightManager that can be used to handle the lights in the scene. 
+    - def_name: get_lightmanager
+      return: carla.LightManager
+      doc: >
+        Returns an instance of carla.LightManager that can be used to handle the lights in the scene.
+    # --------------------------------------
+    - def_name: spawn_custom_mesh
+      params:
+      - param_name: vertices
+        type: list(float)
+        doc: >
+          Flat list of vertex coordinates (x0, y0, z0, x1, y1, z1, ...) in meters, in the client coordinate frame.
+      - param_name: triangles
+        type: list(int)
+        doc: >
+          Triangle indices into the vertex list, three per triangle.
+      - param_name: material
+        type: str
+        default: grass
+        doc: >
+          Semantic material hint ("grass", "road", "dirt", "sidewalk") or a full Unreal Engine material object path.
+      doc: >
+        Spawns a static procedural mesh with collision in the world. The mesh lives until the world is reloaded. Useful to add custom terrain or static geometry to maps generated at runtime from OpenDRIVE.
     # --------------------------------------
     - def_name: freeze_all_traffic_lights
       params:
@@ -715,7 +797,7 @@
     - def_name: get_random_location_from_navigation
       return: carla.Location
       doc: >
-        This can only be used with walkers. It retrieves a random location to be used as a destination using the __<font color="#7fb800">go_to_location()</font>__ method in carla.WalkerAIController. This location will be part of a sidewalk. Roads, crosswalks and grass zones are excluded. The method does not take into consideration locations of existing actors so if a collision happens when trying to spawn an actor, it will return an error. Take a look at [`generate_traffic.py`](https://github.com/carla-simulator/carla/blob/master/PythonAPI/examples/generate_traffic.py) for an example.
+        This can only be used with walkers. It retrieves a random location to be used as a destination using the __<font color="#7fb800">go_to_location()</font>__ method in carla.WalkerAIController. This location will be part of a sidewalk. Roads, crosswalks and grass zones are excluded. The method does not take into consideration locations of existing actors so if a collision happens when trying to spawn an actor, it will return an error. Take a look at [`generate_traffic.py`](https://github.com/carla-simulator/carla/blob/ue58-dev/PythonAPI/examples/generate_traffic.py) for an example.
     # --------------------------------------
     - def_name: get_settings
       return: carla.WorldSettings
@@ -738,13 +820,49 @@
         Retrieves an object containing weather parameters currently active in the simulation, mainly cloudiness, precipitation, wind and sun position.
     # --------------------------------------
     - def_name: set_weather
-      params: 
+      params:
       - param_name: weather
         type: carla.WeatherParameters
-        doc: > 
-          New conditions to be applied. 
+        doc: >
+          New conditions to be applied.
       doc: >
-        Changes the weather parameteres ruling the simulation to another ones defined in an object. 
+        Changes the weather parameteres ruling the simulation to another ones defined in an object. A large jump (sun altitude moving more than `5` degrees or cloudiness more than `30` in one call, e.g. noon to night) makes the global illumination and the sky light refresh fully for `8` seconds, so give the scene about 7 seconds before capturing (console variables `carla.Weather.LightingJumpSunDeg`, `LightingJumpCloudiness`, `LightingJumpSettleSeconds`). Gradual changes are not affected. Street and building lights only switch when the change crosses sunrise or sunset (see carla.Light).
+    # --------------------------------------
+    - def_name: set_sky_light_map
+      params:
+      - param_name: width
+        type: int
+        doc: >
+          Panorama width in pixels.
+      - param_name: height
+        type: int
+        doc: >
+          Panorama height in pixels.
+      - param_name: pixels
+        type: bytes
+        doc: >
+          Contiguous buffer of `width * height * 3` (RGB) or `width * height * 4` (RGBA) float32 values, row major, top row first. Any object exposing the Python buffer protocol works, including a numpy array.
+      - param_name: intensity
+        type: float
+        default: 1.0
+        doc: >
+          Multiplier applied on top of the panorama's linear radiance values.
+      - param_name: face_size
+        type: int
+        default: 512
+        doc: >
+          Resolution (pixels per edge) of the cubemap the panorama is resampled into before lighting the sky.
+      doc: >
+        Lights the scene with an environment map instead of the real-time atmosphere capture: the equirectangular linear RGB(A) float `pixels` panorama is resampled into a cubemap and becomes the sky light's ambient and reflection source at `intensity`, on every sky rig in the level, until `clear_sky_light_map()` is called. Persists across weather changes but not across level loads: `load_world()` and `reload_world()` drop it, so set it again on the new world. Panorama convention (the CARLA world frame, i.e. Unreal's left-handed X-forward/Y-right/Z-up): column `u` is azimuth `phi = 2*pi * (u + 0.5) / width`, measured from +X toward +Y (the same sense as a CARLA yaw, so azimuth 90° is to the right of a yaw-0 vehicle); row `v` is elevation `theta = pi/2 - pi * (v + 0.5) / height`, with row 0 the zenith and the last row the nadir; direction `d = (cos(theta)*cos(phi), cos(theta)*sin(phi), sin(theta))`. Values are scene radiance in the project's photometric units (a clear noon sky is on the order of thousands of cd/m²), so a panorama normalized to `[0, 1]` typically needs `intensity` in the thousands to read correctly against CARLA's fixed daylight exposure — measure against a reference frame from the real-time atmosphere rather than assuming a default. An overload also accepts a pre-built carla.TextureFloatColor panorama instead of `width`/`height`/`pixels`.
+    # --------------------------------------
+    - def_name: clear_sky_light_map
+      doc: >
+        Removes a sky light map set with `set_sky_light_map()` and restores the real-time atmosphere capture on every sky rig in the level.
+    # --------------------------------------
+    - def_name: has_sky_light_map
+      return: bool
+      doc: >
+        Returns whether a sky light map is currently active (set with `set_sky_light_map()` and not yet cleared).
     # --------------------------------------
     - def_name: cast_ray
       return: list(carla.LabelledPoint)
@@ -776,7 +894,7 @@
         doc: >
           The maximum distance to perform the projection
       doc: >
-        Projects the specified point to the desired direction in the scene. The functions casts a ray from location in a direction and returns a carla.Labelled object with the first geometry this ray intersects. If no geometry is found in the search_distance range the function returns `None`.
+        Projects the specified point to the desired direction in the scene. The functions casts a ray from location in a direction and returns a carla.LabelledPoint object with the first geometry this ray intersects. If no geometry is found in the search_distance range the function returns `None`.
     # --------------------------------------
     - def_name: ground_projection
       return: carla.LabelledPoint
@@ -925,6 +1043,14 @@
       Helper class part of carla.World that defines methods for creating debug shapes. By default, shapes last one second. They can be permanent, but take into account the resources needed to do so. Take a look at the snipets available for this class to learn how to debug easily in CARLA.
     # - METHODS ----------------------------
     methods:
+    - def_name: clear_debug_string
+      doc: >
+        Removes every debug string currently drawn.
+    # --------------------------------------
+    - def_name: clear_debug_shape
+      doc: >
+        Removes every debug shape currently drawn.
+    # --------------------------------------
     - def_name: draw_arrow
       params:
       - param_name: begin
@@ -960,6 +1086,11 @@
         param_units: seconds
         doc: >
           Shape's lifespan. By default it only lasts one frame. Set this to <code>0</code> for permanent shapes. 
+      - param_name: persistent_lines
+        type: bool
+        default: true
+        doc: >
+          Kept for backwards compatibility. The server ignores it; use <code>life_time</code> to control how long the shape lasts.
       doc: >
         Draws an arrow from `begin` to `end` pointing in that direction.
 
@@ -992,6 +1123,11 @@
         param_units: seconds
         doc: >
           Shape's lifespan. By default it only lasts one frame. Set this to <code>0</code> for permanent shapes. 
+      - param_name: persistent_lines
+        type: bool
+        default: true
+        doc: >
+          Kept for backwards compatibility. The server ignores it; use <code>life_time</code> to control how long the shape lasts.
       doc: >
         Draws a box, ussually to act for object colliders. 
         
@@ -1025,6 +1161,11 @@
         param_units: seconds
         doc: >
           Shape's lifespan. By default it only lasts one frame. Set this to <code>0</code> for permanent shapes. 
+      - param_name: persistent_lines
+        type: bool
+        default: true
+        doc: >
+          Kept for backwards compatibility. The server ignores it; use <code>life_time</code> to control how long the shape lasts.
       doc: >
         Draws a line in between `begin` and `end`.
     # --------------------------------------
@@ -1052,6 +1193,11 @@
         param_units: seconds
         doc: >
           Shape's lifespan. By default it only lasts one frame. Set this to <code>0</code> for permanent shapes. 
+      - param_name: persistent_lines
+        type: bool
+        default: true
+        doc: >
+          Kept for backwards compatibility. The server ignores it; use <code>life_time</code> to control how long the shape lasts.
       doc: >
         Draws a point `location`.
     # --------------------------------------
@@ -1082,6 +1228,11 @@
         param_units: seconds
         doc: >
           Shape's lifespan. By default it only lasts one frame. Set this to <code>0</code> for permanent shapes. 
+      - param_name: persistent_lines
+        type: bool
+        default: true
+        doc: >
+          Kept for backwards compatibility. The server ignores it; use <code>life_time</code> to control how long the shape lasts.
       doc: >
         Draws a string in a given location of the simulation which can only be seen server-side.
     # --------------------------------------

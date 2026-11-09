@@ -9,6 +9,9 @@ public class CarlaRGL : ModuleRules
         PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
         bEnableExceptions = true;
         bUseRTTI = true;
+        // UE 5.8 escalates -Wshadow to an error by default; keep it a warning,
+        // as upstream does for the Carla module.
+        ShadowVariableWarningLevel = WarningLevel.Warning;
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {

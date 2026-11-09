@@ -8,14 +8,13 @@
 waypoints and avoiding other vehicles. The agent also responds to traffic lights,
 traffic signs, and has different possible configurations. """
 
-import random
 import numpy as np
 import carla
 from agents.navigation.basic_agent import BasicAgent
 from agents.navigation.local_planner import RoadOption
 from agents.navigation.behavior_types import Cautious, Aggressive, Normal
 
-from agents.tools.misc import get_speed, positive, is_within_distance, compute_distance
+from agents.tools.misc import get_speed, positive
 
 class BehaviorAgent(BasicAgent):
     """
@@ -286,8 +285,10 @@ class BehaviorAgent(BasicAgent):
             else:
                 control = self.car_following_manager(vehicle, distance)
 
-        # 3: Intersection behavior
-        elif self._incoming_waypoint.is_junction and (self._incoming_direction in [RoadOption.LEFT, RoadOption.RIGHT]):
+        # 3: Intersection behavior. There is no incoming waypoint once the
+        # local planner's queue is empty, e.g. at the end of the route
+        elif (self._incoming_waypoint is not None and self._incoming_waypoint.is_junction
+              and self._incoming_direction in [RoadOption.LEFT, RoadOption.RIGHT]):
             target_speed = min([
                 self._behavior.max_speed,
                 self._speed_limit - 5])

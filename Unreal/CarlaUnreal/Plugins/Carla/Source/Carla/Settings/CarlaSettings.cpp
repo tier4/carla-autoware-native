@@ -85,6 +85,22 @@ static void LoadSettingsFromConfig(
     ConfigFile.GetString(S_CARLA_SERVER, TEXT("PrimaryIP"), Tmp);
     Settings.PrimaryIP = TCHAR_TO_UTF8(*Tmp);
     ConfigFile.GetInt(S_CARLA_SERVER,    TEXT("PrimaryPort"), Settings.PrimaryPort);
+    // tier4: the ROS 2 middleware can also come from the settings file
+    // ([CARLA/Server] RmwName=cyclonedds); -rmw= on the command line still wins.
+    FString RmwFromFile;
+    ConfigFile.GetString(S_CARLA_SERVER, TEXT("RmwName"), RmwFromFile);
+    if (!RmwFromFile.IsEmpty())
+    {
+      Settings.RmwName = RmwFromFile.ToLower();
+    }
+    // tier4: leaf of the ROS2 camera image topics (see UCarlaSettings).
+    ConfigFile.GetString(S_CARLA_SERVER, TEXT("ROS2CameraImageTopic"), Settings.ROS2CameraImageTopic);
+    // tier4: optional sensor QoS (see UCarlaSettings).
+    ConfigFile.GetString(S_CARLA_SERVER, TEXT("ROS2CameraQos"), Settings.ROS2CameraQos);
+    ConfigFile.GetString(S_CARLA_SERVER, TEXT("ROS2LidarQos"), Settings.ROS2LidarQos);
+    ConfigFile.GetString(S_CARLA_SERVER, TEXT("ROS2ImuQos"), Settings.ROS2ImuQos);
+    // tier4: MGRS projection ellipsoid (see UCarlaSettings).
+    ConfigFile.GetString(S_CARLA_SERVER, TEXT("AutowareEllipsoid"), Settings.AutowareEllipsoid);
   }
   ConfigFile.GetBool(S_CARLA_SERVER, TEXT("SynchronousMode"), Settings.bSynchronousMode);
   ConfigFile.GetBool(S_CARLA_SERVER, TEXT("DisableRendering"), Settings.bDisableRendering);
@@ -162,9 +178,45 @@ void UCarlaSettings::LoadSettings()
     {
       bDisableRendering = true;
     }
-    if (FParse::Param(FCommandLine::Get(), TEXT("-ros2")))
+    // FParse::Param only matches single-dash switches; also accept the
+    // historically documented "--ros2" spelling so it does not silently no-op.
+    if (FParse::Param(FCommandLine::Get(), TEXT("-ros2")) ||
+        FCString::Strifind(FCommandLine::Get(), TEXT("--ros2")) != nullptr)
     {
       ROS2 = true;
+    }
+    FString RmwValue;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rmw="), RmwValue))
+    {
+      RmwName = RmwValue.ToLower();
+    }
+    FString CameraImageTopicValue;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-camera-image-topic="), CameraImageTopicValue))
+    {
+      ROS2CameraImageTopic = CameraImageTopicValue;
+    }
+    FString QosValue;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-camera-qos="), QosValue))
+    {
+      ROS2CameraQos = QosValue;
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-lidar-qos="), QosValue))
+    {
+      ROS2LidarQos = QosValue;
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-imu-qos="), QosValue))
+    {
+      ROS2ImuQos = QosValue;
+    }
+    FString EllipsoidValue;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-autoware-ellipsoid="), EllipsoidValue))
+    {
+      AutowareEllipsoid = EllipsoidValue.ToLower();
+    }
+    int32 DomainIdValue;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros-domain-id="), DomainIdValue))
+    {
+      ROS2DomainId = DomainIdValue;
     }
   }
 }

@@ -14,9 +14,6 @@ public class CarlaTools :
   [CommandLine("-nv-omniverse")]
   bool EnableNVIDIAOmniverse = false;
 
-  [CommandLine("-osm2odr")]
-  bool EnableOSM2ODR = false;
-
 
 
   public CarlaTools(ReadOnlyTargetRules Target) :
@@ -57,9 +54,6 @@ public class CarlaTools :
         case "NV_OMNIVERSE":
           EnableNVIDIAOmniverse = true;
           break;
-        case "OSM2ODR":
-          EnableOSM2ODR = true;
-          break;
         default:
           Console.WriteLine($"Unknown option \"{Trimmed}\".");
           break;
@@ -69,11 +63,10 @@ public class CarlaTools :
     Action<bool, string, string> TestOptionalFeature = (enable, name, definition) =>
     {
       if (enable)
-        PrivateDefinitions.Add(name);
+        PrivateDefinitions.Add(definition);
       Console.WriteLine(string.Format("{0} is {1}.", name, enable ? "enabled" : "disabled"));
     };
     
-    TestOptionalFeature(EnableOSM2ODR, "OSM2ODR support", "WITH_OSM2ODR");
 
     PublicDependencyModuleNames.AddRange(new string[]
     {
@@ -120,7 +113,23 @@ public class CarlaTools :
       "MeshDescription",
       "MeshUtilitiesCommon",
       "Projects",
-      "PCG"
+      "PCG",
+      // CarlaCrosswalkNavBuilder: package save/delete helpers.
+      "SourceControl",
+      // carla-digitaltwins port: terrain heightmap sampling, road render
+      // export, street-view fetch, TL tool widget, OSM street map access.
+      "StreetMapRuntime",
+      "StreetMapImporting",
+      "ImageWriteQueue",
+      "ImageWrapper",
+      "ImageCore",
+      "EngineSettings",
+      "InputCore",
+      "AppFramework",
+      "DesktopPlatform",
+      "LevelEditor",
+      // SkyPreviewSubsystem: editor-only sky rig for maps that save none.
+      "EditorSubsystem"
     });
 
     if (EnableNVIDIAOmniverse)
@@ -137,10 +146,7 @@ public class CarlaTools :
       throw new NotImplementedException();
     }
 
-    if (EnableOSM2ODR)
-    {
-      // @TODO
-      throw new NotImplementedException();
-    }
+    // OSM2ODR needs no extra library: the converter is compiled into
+    // libcarla-server, which this module already links.
   }
 }

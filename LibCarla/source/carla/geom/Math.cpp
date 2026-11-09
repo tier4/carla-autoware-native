@@ -115,6 +115,9 @@ namespace geom {
   }
 
   Vector3D Math::GetForwardVector(const Rotation &rotation) {
+    // Forward = `Rotation::RotateVector({1, 0, 0})`. `+pitch` tilts the
+    // forward axis up, so the z component is `+sin(pitch)` (engine /
+    // CARLA 0.9.x convention).
     const float cp = std::cos(ToRadians(rotation.pitch));
     const float sp = std::sin(ToRadians(rotation.pitch));
     const float cy = std::cos(ToRadians(rotation.yaw));
@@ -123,6 +126,9 @@ namespace geom {
   }
 
   Vector3D Math::GetRightVector(const Rotation &rotation) {
+    // Right = `Rotation::RotateVector({0, 1, 0})`. `+roll` tilts the right
+    // axis down, so the z component is `-cos(pitch) * sin(roll)` (engine /
+    // CARLA 0.9.x convention).
     const float cy = std::cos(ToRadians(rotation.yaw));
     const float sy = std::sin(ToRadians(rotation.yaw));
     const float cr = std::cos(ToRadians(rotation.roll));
@@ -136,6 +142,8 @@ namespace geom {
   }
 
   Vector3D Math::GetUpVector(const Rotation &rotation) {
+    // Up = `Rotation::RotateVector({0, 0, 1})`. Third column of the
+    // engine / CARLA 0.9.x rotation matrix.
     const float cy = std::cos(ToRadians(rotation.yaw));
     const float sy = std::sin(ToRadians(rotation.yaw));
     const float cr = std::cos(ToRadians(rotation.roll));

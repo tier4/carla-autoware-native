@@ -11,11 +11,18 @@
 #include "carla/geom/Transform.h"
 #include "carla/ros2/AutowareLocalizationConfig.h"
 #include "carla/ros2/ROS2CallbackData.h"
+#include "carla/ros2/middleware/Middleware.h"
+#include "carla/ros2/middleware/MiddlewareConfig.h"
+#include "carla/ros2/middleware/QosProfile.h"
 #include "carla/streaming/detail/Types.h"
 
-#include <unordered_set>
-#include <unordered_map>
+#include <atomic>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // forward declarations
@@ -31,9 +38,8 @@ namespace carla {
       class LidarData;
       class SemanticLidarData;
       class RadarData;
-      class VehicleStatusEvent;
     }
-    namespace s11n{
+    namespace s11n {
       struct VehicleStatusData;
     }
   }
@@ -42,74 +48,113 @@ namespace carla {
 namespace carla {
 namespace ros2 {
 
-  class CarlaPublisher;
-  class CarlaTransformPublisher;
-  class CarlaClockPublisher;
-  class CarlaEgoVehicleControlSubscriber;
-  class AutowareController;
-  class AutowarePublisher;
-  class AutowareLocalizationPublisher;
-  class BasicSubscriber;
-  class BasicPublisher;
+class BasePublisher;
+class BaseSubscriber;
+class AutowareVehicleStatusPublisher;
+class AutowareLocalizationPublisher;
+class CarlaCameraPublisher;
+class CarlaClockPublisher;
+class CarlaTransformPublisher;
+class BasicSubscriber;
+class BasicPublisher;
 
-class ROS2
-{
-  public:
-
+class ROS2 {
+public:
   // deleting copy constructor for singleton
-  ROS2(const ROS2& obj) = delete;
+  ROS2(const ROS2 &obj) = delete;
   static std::shared_ptr<ROS2> GetInstance() {
     if (!_instance)
       _instance = std::shared_ptr<ROS2>(new ROS2);
     return _instance;
   }
 
-  // utility
-  static std::pair<int32_t, uint32_t> Carla2RosTime(double timestamp) {
-    double integral;
-    const double fractional = modf(timestamp, &integral);
-    const double multiplier = 1000000000.0;
-    const auto seconds = static_cast<int32_t>(integral);
-    const auto nanoseconds = static_cast<uint32_t>(fractional * multiplier);
-
-    return std::make_pair(seconds, nanoseconds);
-  }
-
   // general
-  void Enable(bool enable);
+  /// Enable or disable ROS 2 publishing. When enabling, @a middleware selects the
+  /// DDS middleware; it must have been compiled into the shared library.
+  /// @a domain_id selects the ROS 2 domain id for the chosen middleware;
+  /// kUnsetDomainId (the default) keeps each middleware's native default.
+  /// @return true on success, false if the requested middleware is unavailable
+  /// (ROS 2 is then left disabled).
+  bool Enable(bool enable, Middleware middleware = Middleware::FastDDS,
+      int domain_id = kUnsetDomainId);
   void Shutdown();
   bool IsEnabled() { return _enabled; }
   void SetFrame(uint64_t frame);
   void SetTimestamp(double timestamp);
 
-  // TF publishing control
-  void SetPublishTF(bool publish_tf);
-  bool GetPublishTF() const { return _publish_tf; }
+  // Global TF gate (tier4 port): when false, no sensor broadcasts its
+  // transform on /tf. Complements the per-sensor publish_tf flag set at
+  // RegisterSensor time; both must be true for a transform to go out.
+  // Exposed to the client through World.set_publish_tf (later phase).
+  void SetPublishTF(bool publish_tf) { _publish_tf = publish_tf; }
+  bool GetPublishTF() const { return _publish_tf.load(); }
 
-  // ros_name managing
-  void AddActorRosName(void *actor, std::string ros_name);
-  void AddActorParentRosName(void *actor, void* parent);
-  void RemoveActorRosName(void *actor);
-  void UpdateActorRosName(void *actor, std::string ros_name);
-  std::string GetActorRosName(void *actor);
-  std::string GetActorParentRosName(void *actor);
+  // actor registration API: replaces the legacy AddActorRosName /
+  // GetActorRosName / GetActorParentRosName surface that PR-2 stubbed and
+  // PR-4 retired. The plugin calls RegisterSensor / RegisterVehicle when an
+  // actor spawns and Unregister* when it destroys; ROS2 builds the topic
+  // names, owns per-sensor publishers + TF, and routes subscriber
+  // callbacks. The vehicle gets exactly one control subscriber: the Ackermann
+  // subscriber when enable_ackermann_control is true, otherwise the direct
+  // VehicleControl one. The two control topics are mutually exclusive so they
+  // cannot contend frame to frame.
+  void RegisterSensor(
+      void *actor, std::string ros_name, std::string frame_id, bool publish_tf);
+  void UnregisterSensor(void *actor);
+  // The vehicle gets exactly one control subscriber. enable_autoware_control
+  // wins over enable_ackermann_control (tier4 gave the Autoware command path
+  // priority); it wires the six /control/command/* + /vehicle/engage
+  // subscribers and marks the vehicle as the Autoware ego so
+  // ProcessDataFromStatusSensor accepts its status stream. Default behavior
+  // (both flags false) is unchanged for non-Autoware users.
+  void RegisterVehicle(
+      void *actor, std::string ros_name, std::string frame_id, ActorCallback callback,
+      bool enable_ackermann_control = false,
+      bool enable_autoware_control = false);
+  void UnregisterVehicle(void *actor);
 
-  // ros_topic_name managing
+  // Exact-topic-name override (tier4 port of the ros_topic_name attribute
+  // flow). When set (non-empty), the actor's publishers/subscribers bind to
+  // "rt[/]<ros_topic_name>" instead of the "rt/carla/[parent/]ros_name"
+  // convention; multi-topic sensors still append their per-topic suffixes.
+  // The UE side reads the blueprint's "ros_topic_name" attribute and calls
+  // AddActorRosTopicName before the first data tick (next phase); Remove also
+  // drops the actor's cached publishers so a re-registration rebinds cleanly.
   void AddActorRosTopicName(void *actor, std::string ros_topic_name);
+  // tier4: leaf of every camera image topic ("image" by default, as upstream).
+  // Applies to camera publishers created after the call.
+  void SetCameraImageTopicSuffix(std::string suffix);
+  // tier4: optional QoS of the sensor data topics, "<reliability>[:<depth>]"
+  // (see QosProfile::FromString). Unset (the default) keeps the middleware
+  // default, as upstream. Applies to publishers created after the call.
+  enum class SensorQosClass : uint8_t { Camera = 0, Lidar = 1, Imu = 2 };
+  bool SetSensorQos(SensorQosClass sensor_class, const std::string &spec);
   void RemoveActorRosTopicName(void *actor);
-  void UpdateActorRosTopicName(void *actor, std::string ros_name);
-  std::string GetActorRosTopicName(void *actor);
+  std::string GetActorRosTopicName(void *actor) const;
 
-  // callbacks
-  void AddActorCallback(void* actor, std::string ros_name, ActorCallback callback);
-  void RemoveActorCallback(void* actor);
-  void RemoveBasicSubscriberCallback(void* actor);
-  void AddBasicSubscriberCallback(void* actor, std::string ros_name, ActorMessageCallback callback);
+  // Topic-hierarchy seam used by the plugin's attach_actor path: tells ROS2
+  // that `actor` should publish under `parent`'s ros_name prefix. Walking
+  // the parent chain is the publisher-side concern.
+  void AddActorParentRosName(void *actor, void *parent);
+
+  // Demo subscriber callbacks (only compiled when WITH_ROS2_DEMO).
+  void RemoveBasicSubscriberCallback(void *actor);
+  void AddBasicSubscriberCallback(
+      void *actor, std::string ros_name, ActorMessageCallback callback);
 
   // enabling streams to publish
-  void EnableStream(carla::streaming::detail::stream_id_type id) { _publish_stream.insert(id); }
-  bool IsStreamEnabled(carla::streaming::detail::stream_id_type id) { return _publish_stream.count(id) > 0; }
-  void ResetStreams() { _publish_stream.clear(); }
+  void EnableStream(carla::streaming::detail::stream_id_type id) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _publish_stream.insert(id);
+  }
+  bool IsStreamEnabled(carla::streaming::detail::stream_id_type id) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    return _publish_stream.count(id) > 0;
+  }
+  void ResetStreams() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _publish_stream.clear();
+  }
 
   // receiving data to publish
   void ProcessDataFromCamera(
@@ -124,24 +169,6 @@ class ROS2
       carla::streaming::detail::stream_id_type stream_id,
       const carla::geom::Transform sensor_transform,
       const carla::geom::GeoLocation &data,
-      const carla::geom::Transform &sensor_world_transform,
-      void *actor = nullptr);
-  // ue5-dev compatible overload (without sensor_world_transform)
-  void ProcessDataFromGNSS(
-      uint64_t sensor_type,
-      carla::streaming::detail::stream_id_type stream_id,
-      const carla::geom::Transform sensor_transform,
-      const carla::geom::GeoLocation &data,
-      void *actor = nullptr) {
-    ProcessDataFromGNSS(sensor_type, stream_id, sensor_transform, data, sensor_transform, actor);
-  }
-  void ProcessDataFromAutowareGNSS(
-      uint64_t sensor_type,
-      carla::streaming::detail::stream_id_type stream_id,
-      const carla::geom::Transform sensor_transform,
-      const carla::geom::GeoLocation &data,
-      const carla::geom::Transform &sensor_world_transform,
-      const double mgrs_offset_position[3],
       void *actor = nullptr);
   void ProcessDataFromIMU(
       uint64_t sensor_type,
@@ -151,6 +178,9 @@ class ROS2
       carla::geom::Vector3D gyroscope,
       float compass,
       void *actor = nullptr);
+  // tier4: one sample of sensor.other.imu_highprecision. It is stamped
+  // time_offset_seconds before the current frame stamp, so several samples per
+  // frame (one per physics substep) carry their own time.
   void ProcessDataFromIMUStamped(
       double time_offset_seconds,
       uint64_t sensor_type,
@@ -167,6 +197,19 @@ class ROS2
       const carla::SharedBufferView buffer,
       int W, int H, float Fov,
       void *actor = nullptr);
+  // Legacy overload: publishes the plain XYZI PointCloud2 layout. Kept so
+  // call sites without a sensor description still compile/work.
+  void ProcessDataFromLidar(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      carla::sensor::data::LidarData &data,
+      void *actor = nullptr);
+  // tier4 autoware-support overload: when the caller provides the sensor's
+  // channel count and vertical FOV limits (degrees), the publisher emits the
+  // extended Autoware XYZIRCAEDT layout instead of plain XYZI (requires
+  // channel_count >= 2 to derive per-channel elevations; falls back to XYZI
+  // otherwise).
   void ProcessDataFromLidar(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
@@ -176,15 +219,6 @@ class ROS2
       float lower_fov_limit,
       carla::sensor::data::LidarData &data,
       void *actor = nullptr);
-  // ue5-dev compatible overload (without channel_count, fov)
-  void ProcessDataFromLidar(
-      uint64_t sensor_type,
-      carla::streaming::detail::stream_id_type stream_id,
-      const carla::geom::Transform sensor_transform,
-      carla::sensor::data::LidarData &data,
-      void *actor = nullptr) {
-    ProcessDataFromLidar(sensor_type, stream_id, sensor_transform, 0, 0.f, 0.f, data, actor);
-  }
   void ProcessDataFromSemanticLidar(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
@@ -211,46 +245,145 @@ class ROS2
       const carla::geom::Transform sensor_transform,
       uint32_t other_actor,
       carla::geom::Vector3D impulse,
-      void* actor);
+      void *actor);
+  // Vehicle-status stream (Autoware): decodes the packed status sample into
+  // the six /vehicle/status/* report publishers. `vehicle_actor` is the
+  // parent vehicle the status sensor is attached to (must be registered with
+  // enable_autoware_control); `actor` is the sensor actor itself.
   void ProcessDataFromStatusSensor(
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,
       const carla::geom::Transform sensor_transform,
-      const sensor::s11n::VehicleStatusData &data,
-      const AutowareLocalizationConfig &localization_config,
+      const carla::sensor::s11n::VehicleStatusData &data,
       void *vehicle_actor,
       void *actor);
+  // tier4: sensorless Autoware localization (5cf27b660). Publishes the
+  // ground-truth pose of an Autoware-controlled vehicle in the Autoware map
+  // frame when config.enabled; base_link_transform is the CARLA world transform
+  // of the vehicle status sensor (meters, degrees).
+  void ProcessAutowareLocalization(
+      const AutowareLocalizationConfig &config,
+      const carla::geom::Transform base_link_transform,
+      const carla::sensor::s11n::VehicleStatusData &data,
+      void *vehicle_actor);
+  // Autoware GNSS: publishes the sensor world transform (+ MGRS map offset)
+  // as <base>/pose and <base>/pose_with_covariance instead of NavSatFix.
+  void ProcessDataFromAutowareGNSS(
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      const carla::geom::GeoLocation &data,
+      const carla::geom::Transform &sensor_world_transform,
+      const double mgrs_offset_position[3],
+      void *actor = nullptr);
 
-    uint32_t GetDomainId() const noexcept { return _domain_id; }
+private:
+  struct ActorRegistration {
+    std::string ros_name;
+    std::string frame_id;
+    bool publish_tf{true};
+  };
 
-  private:
-  std::pair<std::shared_ptr<CarlaPublisher>, std::shared_ptr<CarlaTransformPublisher>> GetOrCreateSensor(int type, carla::streaming::detail::stream_id_type id, void* actor);
+  struct Stamp {
+    int32_t seconds{0};
+    uint32_t nanoseconds{0};
+  };
 
-  // sigleton
-  ROS2() {};
+  // Takes _mutex.
+  Stamp GetStamp() const;
 
-  bool ObtainDomainId() noexcept;
+  // The helpers below up to ResolveAutoStreamSuffix expect _mutex to be held
+  // by the caller, except the GetOrCreate* factories and PublishTransform,
+  // which take it themselves.
+  void UnregisterSensorLocked(void *actor);
+  void DropPublishersLocked(void *actor);
+  // True while the actor is registered or carries a topic override; late
+  // deliveries for destroyed actors must not re-create their publishers.
+  bool IsKnownActorLocked(void *actor) const;
+
+  // Resolves an actor's `rt/carla/[parent/]ros_name` base topic by walking the
+  // parent chain. Returns empty if the actor is not registered.
+  std::string BuildBaseTopicName(void *actor) const;
+  // True when the actor carries a non-empty ros_topic_name override, i.e.
+  // BuildBaseTopicName returns an exact user-chosen topic. Single-topic
+  // publishers then skip their conventional suffix (tier4 semantics).
+  bool HasTopicOverride(void *actor) const;
+  std::string LookupRosName(void *actor) const;
+  std::string LookupFrameId(void *actor) const;
+  std::string BuildParentChain(void *actor) const;
+
+  // Lazy-creates the per-sensor publisher matching `type` (an ESensors enum
+  // declared in ROS2.cpp). Returns the BasePublisher pointer; the caller
+  // dynamic_pointer_casts to the concrete subtype for typed Write() calls.
+  std::shared_ptr<BasePublisher> GetOrCreateSensor(
+      int type, carla::streaming::detail::stream_id_type id, void *actor);
+
+  // Lazy-creates the per-sensor transform publisher, gated on the actor's
+  // publish_tf flag (set at RegisterSensor time). Returns nullptr if the
+  // sensor opted out.
+  std::shared_ptr<CarlaTransformPublisher> GetOrCreateTransformPublisherLocked(void *actor);
+
+  // Broadcasts the sensor transform on /tf. Resolves the publisher and frame
+  // names under the lock, then writes outside it.
+  void PublishTransform(
+      void *actor, const Stamp &stamp, const carla::geom::Transform &sensor_transform);
+
+  // Camera-side counterpart of GetOrCreateSensor for publishers that inherit
+  // CarlaCameraPublisher (the RGB / Depth / SS / IS / Normals / OpticalFlow
+  // unified base). DVS uses its own composite via GetOrCreateSensor.
+  template <typename CameraT>
+  std::shared_ptr<CarlaCameraPublisher> GetOrCreateCameraSensor(
+      carla::streaming::detail::stream_id_type id,
+      void *actor,
+      const std::string &default_prefix);
+
+  // Resolves a `prefix__` placeholder by appending the stream id, persisting
+  // the resolved name in `_registrations` so subsequent lookups see it.
+  void ResolveAutoStreamSuffix(
+      void *actor, const std::string &prefix, carla::streaming::detail::stream_id_type id);
+
+  // singleton
+  ROS2() = default;
 
   static std::shared_ptr<ROS2> _instance;
 
-  bool _enabled { false };
-  bool _publish_tf { true };
-  uint64_t _frame { 0 };
-  int32_t _seconds { 0 };
-  uint32_t _nanoseconds { 0 };
-  uint32_t _domain_id { 0U };
-  std::unordered_map<void *, std::string> _actor_ros_name;
-  std::unordered_map<void *, std::string> _actor_ros_topic_name;
-  std::unordered_map<void *, std::vector<void*> > _actor_parent_ros_name;
-  std::shared_ptr<CarlaEgoVehicleControlSubscriber> _controller;
-  std::shared_ptr<AutowareController> _autoware_controller;
-  std::shared_ptr<AutowarePublisher> _autoware_publisher;
-  std::shared_ptr<AutowareLocalizationPublisher> _autoware_localization_publisher;
+  // Camera readbacks publish from parallel render-thread workers while the
+  // game thread registers and destroys actors, so the maps below and the
+  // stamp are guarded by this mutex.
+  mutable std::mutex _mutex;
+
+  std::atomic<bool> _enabled{false};
+  std::atomic<bool> _publish_tf{true};
+  std::atomic<uint64_t> _frame{0};
+  Stamp _stamp;
+
+  std::unordered_map<void *, ActorRegistration> _registrations;
+  // Exact-topic overrides; empty string means "no override".
+  std::unordered_map<void *, std::string> _actor_ros_topic_names;
+  // Vehicles registered with enable_autoware_control — the only ones whose
+  // vehicle-status stream is accepted and published.
+  std::unordered_set<void *> _autoware_vehicles;
+  // Lazily-created six-report publisher per Autoware vehicle. NOTE: report
+  // topics are fixed absolute names, so only one Autoware ego per simulation
+  // is supported (tier4 semantics).
+  std::unordered_map<void *, std::shared_ptr<AutowareVehicleStatusPublisher>>
+      _autoware_status_publishers;
+  // tier4: sensorless localization publisher per Autoware vehicle (fixed topics,
+  // so one Autoware ego per simulation, as for the status publishers).
+  std::unordered_map<void *, std::shared_ptr<AutowareLocalizationPublisher>>
+      _autoware_localization_publishers;
+  std::unordered_map<void *, std::vector<void *>> _actor_parents;
   std::shared_ptr<CarlaClockPublisher> _clock_publisher;
-  std::unordered_map<void *, std::shared_ptr<CarlaPublisher>> _publishers;
+  std::unordered_map<void *, std::shared_ptr<BasePublisher>> _publishers;
+  std::unordered_map<void *, std::shared_ptr<CarlaCameraPublisher>> _camera_publishers;
   std::unordered_map<void *, std::shared_ptr<CarlaTransformPublisher>> _transforms;
   std::unordered_set<carla::streaming::detail::stream_id_type> _publish_stream;
   std::unordered_map<void *, ActorCallback> _actor_callbacks;
+  std::unordered_multimap<void *, std::shared_ptr<BaseSubscriber>> _subscribers;
+  // tier4: see SetCameraImageTopicSuffix.
+  std::string _camera_image_topic_suffix{"image"};
+  // tier4: see SetSensorQos (indexed by SensorQosClass).
+  std::optional<QosProfile> _sensor_qos[3];
 #if defined(WITH_ROS2_DEMO)
   std::shared_ptr<BasicSubscriber> _basic_subscriber;
   std::shared_ptr<BasicPublisher> _basic_publisher;
@@ -258,5 +391,5 @@ class ROS2
 #endif
 };
 
-} // namespace ros2
-} // namespace carla
+}  // namespace ros2
+}  // namespace carla

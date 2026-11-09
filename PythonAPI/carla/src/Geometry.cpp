@@ -6,7 +6,14 @@
 
 #include <PythonAPI.h>
 
+#include <carla/geom/Acceleration.h>
+#include <carla/geom/AngularVelocity.h>
 #include <carla/geom/GeoProjectionsParams.h>
+#include <carla/geom/Quaternion.h>
+#include <carla/geom/RightHandedRotation.h>
+#include <carla/geom/RightHandedTransform.h>
+#include <carla/geom/RightHandedVector3D.h>
+#include <carla/geom/Velocity.h>
 
 #include <limits>
 
@@ -35,6 +42,10 @@ static auto GetTransformMatrix(const carla::geom::Transform &self) {
 
 static auto GetInverseTransformMatrix(const carla::geom::Transform &self) {
   return BuildMatrix(self.GetInverseMatrix());
+}
+
+static auto GetRightHandedTransformMatrix(const carla::geom::RightHandedTransform &self) {
+  return BuildMatrix(self.GetMatrix());
 }
 
 static auto Cross(const carla::geom::Vector3D &self, const carla::geom::Vector3D &other) {
@@ -80,7 +91,7 @@ static boost::python::object OptionalToPythonObject(const boost::optional<T>& op
 void export_geom() {
   using namespace boost::python;
   namespace cg = carla::geom;
-  class_<std::vector<cg::Vector2D>>("vector_of_vector2D")
+  class_<std::vector<cg::Vector2D>>("VectorOfVector2D")
       .def(boost::python::vector_indexing_suite<std::vector<cg::Vector2D>>())
       .def(self_ns::str(self_ns::self))
   ;
@@ -91,7 +102,8 @@ void export_geom() {
     .def_readwrite("y", &cg::Vector2D::y)
     .def("squared_length", &cg::Vector2D::SquaredLength)
     .def("length", &cg::Vector2D::Length)
-    .def("make_unit_vector", &cg::Vector2D::MakeUnitVector)
+    .def("make_unit_vector", &cg::Vector2D::MakeUnitVector,
+        (arg("epsilon") = 2.0f * std::numeric_limits<float>::epsilon()))
     .def("__eq__", &cg::Vector2D::operator==)
     .def("__ne__", &cg::Vector2D::operator!=)
     .def(self += self)
@@ -118,7 +130,8 @@ void export_geom() {
     .def_readwrite("z", &cg::Vector3D::z)
     .def("length", &cg::Vector3D::Length)
     .def("squared_length", &cg::Vector3D::SquaredLength)
-    .def("make_unit_vector", &cg::Vector3D::MakeUnitVector)
+    .def("make_unit_vector", &cg::Vector3D::MakeUnitVector,
+        (arg("epsilon") = 2.0f * std::numeric_limits<float>::epsilon()))
     .def("cross", &Cross, (arg("vector")))
     .def("dot", &Dot, (arg("vector")))
     .def("dot_2d", &Dot2D, (arg("vector")))
@@ -150,9 +163,30 @@ void export_geom() {
     .add_property("y", +[](const cg::Location &self) { return self.y; }, +[](cg::Location &self, float y) { self.y = y; })
     .add_property("z", +[](const cg::Location &self) { return self.z; }, +[](cg::Location &self, float z) { self.z = z; })
     .def("distance", &cg::Location::Distance, (arg("location")))
+    .def("to_right_handed", &cg::Location::ToRightHanded)
+    .def("from_right_handed", &cg::Location::FromRightHanded, (arg("location")))
+    .staticmethod("from_right_handed")
     .def("__eq__", &cg::Location::operator==)
     .def("__ne__", &cg::Location::operator!=)
     .def("__abs__", &cg::Location::Abs)
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cg::Velocity, bases<cg::Vector3D>>("Velocity")
+    .def(init<float, float, float>((arg("x")=0.0f, arg("y")=0.0f, arg("z")=0.0f)))
+    .def(init<const cg::Vector3D &>((arg("rhs"))))
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cg::AngularVelocity, bases<cg::Vector3D>>("AngularVelocity")
+    .def(init<float, float, float>((arg("x")=0.0f, arg("y")=0.0f, arg("z")=0.0f)))
+    .def(init<const cg::Vector3D &>((arg("rhs"))))
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cg::Acceleration, bases<cg::Vector3D>>("Acceleration")
+    .def(init<float, float, float>((arg("x")=0.0f, arg("y")=0.0f, arg("z")=0.0f)))
+    .def(init<const cg::Vector3D &>((arg("rhs"))))
     .def(self_ns::str(self_ns::self))
   ;
 
@@ -165,8 +199,77 @@ void export_geom() {
     .def("get_right_vector", &cg::Rotation::GetRightVector)
     .def("get_up_vector", &cg::Rotation::GetUpVector)
     .def("get_normalized", &cg::Rotation::Normalize)
+    .def("to_right_handed", &cg::Rotation::ToRightHanded)
+    .def("from_right_handed", &cg::Rotation::FromRightHanded, (arg("rotation")))
+    .staticmethod("from_right_handed")
     .def("__eq__", &cg::Rotation::operator==)
     .def("__ne__", &cg::Rotation::operator!=)
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cg::Quaternion>("Quaternion")
+    .def(init<float, float, float, float>((arg("x")=0.0f, arg("y")=0.0f, arg("z")=0.0f, arg("w")=1.0f)))
+    .def(init<const cg::Rotation &>((arg("rotation"))))
+    .def(init<const cg::RightHandedRotation &>((arg("rotation"))))
+    .def_readwrite("x", &cg::Quaternion::x)
+    .def_readwrite("y", &cg::Quaternion::y)
+    .def_readwrite("z", &cg::Quaternion::z)
+    .def_readwrite("w", &cg::Quaternion::w)
+    .def("rotator", &cg::Quaternion::Rotator)
+    .def("to_right_handed_rotation", &cg::Quaternion::ToRightHandedRotation)
+    .def("get_forward_vector", &cg::Quaternion::GetForwardVector)
+    .def("get_right_vector", &cg::Quaternion::GetRightVector)
+    .def("get_up_vector", &cg::Quaternion::GetUpVector)
+    .def("conjugate", &cg::Quaternion::Conjugate)
+    .def("inverse", &cg::Quaternion::Inverse)
+    .def("length", &cg::Quaternion::Length)
+    .def("unit_quaternion", &cg::Quaternion::UnitQuaternion)
+    .def("__eq__", &cg::Quaternion::operator==)
+    .def("__ne__", &cg::Quaternion::operator!=)
+    .def(self * self)
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  // ---------------------------------------------------------------------------
+  // Right-handed (ROS / REP-103 "FLU") boundary types. See
+  // Docs/coordinate_conventions.md -- these are the only place a CARLA pose
+  // changes handedness, and they are never returned by the simulator itself.
+  // ---------------------------------------------------------------------------
+
+  class_<cg::RightHandedVector3D>("RightHandedVector3D")
+    .def(init<float, float, float>((arg("x")=0.0f, arg("y")=0.0f, arg("z")=0.0f)))
+    .def_readwrite("x", &cg::RightHandedVector3D::x)
+    .def_readwrite("y", &cg::RightHandedVector3D::y)
+    .def_readwrite("z", &cg::RightHandedVector3D::z)
+    .def("to_left_handed", +[](const cg::RightHandedVector3D &self) {
+      return static_cast<cg::Vector3D>(self);
+    })
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cg::RightHandedRotation>("RightHandedRotation")
+    .def(init<float, float, float>((arg("roll")=0.0f, arg("pitch")=0.0f, arg("yaw")=0.0f)))
+    .def_readwrite("roll", &cg::RightHandedRotation::roll)
+    .def_readwrite("pitch", &cg::RightHandedRotation::pitch)
+    .def_readwrite("yaw", &cg::RightHandedRotation::yaw)
+    .def("get_quaternion", +[](const cg::RightHandedRotation &self) {
+      return cg::Quaternion(self);
+    })
+    .def("__eq__", &cg::RightHandedRotation::operator==)
+    .def("__ne__", &cg::RightHandedRotation::operator!=)
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cg::RightHandedTransform>("RightHandedTransform")
+    .def(init<cg::RightHandedVector3D, cg::RightHandedRotation>(
+        (arg("location")=cg::RightHandedVector3D(),
+         arg("rotation")=cg::RightHandedRotation())))
+    .def_readwrite("location", &cg::RightHandedTransform::location)
+    .def_readwrite("rotation", &cg::RightHandedTransform::rotation)
+    .def("get_quaternion", &cg::RightHandedTransform::GetQuaternion)
+    .def("get_matrix", &GetRightHandedTransformMatrix)
+    .def("__eq__", &cg::RightHandedTransform::operator==)
+    .def("__ne__", &cg::RightHandedTransform::operator!=)
     .def(self_ns::str(self_ns::self))
   ;
 
@@ -189,12 +292,15 @@ void export_geom() {
     .def("get_up_vector", &cg::Transform::GetUpVector)
     .def("get_matrix", &GetTransformMatrix)
     .def("get_inverse_matrix", &GetInverseTransformMatrix)
+    .def("to_right_handed", &cg::Transform::ToRightHanded)
+    .def("from_right_handed", &cg::Transform::FromRightHanded, (arg("transform")))
+    .staticmethod("from_right_handed")
     .def("__eq__", &cg::Transform::operator==)
     .def("__ne__", &cg::Transform::operator!=)
     .def(self_ns::str(self_ns::self))
   ;
 
-  class_<std::vector<cg::Transform>>("vector_of_transform")
+  class_<std::vector<cg::Transform>>("VectorOfTransform")
       .def(boost::python::vector_indexing_suite<std::vector<cg::Transform>>())
       .def(self_ns::str(self_ns::self))
   ;
@@ -238,7 +344,14 @@ void export_geom() {
   .def_readwrite("offset_z", &cg::OffsetTransform::offset_z)
   .def_readwrite("offset_cos_h", &cg::OffsetTransform::offset_cos_h)
   .def_readwrite("offset_sin_h", &cg::OffsetTransform::offset_sin_h)
-  .def("ApplyTransformation", &cg::OffsetTransform::ApplyTransformation)
+  .def("apply_transform", &cg::OffsetTransform::ApplyTransformation, (arg("location")))
+  // Deprecated: shipped as CamelCase, which reads like a class among snake_case
+  // methods. Documented, so it keeps working and warns instead of disappearing.
+  .def("ApplyTransformation", +[](const cg::OffsetTransform &self, const cg::Location &location) {
+      PyErr_WarnEx(PyExc_DeprecationWarning,
+          "ApplyTransformation is deprecated, use apply_transform instead", 1);
+      return self.ApplyTransformation(location);
+    }, (arg("location")))
   .def("__eq__", &cg::OffsetTransform::operator==)
   ;
 

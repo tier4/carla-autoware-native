@@ -1,39 +1,53 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma de Barcelona (UAB).
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
+// de Barcelona (UAB).
+//
 // This work is licensed under the terms of the MIT license.
 // For a copy, see <https://opensource.org/licenses/MIT>.
 
 #pragma once
 
-#include <memory>
+#include "carla/ros2/publishers/BasePublisher.h"
 
-#include "CarlaPublisher.h"
+#include <cstdint>
+#include <memory>
 
 namespace carla {
 namespace ros2 {
 
-/**
- * @note This class has to inherit from CarlaPublisher only to be inserted in ROS2::_publishers map.
- * The functionality of CarlaPublisher is used internally.
- */
-class AutowareGNSSPublisher : public CarlaPublisher {
-  public:
-    AutowareGNSSPublisher(const char* ros_name = "", const char* parent = "", const char* ros_topic_name = "");
-    ~AutowareGNSSPublisher();
-    AutowareGNSSPublisher(const AutowareGNSSPublisher&);
-    AutowareGNSSPublisher& operator=(const AutowareGNSSPublisher&);
-    AutowareGNSSPublisher(AutowareGNSSPublisher&&);
-    AutowareGNSSPublisher& operator=(AutowareGNSSPublisher&&);
+// Port of tier4's AutowareGNSSPublisher: a dual-topic pose publisher fed by
+// the Autoware GNSS sensor. Publishes the sensor's *world* transform (plus an
+// optional MGRS map offset) instead of geodetic coordinates:
+//   <base_topic>/pose                 geometry_msgs/Pose (bare pose, no header)
+//   <base_topic>/pose_with_covariance geometry_msgs/PoseWithCovarianceStamped
+// frame_id (used in the stamped message header) is "map" per tier4's design.
+// QoS RELIABLE / VOLATILE / KEEP_LAST depth 1 per tier4.
+// Dual-topic structure mirrors CarlaCameraPublisher (image_raw + camera_info).
+class AutowareGNSSPublisher : public BasePublisher {
+public:
+  AutowareGNSSPublisher(std::string base_topic_name, std::string frame_id);
+  ~AutowareGNSSPublisher() override;
 
-    bool Init(DomainId domain_id);
-    bool Init(const TopicConfig& pose_config, const TopicConfig& pose_config_with_covariance_stamped);
-    bool Publish();
-    void SetData(int32_t seconds, uint32_t nanoseconds, const float* position, const float* orientation);
-    void SetData(int32_t seconds, uint32_t nanoseconds, const float* position, const float* orientation, const double* mgrs_offset_position);
-    const char* type() const override { return "Autoware GNSS"; }
+  AutowareGNSSPublisher(const AutowareGNSSPublisher &) = delete;
+  AutowareGNSSPublisher &operator=(const AutowareGNSSPublisher &) = delete;
 
-  private:
-    class Implementation;
-    std::shared_ptr<Implementation> _impl;
+  /// Fill both pose messages from the sensor's CARLA world transform
+  /// (translation in meters, rotation pitch/yaw/roll in degrees) plus the
+  /// MGRS map-origin offset in meters. Pass {0,0,0} offsets when no
+  /// georeference is configured.
+  bool Write(
+      std::int32_t seconds,
+      std::uint32_t nanoseconds,
+      float tx, float ty, float tz,
+      float pitch_deg, float yaw_deg, float roll_deg,
+      double mgrs_offset_x, double mgrs_offset_y, double mgrs_offset_z);
+
+  /// Publishes both topics.
+  bool Publish() override;
+
+private:
+  class Impl;
+  std::shared_ptr<Impl> _impl;
 };
-}
-}
+
+}  // namespace ros2
+}  // namespace carla

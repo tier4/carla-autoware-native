@@ -82,6 +82,31 @@ public:
 
   void EnableEnvironmentObjects(const TSet<uint64>& EnvObjectIds, bool Enable);
 
+  /// The registered environment objects disabled now, and a count of the
+  /// changes to that set: Multi-GPU secondaries mirror it.
+  const TSet<uint64> &GetDisabledEnvironmentObjects() const
+  {
+    return DisabledEnvironmentObjects;
+  }
+
+  uint64 GetEnvironmentObjectsSerial() const
+  {
+    return EnvironmentObjectsSerial;
+  }
+
+  /// How many times the environment objects were registered (on every map
+  /// layer streamed in or out).
+  uint64 GetEnvironmentObjectsRegistrations() const
+  {
+    return EnvironmentObjectsRegistrations;
+  }
+
+  /// rpc::MapLayer bits of the layers loaded now.
+  int32 GetLoadedMapLayers() const
+  {
+    return LoadedMapLayers;
+  }
+
   void EnableOverlapEvents();
 
   void CheckForEmptyMeshes();
@@ -119,10 +144,9 @@ public:
   TArray<FString> GetNamesOfAllActors();
 
   /// Gravitational acceleration used by IMU sensors.
-  /// Default is -9.81 m/s^2 for Autoware compatibility (T4 fork convention).
-  /// Upstream default is +9.81f; overridden here to preserve T4 IMU sign convention.
+  /// Default is Earth's, approximately 9.81 m/s^2.
   UPROPERTY(BlueprintReadOnly, EditAnywhere, Category="Sensor Gravity")
-  float IMUSensorGravity = -9.81f;
+  float IMUSensorGravity = 9.81f;
 
   FOnEpisodeInitialisedDelegate OnEpisodeInitialisedDelegate;
 
@@ -138,6 +162,9 @@ protected:
 
   void Tick(float DeltaSeconds) override;
 
+  /// Loads the episode georeference (parsing the map's OpenDRIVE by default)
+  /// and stores the recommended spawn points. Virtual so Autoware maps can
+  /// take the georeference from an MGRS data asset instead (tier4 port).
   virtual void LoadGeoReference();
 
   void StoreSpawnPoints();
@@ -147,13 +174,25 @@ protected:
 
 private:
 
+  /// Tags actors of World Partition cells as they stream in. The legacy
+  /// ALargeMapManager used to do this for WorldComposition tiles, but it
+  /// retires itself on World Partition maps, which left streamed-in cells
+  /// untagged (semantic segmentation rendered them unlabeled).
+  void OnLevelAddedToWorld(ULevel* InLevel, UWorld* InWorld);
+
   void SpawnActorFactories();
-  
+
   void GenerateSpawnPoints();
 
   void ParseOpenDrive();
 
+public:
+
+  // Public so map managers can refresh environment objects after relocating
+  // actors (e.g. traffic sign height adjustment).
   void RegisterEnvironmentObjects();
+
+private:
 
   void ConvertMapLayerMaskToMapNames(int32 MapLayer, TArray<FName>& OutLevelNames);
 
@@ -167,7 +206,7 @@ private:
 
   UPROPERTY()
   UCarlaSettingsDelegate *CarlaSettingsDelegate = nullptr;
-  
+
   UPROPERTY()
   ACarlaRecorder *Recorder = nullptr;
 
@@ -199,6 +238,14 @@ private:
   std::optional<carla::road::Map> Map;
 
   int PendingLevelsToLoad = 0;
+
+  TSet<uint64> DisabledEnvironmentObjects;
+
+  uint64 EnvironmentObjectsSerial = 0u;
+
+  uint64 EnvironmentObjectsRegistrations = 0u;
+
+  int32 LoadedMapLayers = 0;
   int PendingLevelsToUnLoad = 0;
 
   bool ReadyToRegisterObjects = false;

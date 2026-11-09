@@ -485,7 +485,10 @@ def spawn_ego_with_sensors(world, spawn_point, args):
 
     ego_blueprint = blueprint_library.find("vehicle.lincoln.mkz")
     ego_blueprint.set_attribute("role_name", "ego")
-    # Ego uses acceleration control from Autoware /control/command/control_cmd (not ackermann)
+    # Ego uses acceleration control from Autoware /control/command/control_cmd (not ackermann).
+    # Upstream CARLA only registers a vehicle for the Autoware interface
+    # (/vehicle/status/* publishers + /control/command/* subscribers) when it opts in.
+    ego_blueprint.set_attribute("ros2_autoware_control", "true")
     ego_blueprint.set_attribute("ros_topic_name", "/carla/input")  # Fallback; Autoware control_cmd has priority
 
     ego = world.spawn_actor(ego_blueprint, spawn_point)

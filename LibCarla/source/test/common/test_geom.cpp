@@ -6,10 +6,20 @@
 
 #include "test.h"
 
-#include <carla/geom/Vector3D.h>
-#include <carla/geom/Math.h>
+#include <carla/geom/Acceleration.h>
+#include <carla/geom/AngularVelocity.h>
 #include <carla/geom/BoundingBox.h>
+#include <carla/geom/Math.h>
+#include <carla/geom/Quaternion.h>
+#include <carla/geom/RightHandedRotation.h>
+#include <carla/geom/RightHandedTransform.h>
+#include <carla/geom/RightHandedVector3D.h>
+#include <carla/ros2/publishers/TransformQuaternion.h>
 #include <carla/geom/Transform.h>
+#include <carla/geom/Vector3D.h>
+#include <carla/geom/Velocity.h>
+#include <array>
+#include <cmath>
 #include <limits>
 
 namespace carla {
@@ -123,6 +133,12 @@ TEST(geom, single_point_rotation) {
 TEST(geom, single_point_translation_and_rotation) {
   constexpr double error = 0.001;
 
+  // Engine convention: `+pitch` tilts the forward axis up, so pitch=90
+  // sends the up axis {0, 0, 1} onto the backward axis {-1, 0, 0}. The
+  // point {0, 0, 2} therefore lands at {-2, 0, 0}, and the translation by
+  // {0, 0, -1} brings the final point to {-2, 0, -1}.
+  // #9751 mirrored this to {2, 0, -1}; the engine disagrees (a camera at
+  // pitch=+20 looks at the sky, verified on UE5.8 2026-08-27).
   Location translation (0.0,0.0,-1.0); // x y z
   Rotation rotation (90.0,0.0,0.0); // y z x
   Transform transform (translation, rotation);
@@ -213,6 +229,10 @@ TEST(geom, forward_vector) {
   compare({360.0f, 360.0f,   0.0f}, {1.0f, 0.0f, 0.0f});
   compare({  0.0f,  90.0f,   0.0f}, {0.0f, 1.0f, 0.0f});
   compare({  0.0f, -90.0f,   0.0f}, {0.0f,-1.0f, 0.0f});
+  // Engine convention: `+pitch` is nose up, so pitch=90 points forward
+  // straight up, {0, 0, +1}. Empirically confirmed on the running UE5.8
+  // server (2026-08-27): a camera at Rotation(pitch=+20) fills the frame
+  // with sky. #9751 briefly asserted {0, 0, -1} here.
   compare({ 90.0f,   0.0f,   0.0f}, {0.0f, 0.0f, 1.0f});
   compare({180.0f, -90.0f,   0.0f}, {0.0f, 1.0f, 0.0f});
 }
@@ -226,4 +246,542 @@ TEST(geom, nearest_point_arc) {
       Vector3D(0,0,0), 1.57f, 0, 1).second, 1.0f, 0.01f);
   ASSERT_NEAR(Math::DistanceArcToPoint(Vector3D(1,2,0),
       Vector3D(0,0,0), 1.57f, 0, 1).second, 1.0f, 0.01f);
+}
+
+TEST(geom, right_handed_vector3d_boundary_negation) {
+  // Going Vector3D -> RightHandedVector3D negates Y exactly once.
+  const Vector3D lh{1.0f, 2.0f, 3.0f};
+  const RightHandedVector3D rh{lh};
+  ASSERT_FLOAT_EQ(rh.x, 1.0f);
+  ASSERT_FLOAT_EQ(rh.y, -2.0f);
+  ASSERT_FLOAT_EQ(rh.z, 3.0f);
+
+  // Round-trip back to Vector3D restores the original.
+  const Vector3D round_trip = static_cast<Vector3D>(rh);
+  ASSERT_FLOAT_EQ(round_trip.x, 1.0f);
+  ASSERT_FLOAT_EQ(round_trip.y, 2.0f);
+  ASSERT_FLOAT_EQ(round_trip.z, 3.0f);
+}
+
+TEST(geom, quaternion_default_is_identity) {
+  const Quaternion q;
+  ASSERT_FLOAT_EQ(q.x, 0.0f);
+  ASSERT_FLOAT_EQ(q.y, 0.0f);
+  ASSERT_FLOAT_EQ(q.z, 0.0f);
+  ASSERT_FLOAT_EQ(q.w, 1.0f);
+
+  // Identity quaternion rotates a vector to itself.
+  const Vector3D v{1.0f, 2.0f, 3.0f};
+  const Vector3D out = static_cast<Vector3D>(q.RotatedVector(RightHandedVector3D{v}));
+  ASSERT_NEAR(out.x, v.x, 1e-5f);
+  ASSERT_NEAR(out.y, v.y, 1e-5f);
+  ASSERT_NEAR(out.z, v.z, 1e-5f);
+}
+
+TEST(geom, quaternion_get_forward_matches_rotation_get_forward) {
+  // The quaternion built from a Rotation must agree with that Rotation's
+  // forward-vector for every axis-aligned angle. This is the canonical
+  // regression guard against drift between the two math paths.
+  constexpr float eps = 1e-4f;
+  const float angles[] = {-180.0f, -90.0f, -45.0f, 0.0f, 30.0f, 90.0f, 123.0f, 180.0f};
+  for (const float a : angles) {
+    for (const auto axis : {0, 1, 2}) {
+      Rotation r{};
+      if (axis == 0) r.pitch = a;
+      else if (axis == 1) r.yaw = a;
+      else r.roll = a;
+
+      const Vector3D r_forward = r.GetForwardVector();
+      const Vector3D q_forward = Quaternion(r).GetForwardVector();
+      EXPECT_NEAR(q_forward.x, r_forward.x, eps) << "axis=" << axis << " angle=" << a;
+      EXPECT_NEAR(q_forward.y, r_forward.y, eps) << "axis=" << axis << " angle=" << a;
+      EXPECT_NEAR(q_forward.z, r_forward.z, eps) << "axis=" << axis << " angle=" << a;
+    }
+  }
+}
+
+TEST(geom, quaternion_get_yaw_round_trip) {
+  // Yaw component of Rotation -> Quaternion -> Rotation must round-trip.
+  // Pitch and roll left at zero so the Rotator extraction is unambiguous.
+  constexpr float eps = 1e-3f;
+  for (float yaw_deg = -150.0f; yaw_deg <= 150.0f; yaw_deg += 30.0f) {
+    const Quaternion q{Rotation{0.0f, yaw_deg, 0.0f}};
+    const Rotation r = q.Rotator();
+    EXPECT_NEAR(r.yaw, yaw_deg, eps) << "yaw=" << yaw_deg;
+    EXPECT_NEAR(r.pitch, 0.0f, eps);
+    EXPECT_NEAR(r.roll, 0.0f, eps);
+  }
+}
+
+TEST(geom, quaternion_inverse_is_left_inverse) {
+  // q * q^-1 must be the identity for sampled axis-aligned and combined
+  // rotations. Tolerances are generous to accommodate float accumulation.
+  constexpr float eps = 1e-4f;
+  const Rotation samples[] = {
+    {0.0f, 0.0f, 0.0f},
+    {30.0f, 0.0f, 0.0f},
+    {0.0f, 45.0f, 0.0f},
+    {0.0f, 0.0f, 60.0f},
+    {15.0f, 25.0f, 10.0f},
+    {-45.0f, 90.0f, -30.0f},
+  };
+  for (const auto &r : samples) {
+    const Quaternion q{r};
+    const Quaternion identity = q * q.Inverse();
+    EXPECT_NEAR(identity.x, 0.0f, eps) << r.pitch << "/" << r.yaw << "/" << r.roll;
+    EXPECT_NEAR(identity.y, 0.0f, eps);
+    EXPECT_NEAR(identity.z, 0.0f, eps);
+    EXPECT_NEAR(std::abs(identity.w), 1.0f, eps);
+  }
+}
+
+TEST(geom, quaternion_pitch_90_forward_is_positive_z) {
+  // Engine convention guard: `+pitch` is nose up, so the forward vector of
+  // pitch=90 is {0, 0, +1}, the same answer `Rotation::GetForwardVector`
+  // gives. #9751 asserted {0, 0, -1} here, which mirrored the engine.
+  const Quaternion q{Rotation{90.0f, 0.0f, 0.0f}};
+  const Vector3D forward = q.GetForwardVector();
+  EXPECT_NEAR(forward.x, 0.0f, 1e-5f);
+  EXPECT_NEAR(forward.y, 0.0f, 1e-5f);
+  EXPECT_NEAR(forward.z, 1.0f, 1e-5f);
+}
+
+TEST(geom, engine_convention_pitch_up_roll_right_side_down) {
+  // The two empirical facts this whole sign convention rests on, measured
+  // on the running UE5.8 server on 2026-08-27 with a camera sensor and
+  // rendered frames (scratchpad pose_check.py, pitch_+-20.png /
+  // roll_+-25.png):
+  //   * a camera at Rotation(pitch=+20) is tilted UP  -> forward.z > 0
+  //   * a camera at Rotation(roll=+25) has its right side DOWN -> right.z < 0
+  // These match CARLA 0.9.x and the documented API semantics. #9751
+  // mirrored both.
+  constexpr float eps = 1e-5f;
+
+  const Rotation pitched{20.0f, 0.0f, 0.0f};
+  const Vector3D forward = pitched.GetForwardVector();
+  EXPECT_GT(forward.z, 0.0f);
+  EXPECT_NEAR(forward.z, std::sin(Math::ToRadians(20.0f)), eps);
+
+  const Rotation rolled{0.0f, 0.0f, 25.0f};
+  const Vector3D right = rolled.GetRightVector();
+  EXPECT_LT(right.z, 0.0f);
+  EXPECT_NEAR(right.z, -std::sin(Math::ToRadians(25.0f)), eps);
+
+  // Up completes a right-handed... (left-handed, in CARLA) orthonormal
+  // basis: for pure roll the up axis leans toward +Y.
+  const Vector3D up = rolled.GetUpVector();
+  EXPECT_GT(up.y, 0.0f);
+  EXPECT_NEAR(up.y, std::sin(Math::ToRadians(25.0f)), eps);
+}
+
+TEST(geom, get_matrix_agrees_with_rotate_vector_and_basis_vectors) {
+  // All four public math paths (Transform::GetMatrix, Rotation::RotateVector,
+  // Math::Get{Forward,Right,Up}Vector and Quaternion(Rotation)) must produce
+  // the same rotation for arbitrary pitch/yaw/roll. This is the guard that
+  // keeps a future sign edit from touching one path only.
+  constexpr float eps = 1e-4f;
+  const Rotation samples[] = {
+    {0.0f, 0.0f, 0.0f},
+    {20.0f, 0.0f, 0.0f},
+    {-20.0f, 0.0f, 0.0f},
+    {0.0f, 0.0f, 25.0f},
+    {0.0f, 0.0f, -25.0f},
+    {13.0f, 47.0f, -31.0f},
+    {-62.0f, -155.0f, 88.0f},
+  };
+  const Vector3D axes[] = {
+    {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+
+  for (const auto &r : samples) {
+    const Transform t{Location{}, r};
+    const std::array<float, 16> m = t.GetMatrix();
+    const Vector3D basis[] = {
+      r.GetForwardVector(), r.GetRightVector(), r.GetUpVector()};
+    const Vector3D q_basis[] = {
+      Quaternion(r).GetForwardVector(),
+      Quaternion(r).GetRightVector(),
+      Quaternion(r).GetUpVector()};
+
+    for (int col = 0; col < 3; ++col) {
+      const Vector3D rotated = r.RotateVector(axes[col]);
+      // Column `col` of the 4x4 row-major matrix.
+      const float mx = m[static_cast<size_t>(col)];
+      const float my = m[static_cast<size_t>(4 + col)];
+      const float mz = m[static_cast<size_t>(8 + col)];
+      EXPECT_NEAR(mx, rotated.x, eps) << "col=" << col;
+      EXPECT_NEAR(my, rotated.y, eps) << "col=" << col;
+      EXPECT_NEAR(mz, rotated.z, eps) << "col=" << col;
+      EXPECT_NEAR(basis[col].x, rotated.x, eps) << "col=" << col;
+      EXPECT_NEAR(basis[col].y, rotated.y, eps) << "col=" << col;
+      EXPECT_NEAR(basis[col].z, rotated.z, eps) << "col=" << col;
+      EXPECT_NEAR(q_basis[col].x, rotated.x, eps) << "col=" << col;
+      EXPECT_NEAR(q_basis[col].y, rotated.y, eps) << "col=" << col;
+      EXPECT_NEAR(q_basis[col].z, rotated.z, eps) << "col=" << col;
+    }
+  }
+}
+
+TEST(geom, get_inverse_matrix_is_inverse_of_get_matrix) {
+  // GetInverseMatrix must actually invert GetMatrix, translation included,
+  // for non-zero pitch and roll.
+  constexpr float eps = 1e-3f;
+  const Transform samples[] = {
+    Transform{Location{1.0f, -2.0f, 3.0f}, Rotation{20.0f, 0.0f, 0.0f}},
+    Transform{Location{-5.0f, 4.0f, 0.5f}, Rotation{0.0f, 0.0f, 25.0f}},
+    Transform{Location{10.0f, 20.0f, 30.0f}, Rotation{13.0f, 47.0f, -31.0f}},
+  };
+  for (const auto &t : samples) {
+    const std::array<float, 16> m = t.GetMatrix();
+    const std::array<float, 16> mi = t.GetInverseMatrix();
+    for (int row = 0; row < 4; ++row) {
+      for (int col = 0; col < 4; ++col) {
+        float acc = 0.0f;
+        for (int k = 0; k < 4; ++k) {
+          acc += mi[static_cast<size_t>(row * 4 + k)] *
+                 m[static_cast<size_t>(k * 4 + col)];
+        }
+        EXPECT_NEAR(acc, (row == col) ? 1.0f : 0.0f, eps)
+            << "row=" << row << " col=" << col;
+      }
+    }
+  }
+}
+
+TEST(geom, inverse_rotate_vector_undoes_rotate_vector) {
+  constexpr float eps = 1e-4f;
+  const Rotation samples[] = {
+    {20.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 25.0f}, {13.0f, 47.0f, -31.0f}};
+  for (const auto &r : samples) {
+    const Vector3D v{1.0f, -2.0f, 3.0f};
+    Vector3D round_trip = v;
+    r.RotateVector(round_trip);
+    r.InverseRotateVector(round_trip);
+    EXPECT_NEAR(round_trip.x, v.x, eps);
+    EXPECT_NEAR(round_trip.y, v.y, eps);
+    EXPECT_NEAR(round_trip.z, v.z, eps);
+  }
+}
+
+TEST(geom, velocity_inherits_vector3d_storage) {
+  // Velocity is a Vector3D-inheriting POD that carries m/s unit semantics
+  // without adding any data members. Wire-compatibility with Vector3D is
+  // preserved (msgpack adapter inherited).
+  const Velocity v{1.5f, -2.0f, 0.25f};
+  EXPECT_FLOAT_EQ(v.x, 1.5f);
+  EXPECT_FLOAT_EQ(v.y, -2.0f);
+  EXPECT_FLOAT_EQ(v.z, 0.25f);
+
+  // Arithmetic operations inherit from Vector3D.
+  const Velocity v2 = Velocity{v + Vector3D{0.5f, 1.0f, 0.0f}};
+  EXPECT_FLOAT_EQ(v2.x, 2.0f);
+  EXPECT_FLOAT_EQ(v2.y, -1.0f);
+  EXPECT_FLOAT_EQ(v2.z, 0.25f);
+}
+
+TEST(geom, angular_velocity_and_acceleration_inherit_vector3d_storage) {
+  const AngularVelocity w{45.0f, 0.0f, 0.0f};
+  EXPECT_FLOAT_EQ(w.x, 45.0f);
+  EXPECT_FLOAT_EQ(w.y, 0.0f);
+
+  const Acceleration a{0.0f, 9.81f, 0.0f};
+  EXPECT_FLOAT_EQ(a.y, 9.81f);
+
+  // The new types are layout-compatible with Vector3D so the
+  // serialization wire format stays unchanged.
+  static_assert(sizeof(Velocity) == sizeof(Vector3D),
+                "Velocity must stay layout-compatible with Vector3D");
+  static_assert(sizeof(AngularVelocity) == sizeof(Vector3D),
+                "AngularVelocity must stay layout-compatible with Vector3D");
+  static_assert(sizeof(Acceleration) == sizeof(Vector3D),
+                "Acceleration must stay layout-compatible with Vector3D");
+}
+
+TEST(geom, quaternion_basis_vectors_for_identity) {
+  // Identity quaternion's three basis vectors must be the canonical
+  // CARLA left-handed axes.
+  constexpr float eps = 1e-5f;
+  const Quaternion q;
+
+  const Vector3D forward = q.GetForwardVector();
+  EXPECT_NEAR(forward.x, 1.0f, eps);
+  EXPECT_NEAR(forward.y, 0.0f, eps);
+  EXPECT_NEAR(forward.z, 0.0f, eps);
+
+  const Vector3D right = q.GetRightVector();
+  EXPECT_NEAR(right.x, 0.0f, eps);
+  EXPECT_NEAR(right.y, 1.0f, eps);
+  EXPECT_NEAR(right.z, 0.0f, eps);
+
+  const Vector3D up = q.GetUpVector();
+  EXPECT_NEAR(up.x, 0.0f, eps);
+  EXPECT_NEAR(up.y, 0.0f, eps);
+  EXPECT_NEAR(up.z, 1.0f, eps);
+}
+
+TEST(geom, quaternion_basis_vectors_for_yaw_90) {
+  // Yaw=90 deg in CARLA's left-handed convention sends:
+  //   forward (+X) -> (+Y), right (+Y) -> (-X), up (+Z) -> (+Z).
+  constexpr float eps = 1e-4f;
+  const Quaternion q{Rotation{0.0f, 90.0f, 0.0f}};
+
+  const Vector3D forward = q.GetForwardVector();
+  EXPECT_NEAR(forward.x, 0.0f, eps);
+  EXPECT_NEAR(forward.y, 1.0f, eps);
+  EXPECT_NEAR(forward.z, 0.0f, eps);
+
+  const Vector3D right = q.GetRightVector();
+  EXPECT_NEAR(right.x, -1.0f, eps);
+  EXPECT_NEAR(right.y, 0.0f, eps);
+  EXPECT_NEAR(right.z, 0.0f, eps);
+
+  const Vector3D up = q.GetUpVector();
+  EXPECT_NEAR(up.x, 0.0f, eps);
+  EXPECT_NEAR(up.y, 0.0f, eps);
+  EXPECT_NEAR(up.z, 1.0f, eps);
+}
+
+TEST(geom, quaternion_hamilton_product_yaw_compose) {
+  // Two consecutive yaw=45 rotations compose to a yaw=90 rotation:
+  // applying the product to the forward axis sends (1,0,0) -> (0,1,0).
+  constexpr float eps = 1e-4f;
+  const Quaternion q45{Rotation{0.0f, 45.0f, 0.0f}};
+  const Quaternion q90 = q45 * q45;
+
+  const Vector3D forward = q90.GetForwardVector();
+  EXPECT_NEAR(forward.x, 0.0f, eps);
+  EXPECT_NEAR(forward.y, 1.0f, eps);
+  EXPECT_NEAR(forward.z, 0.0f, eps);
+}
+
+TEST(geom, quaternion_conjugate_equals_inverse_for_unit_quaternion) {
+  // For a unit quaternion built from any Rotation, conjugate and inverse
+  // are mathematically identical. Sample a few axis-aligned and combined
+  // rotations.
+  constexpr float eps = 1e-5f;
+  const Rotation samples[] = {
+    {0.0f, 0.0f, 0.0f},
+    {30.0f, 0.0f, 0.0f},
+    {0.0f, 45.0f, 0.0f},
+    {0.0f, 0.0f, 60.0f},
+    {15.0f, 25.0f, 10.0f},
+  };
+  for (const auto &r : samples) {
+    const Quaternion q{r};
+    const Quaternion qc = q.Conjugate();
+    const Quaternion qi = q.Inverse();
+    EXPECT_NEAR(qc.x, qi.x, eps) << r.pitch << "/" << r.yaw << "/" << r.roll;
+    EXPECT_NEAR(qc.y, qi.y, eps);
+    EXPECT_NEAR(qc.z, qi.z, eps);
+    EXPECT_NEAR(qc.w, qi.w, eps);
+  }
+}
+
+// =============================================================================
+// -- Right-handed (ROS / REP-103 FLU) boundary --------------------------------
+// =============================================================================
+//
+// The mapping under test, documented in `Docs/coordinate_conventions.md`:
+//
+//   location (x, y, z)         -> (x, -y, z)
+//   rotation (roll,pitch,yaw)  -> (roll, -pitch, -yaw), intrinsic Z-Y-X,
+//                                 right-hand rule
+//   matrix   M                 -> S * M * S,  S = diag(1, -1, 1, 1)
+//
+// Two independent implementations of the same mapping already existed before
+// these adapters and are used here as cross-checks: the ROS 2 bridge's
+// `carla::ros2::TransformFromCarlaRotation` (header-only, no FastDDS deps) and
+// the Cosmos client's `carla_cosmos/coords.py`.
+
+namespace {
+
+  /// `S * m * S` with `S = diag(1, -1, 1, 1)`: negate every entry whose row or
+  /// column -- but not both -- is the mirrored Y index.
+  std::array<float, 16> MirrorY(const std::array<float, 16> &m) {
+    std::array<float, 16> out{};
+    for (int row = 0; row < 4; ++row) {
+      for (int col = 0; col < 4; ++col) {
+        const float sign = ((row == 1) != (col == 1)) ? -1.0f : 1.0f;
+        out[static_cast<size_t>(row * 4 + col)] =
+            sign * m[static_cast<size_t>(row * 4 + col)];
+      }
+    }
+    return out;
+  }
+
+  const Transform kBoundarySamples[] = {
+    Transform{Location{0.0f, 0.0f, 0.0f},    Rotation{0.0f, 0.0f, 0.0f}},
+    Transform{Location{1.0f, 2.0f, 3.0f},    Rotation{20.0f, 30.0f, 10.0f}},
+    Transform{Location{-4.5f, 6.25f, 0.5f},  Rotation{-15.0f, 120.0f, 40.0f}},
+    Transform{Location{100.0f, -50.0f, 2.0f},Rotation{0.0f, -90.0f, 0.0f}},
+    Transform{Location{0.0f, 7.0f, -1.0f},   Rotation{35.0f, 0.0f, 0.0f}},
+    Transform{Location{3.0f, 3.0f, 3.0f},    Rotation{0.0f, 0.0f, -25.0f}},
+    Transform{Location{-9.0f, 0.25f, 11.0f}, Rotation{13.0f, 47.0f, -31.0f}},
+  };
+
+} // namespace
+
+TEST(geom, right_handed_rotation_negates_pitch_and_yaw) {
+  // The reference case: CARLA (roll, pitch, yaw) = (10, 20, 30) is FLU
+  // (10, -20, -30). Note it is *pitch and yaw* that flip, not the "yaw and
+  // roll" claimed by #9751's commit message.
+  const Rotation carla_rotation{20.0f, 30.0f, 10.0f}; // pitch, yaw, roll
+  const RightHandedRotation flu = carla_rotation.ToRightHanded();
+  EXPECT_FLOAT_EQ(flu.roll, 10.0f);
+  EXPECT_FLOAT_EQ(flu.pitch, -20.0f);
+  EXPECT_FLOAT_EQ(flu.yaw, -30.0f);
+
+  // Cross-check against the Cosmos client, which computes the same triple
+  // through matrices: coords.flu_rpy_deg(coords.ue_to_flu(coords.ue_matrix(
+  // carla.Transform(rotation=carla.Rotation(pitch=20, yaw=30, roll=10)))))
+  // == [10.0, -20.0, -30.0].
+
+  const Rotation back = Rotation::FromRightHanded(flu);
+  EXPECT_FLOAT_EQ(back.pitch, carla_rotation.pitch);
+  EXPECT_FLOAT_EQ(back.yaw, carla_rotation.yaw);
+  EXPECT_FLOAT_EQ(back.roll, carla_rotation.roll);
+}
+
+TEST(geom, right_handed_location_mirrors_y) {
+  const Location carla_location{10.0f, 20.0f, 30.0f};
+  const RightHandedVector3D flu = carla_location.ToRightHanded();
+  EXPECT_FLOAT_EQ(flu.x, 10.0f);
+  EXPECT_FLOAT_EQ(flu.y, -20.0f);
+  EXPECT_FLOAT_EQ(flu.z, 30.0f);
+
+  const Location back = Location::FromRightHanded(flu);
+  EXPECT_FLOAT_EQ(back.x, carla_location.x);
+  EXPECT_FLOAT_EQ(back.y, carla_location.y);
+  EXPECT_FLOAT_EQ(back.z, carla_location.z);
+}
+
+TEST(geom, right_handed_transform_round_trips) {
+  constexpr float eps = 1e-4f;
+  for (const auto &t : kBoundarySamples) {
+    const RightHandedTransform flu = t.ToRightHanded();
+    EXPECT_FLOAT_EQ(flu.location.x, t.location.x);
+    EXPECT_FLOAT_EQ(flu.location.y, -t.location.y);
+    EXPECT_FLOAT_EQ(flu.location.z, t.location.z);
+    EXPECT_FLOAT_EQ(flu.rotation.roll, t.rotation.roll);
+    EXPECT_FLOAT_EQ(flu.rotation.pitch, -t.rotation.pitch);
+    EXPECT_FLOAT_EQ(flu.rotation.yaw, -t.rotation.yaw);
+
+    const Transform back = Transform::FromRightHanded(flu);
+    EXPECT_NEAR(back.location.x, t.location.x, eps);
+    EXPECT_NEAR(back.location.y, t.location.y, eps);
+    EXPECT_NEAR(back.location.z, t.location.z, eps);
+    EXPECT_NEAR(back.rotation.pitch, t.rotation.pitch, eps);
+    EXPECT_NEAR(back.rotation.yaw, t.rotation.yaw, eps);
+    EXPECT_NEAR(back.rotation.roll, t.rotation.roll, eps);
+  }
+}
+
+TEST(geom, right_handed_matrix_is_s_m_s) {
+  // `RightHandedTransform::GetMatrix()` must be the similarity transform of
+  // `Transform::GetMatrix()` under a Y-axis mirror. This is the identity the
+  // Cosmos client implements as `coords.ue_to_flu(coords.ue_matrix(tf))`.
+  constexpr float eps = 1e-5f;
+  for (const auto &t : kBoundarySamples) {
+    const std::array<float, 16> expected = MirrorY(t.GetMatrix());
+    const std::array<float, 16> actual = t.ToRightHanded().GetMatrix();
+    for (size_t i = 0; i < 16; ++i) {
+      EXPECT_NEAR(actual[i], expected[i], eps)
+          << "element " << i << " for rotation " << t.rotation.pitch << "/"
+          << t.rotation.yaw << "/" << t.rotation.roll;
+    }
+  }
+}
+
+TEST(geom, right_handed_matrix_is_a_proper_rotation) {
+  // A right-handed frame means det(R) = +1 and orthonormal columns; the
+  // left-handed CARLA matrix has det = -1 once read as right-handed math,
+  // which is exactly what the mirror fixes.
+  constexpr float eps = 1e-4f;
+  for (const auto &t : kBoundarySamples) {
+    const std::array<float, 16> m = t.ToRightHanded().GetMatrix();
+    const float det =
+        m[0] * (m[5] * m[10] - m[6] * m[9]) -
+        m[1] * (m[4] * m[10] - m[6] * m[8]) +
+        m[2] * (m[4] * m[9] - m[5] * m[8]);
+    EXPECT_NEAR(det, 1.0f, eps);
+  }
+}
+
+TEST(geom, right_handed_quaternion_agrees_with_ros2_bridge) {
+  // `ros2::TransformFromCarlaRotation` has implemented this exact mapping
+  // since the ROS 2 port, independently of `geom`. It returns the quaternion
+  // as `(w, x, y, z)` and the translation already mirrored.
+  constexpr float eps = 1e-5f;
+  for (const auto &t : kBoundarySamples) {
+    const RightHandedTransform flu = t.ToRightHanded();
+    const Quaternion q = flu.GetQuaternion();
+    const auto bridge = carla::ros2::TransformFromCarlaRotation(
+        t.location.x, t.location.y, t.location.z,
+        t.rotation.pitch, t.rotation.yaw, t.rotation.roll);
+
+    EXPECT_NEAR(flu.location.x, bridge.translation[0], eps);
+    EXPECT_NEAR(flu.location.y, bridge.translation[1], eps);
+    EXPECT_NEAR(flu.location.z, bridge.translation[2], eps);
+
+    EXPECT_NEAR(q.w, bridge.rotation[0], eps) << "w";
+    EXPECT_NEAR(q.x, bridge.rotation[1], eps) << "x";
+    EXPECT_NEAR(q.y, bridge.rotation[2], eps) << "y";
+    EXPECT_NEAR(q.z, bridge.rotation[3], eps) << "z";
+  }
+}
+
+TEST(geom, right_handed_quaternion_reproduces_right_handed_matrix) {
+  // The quaternion and the matrix of the same `RightHandedTransform` must
+  // describe the same rotation, column for column, in the right-handed frame.
+  constexpr float eps = 1e-4f;
+  const RightHandedVector3D axes[] = {
+    RightHandedVector3D(1.0f, 0.0f, 0.0f),
+    RightHandedVector3D(0.0f, 1.0f, 0.0f),
+    RightHandedVector3D(0.0f, 0.0f, 1.0f)};
+
+  for (const auto &t : kBoundarySamples) {
+    const RightHandedTransform flu = t.ToRightHanded();
+    const std::array<float, 16> m = flu.GetMatrix();
+    const Quaternion q = flu.GetQuaternion();
+    for (int col = 0; col < 3; ++col) {
+      const RightHandedVector3D rotated =
+          q.RotatedVector(axes[static_cast<size_t>(col)]);
+      EXPECT_NEAR(m[static_cast<size_t>(col)], rotated.x, eps) << "col=" << col;
+      EXPECT_NEAR(m[static_cast<size_t>(4 + col)], rotated.y, eps) << "col=" << col;
+      EXPECT_NEAR(m[static_cast<size_t>(8 + col)], rotated.z, eps) << "col=" << col;
+    }
+  }
+}
+
+TEST(geom, quaternion_right_handed_rotation_round_trips) {
+  // `Quaternion` lives in the right-handed frame; `ToRightHandedRotation()`
+  // reads it back out without any sign juggling.
+  constexpr float eps = 1e-3f;
+  const RightHandedRotation samples[] = {
+    {0.0f, 0.0f, 0.0f},
+    {10.0f, -20.0f, -30.0f},
+    {-40.0f, 15.0f, 120.0f},
+    {88.0f, -62.0f, -155.0f},
+  };
+  for (const auto &r : samples) {
+    const RightHandedRotation back = Quaternion(r).ToRightHandedRotation();
+    EXPECT_NEAR(back.roll, r.roll, eps);
+    EXPECT_NEAR(back.pitch, r.pitch, eps);
+    EXPECT_NEAR(back.yaw, r.yaw, eps);
+  }
+}
+
+TEST(geom, right_handed_boundary_leaves_engine_convention_untouched) {
+  // Guard: adding the adapters must not have moved the left-handed math.
+  // A camera at pitch=+20 still looks up and at roll=+25 still drops its
+  // right side (the two facts measured on UE5.8, 2026-08-27), while the
+  // right-handed view of the same poses reports the mirrored angles.
+  constexpr float eps = 1e-5f;
+
+  const Rotation pitched{20.0f, 0.0f, 0.0f};
+  EXPECT_NEAR(pitched.GetForwardVector().z, std::sin(Math::ToRadians(20.0f)), eps);
+  EXPECT_FLOAT_EQ(pitched.ToRightHanded().pitch, -20.0f);
+
+  const Rotation rolled{0.0f, 0.0f, 25.0f};
+  EXPECT_NEAR(rolled.GetRightVector().z, -std::sin(Math::ToRadians(25.0f)), eps);
+  EXPECT_FLOAT_EQ(rolled.ToRightHanded().roll, 25.0f);
 }

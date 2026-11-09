@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -6,9 +6,18 @@
 
 #pragma once
 
-#include "CoreMinimal.h"
-#include "Sensor/Sensor.h" 
+#include "Carla/Sensor/Sensor.h"
+
+#include "Carla/Actor/ActorDefinition.h"
+#include "Carla/Actor/ActorDescription.h"
+
+#include <util/disable-ue4-macros.h>
+#include <carla/sensor/s11n/VehicleStatusSerializer.h>
+#include <util/enable-ue4-macros.h>
+
 #include "VehicleStatusSensor.generated.h"
+
+class ACarlaWheeledVehicle;
 
 // Structure imported from LibCarla
 using FVehicleStatusData = carla::sensor::s11n::VehicleStatusData;
@@ -16,101 +25,98 @@ using FVehicleStatusData = carla::sensor::s11n::VehicleStatusData;
 USTRUCT(BlueprintType)
 struct FVelocityInfo
 {
-	GENERATED_BODY()
-	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
-	FVector Velocity;
+  GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
-	FVector AngularVelocity;
-	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
-	FRotator RotationRate;
-	
+  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
+  FVector Velocity;
 
-	FVelocityInfo()
-		: Velocity(FVector::ZeroVector)
-		, AngularVelocity(FVector::ZeroVector)
-		, RotationRate(FRotator::ZeroRotator)
-	{
-	}
-	
-	float GetSpeed() const
-	{
-		return Velocity.Size();
-	}
-	
-	FString ToString() const
-	{
-		return FString::Printf(TEXT("Velocity: %s | Angular Velocity: %s | Rotation Rate: %s"),
-			*Velocity.ToString(),
-			*AngularVelocity.ToString(),
-			*RotationRate.ToString());
-	}
+  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
+  FVector AngularVelocity;
+
+  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Velocity")
+  FRotator RotationRate;
+
+  FVelocityInfo()
+    : Velocity(FVector::ZeroVector)
+    , AngularVelocity(FVector::ZeroVector)
+    , RotationRate(FRotator::ZeroRotator)
+  {
+  }
+
+  float GetSpeed() const
+  {
+    return Velocity.Size();
+  }
+
+  FString ToString() const
+  {
+    return FString::Printf(TEXT("Velocity: %s | Angular Velocity: %s | Rotation Rate: %s"),
+      *Velocity.ToString(),
+      *AngularVelocity.ToString(),
+      *RotationRate.ToString());
+  }
 };
 
-/**
- * 
- */
+/// Vehicle status sensor ("sensor.other.vehicle_status"): attached to a
+/// vehicle, streams a packed kinematic + control state snapshot each tick and
+/// forwards it to the ROS2 side, where it feeds the six Autoware
+/// /vehicle/status/* report publishers. Ported from tier4/autoware-support.
 UCLASS()
 class CARLA_API AVehicleStatusSensor : public ASensor
 {
-	GENERATED_BODY()
+  GENERATED_BODY()
 
 public:
-	explicit AVehicleStatusSensor(const FObjectInitializer& ObjectInitializer);
 
-	// Carla blueprint definition (get sensor.other.vehicle_status in BP)
-	static FActorDefinition GetSensorDefinition();
+  explicit AVehicleStatusSensor(const FObjectInitializer &ObjectInitializer);
 
-	// Called by Carla’s spawning pipeline with user attributes
-	virtual void Set(const FActorDescription &ActorDescription) override;
-	
-	virtual void PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeconds) override;
+  // Carla blueprint definition (get sensor.other.vehicle_status in BP)
+  static FActorDefinition GetSensorDefinition();
+
+  // Called by Carla's spawning pipeline with user attributes
+  virtual void Set(const FActorDescription &ActorDescription) override;
+
+  virtual void PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaSeconds) override;
 
 protected:
-	virtual void BeginPlay() override;
-	
-	// Publish frequency
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", UIMin="1.0"))
-	float MinRateHz = 1.0f;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", UIMin="1.0"))
-	float MaxRateHz = 1000.0f;
-	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", ClampMax="1000.0", UIMin="1.0", UIMax="1000.0"))
-	float TargetRateHz = 30.0f;
+
+  virtual void BeginPlay() override;
+
+  // Publish frequency
+  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", UIMin="1.0"))
+  float MinRateHz = 1.0f;
+  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", UIMin="1.0"))
+  float MaxRateHz = 1000.0f;
+
+  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Sensor|Rate", meta=(ClampMin="1.0", ClampMax="1000.0", UIMin="1.0", UIMax="1000.0"))
+  float TargetRateHz = 30.0f;
 
 private:
-	// Cached parent vehicle
-	TWeakObjectPtr<ACarlaWheeledVehicle> OwningVehicle;
-	FVelocityInfo VelocityInfo;
 
-	// Find parent helpers
-	FTimerHandle CheckParentTimerHandle;
-	void CheckForParentVehicle();
-	TObjectPtr<ACarlaWheeledVehicle> FindAttachmentParentVehicle() const;
+  // Cached parent vehicle
+  TWeakObjectPtr<ACarlaWheeledVehicle> OwningVehicle;
 
-	// Helpers
-	void CollectAndStream(float DeltaSeconds);
-	void SetVelocityInfoToLocal(const AActor* VehicleActor);
+  // tier4: sensorless Autoware localization (publish_autoware_localization_ground_truth
+  // and the anchor attributes; see UActorBlueprintFunctionLibrary::MakeVehicleStatusDefinition).
+  bool bPublishAutowareLocalization = false;
+  double LocalizationReferenceMap[4] = {0.0, 0.0, 0.0, 0.0};        // x, y, z, yaw [rad]
+  double LocalizationReferenceCarlaBase[4] = {0.0, 0.0, 0.0, 0.0};  // x, y, z, yaw [rad]
+  double LocalizationMapToCarla[3] = {1.0, 0.0, 0.0};               // scale, xy yaw [rad], yaw [rad]
+  FVelocityInfo VelocityInfo;
 
-	bool bPublishAutowareLocalizationGroundTruth = false;
-	double ReferenceMapX = 0.0;
-	double ReferenceMapY = 0.0;
-	double ReferenceMapZ = 0.0;
-	double ReferenceMapYawRad = 0.0;
-	double ReferenceCarlaBaseX = 0.0;
-	double ReferenceCarlaBaseY = 0.0;
-	double ReferenceCarlaBaseZ = 0.0;
-	double ReferenceCarlaBaseYawRad = 0.0;
-	double MapToCarlaScale = 1.0;
-	double MapToCarlaXyYawRad = 0.0;
-	double MapToCarlaYawRad = 0.0;
+  // Find parent helpers
+  FTimerHandle CheckParentTimerHandle;
+  void CheckForParentVehicle();
+  TObjectPtr<ACarlaWheeledVehicle> FindAttachmentParentVehicle() const;
 
-	// Scale UE velocity from cm/s to m/s
-	template<typename T>
-	static FORCEINLINE T CmpsToMps(const T& v_cmps)
-	{
-		return v_cmps * 0.01f;
-	}
+  // Helpers
+  void CollectAndStream(float DeltaSeconds);
+  void SetVelocityInfoToLocal(const AActor* VehicleActor);
+
+  // Scale UE velocity from cm/s to m/s
+  template<typename T>
+  static FORCEINLINE T CmpsToMps(const T& v_cmps)
+  {
+    return v_cmps * 0.01f;
+  }
 };
