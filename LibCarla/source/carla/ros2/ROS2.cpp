@@ -16,6 +16,7 @@
 #include "carla/sensor/s11n/ImageSerializer.h"
 #include "carla/sensor/s11n/SensorHeaderSerializer.h"
 #include "carla/sensor/s11n/VehicleStatusSerializer.h"
+#include "carla/sensor/SensorRegistry.h"
 
 #include "carla/ros2/middleware/ActiveMiddleware.h"
 
@@ -78,6 +79,12 @@ enum ESensors {
   RayCastLidar,
   RssSensor,
   SceneCaptureCamera,
+  // Registered in SensorRegistry right after SceneCaptureCamera. Without this
+  // entry every value below was one lower than the registry index, so the
+  // camera dispatch (keyed on the serializer header's registry index) sent
+  // semantic segmentation through the instance-segmentation case and dropped
+  // instance segmentation altogether.
+  SceneCaptureCamera_RayTracedLens,
   SemanticSegmentationCamera,
   InstanceSegmentationCamera,
   WorldObserver,
@@ -92,12 +99,61 @@ enum ESensors {
   CameraGBufferUint8,
   CameraGBufferFloat,
   HSSLidar,
+  // V2X sensors have no ROS2 dispatch, but they occupy registry slots, so
+  // they need entries to keep the following values aligned.
+  V2XSensor,
+  CustomV2XSensor,
   // Autoware vehicle interface (appended at the END, matching the
-  // SensorRegistry append; V2X sensors have no ROS2 dispatch and therefore
-  // no enum entry, mirroring the pre-existing convention).
+  // SensorRegistry append).
   VehicleStatusSensor,
-  AutowareGnssSensor
+  AutowareGnssSensor,
+  SceneCaptureCamera_RayTracedLensDistance,
+  SceneCaptureCamera_RayTracedLensInstance,
+  // tier4 additions (SensorRegistry appends them after every upstream entry).
+  InertialMeasurementUnitHighPrecision,
+  RGLLidar
 };
+
+// Fail the build if ESensors drifts from the SensorRegistry order again.
+#define CARLA_ROS2_CHECK_SENSOR_ID(Entry, Type)                                \
+  static_assert(ESensors::Entry == carla::sensor::SensorRegistry::get<Type *>::index, \
+                "ESensors::" #Entry " does not match the SensorRegistry index of " #Type)
+CARLA_ROS2_CHECK_SENSOR_ID(CollisionSensor, ACollisionSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(DepthCamera, ADepthCamera);
+CARLA_ROS2_CHECK_SENSOR_ID(NormalsCamera, ANormalsCamera);
+CARLA_ROS2_CHECK_SENSOR_ID(DVSCamera, ADVSCamera);
+CARLA_ROS2_CHECK_SENSOR_ID(GnssSensor, AGnssSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(InertialMeasurementUnit, AInertialMeasurementUnit);
+CARLA_ROS2_CHECK_SENSOR_ID(LaneInvasionSensor, ALaneInvasionSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(ObstacleDetectionSensor, AObstacleDetectionSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(OpticalFlowCamera, AOpticalFlowCamera);
+CARLA_ROS2_CHECK_SENSOR_ID(Radar, ARadar);
+CARLA_ROS2_CHECK_SENSOR_ID(RayCastSemanticLidar, ARayCastSemanticLidar);
+CARLA_ROS2_CHECK_SENSOR_ID(RayCastLidar, ARayCastLidar);
+CARLA_ROS2_CHECK_SENSOR_ID(RssSensor, ARssSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera, ASceneCaptureCamera);
+CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera_RayTracedLens, ASceneCaptureCamera_RayTracedLens);
+CARLA_ROS2_CHECK_SENSOR_ID(SemanticSegmentationCamera, ASemanticSegmentationCamera);
+CARLA_ROS2_CHECK_SENSOR_ID(InstanceSegmentationCamera, AInstanceSegmentationCamera);
+CARLA_ROS2_CHECK_SENSOR_ID(WorldObserver, FWorldObserver);
+CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera_WideAngleLens, ASceneCaptureCamera_WideAngleLens);
+CARLA_ROS2_CHECK_SENSOR_ID(DepthCamera_WideAngleLens, ADepthCamera_WideAngleLens);
+CARLA_ROS2_CHECK_SENSOR_ID(InstanceSegmentationCamera_WideAngleLens, AInstanceSegmentationCamera_WideAngleLens);
+CARLA_ROS2_CHECK_SENSOR_ID(SemanticSegmentationCamera_WideAngleLens, ASemanticSegmentationCamera_WideAngleLens);
+CARLA_ROS2_CHECK_SENSOR_ID(CameraGBufferUint8, FCameraGBufferUint8);
+CARLA_ROS2_CHECK_SENSOR_ID(CameraGBufferFloat, FCameraGBufferFloat);
+CARLA_ROS2_CHECK_SENSOR_ID(HSSLidar, AHSSLidar);
+CARLA_ROS2_CHECK_SENSOR_ID(V2XSensor, AV2XSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(CustomV2XSensor, ACustomV2XSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(VehicleStatusSensor, AVehicleStatusSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(AutowareGnssSensor, AAutowareGnssSensor);
+CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera_RayTracedLensDistance, ASceneCaptureCamera_RayTracedLensDistance);
+CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera_RayTracedLensInstance, ASceneCaptureCamera_RayTracedLensInstance);
+CARLA_ROS2_CHECK_SENSOR_ID(InertialMeasurementUnitHighPrecision, AInertialMeasurementUnitHighPrecision);
+CARLA_ROS2_CHECK_SENSOR_ID(RGLLidar, ARGLLidar);
+#undef CARLA_ROS2_CHECK_SENSOR_ID
+static_assert(ESensors::RGLLidar + 1 == carla::sensor::SensorRegistry::size(),
+              "ESensors must list every SensorRegistry entry");
 
 bool ROS2::Enable(bool enable, Middleware middleware, int domain_id) {
   // Select the ROS 2 middleware before any publisher or subscriber is created.
