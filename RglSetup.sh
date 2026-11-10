@@ -321,6 +321,14 @@ cmd_prepare() {
     echo "  ext_patches:  ${ext_patch_dir:-(none)}"
     echo "========================================================================"
 
+    # --ext-patch-dir only patches extensions/udp, so it does nothing without
+    # --with-udp. Say so instead of ignoring it silently.
+    if [ -n "$ext_patch_dir" ] && [ $ext_udp -eq 0 ]; then
+        echo ""
+        echo "[WARNING] --ext-patch-dir=$ext_patch_dir is ignored: it patches the UDP extension"
+        echo "  (extensions/udp) and is applied only together with --with-udp."
+    fi
+
     # ---- Prerequisites check ----
 
     echo ""

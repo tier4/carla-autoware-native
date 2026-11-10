@@ -151,6 +151,8 @@ cd Build/Package/Carla-*-Linux-Shipping
 | Option | Description |
 |---|---|
 | `--optix-dir=PATH`       | OptiX SDK path (or set `OptiX_INSTALL_DIR`) |
+| `--cuda-dir=PATH`        | CUDA Toolkit path when `nvcc` is not on `PATH` |
+| `--ros-distro=NAME`      | ROS 2 distro, `humble` or `jazzy` (default: `$ROS_DISTRO`, else by Ubuntu release) |
 | `--rgl-branch=BRANCH`    | RGL git branch (default: `develop`) |
 | `--rgl-repo=URL`         | RGL git repository URL |
 | `--skip-rgl-build`       | Skip RGL build (use pre-built library) |
@@ -159,6 +161,7 @@ cd Build/Package/Carla-*-Linux-Shipping
 | `--no-agnocast`          | Disable Agnocast extension |
 | `--with-weather`         | Enable weather extension (private repo) |
 | `--with-udp`             | Enable UDP extension (private repo) |
+| `--ext-patch-dir=DIR`    | Apply `DIR/*.patch` to the UDP extension after cloning; only with `--with-udp` (see [UDP Raw Packet extension](#udp-raw-packet-extension-optional)) |
 
 ### `build` options
 
@@ -168,6 +171,8 @@ cd Build/Package/Carla-*-Linux-Shipping
 | `--package=development` | Build the CARLA Development package after rebuild |
 | `--package=launch`      | Launch the UE5 editor after rebuild |
 | `--package=none`        | (default) Rebuild only, no package step |
+| `--ros-distro=NAME`     | ROS 2 distro RclcppBridge builds against; use the one RGL was prepared with |
+| `--no-clear-ddc`        | Skip the automatic DDC clear on `--package=launch` |
 
 ## Stale cache detection
 
@@ -310,6 +315,24 @@ return-mode whitelist.
 CARLA itself still builds without the UDP extension. In that case the
 UDP-related features auto-disable at runtime with a warning log and the
 rest of the RGL pipeline (ROS 2 publish, Yield) is unaffected.
+
+> [!IMPORTANT]
+> The UDP extension needs fixes that are not in RobotecAI's repository yet.
+> They are kept as patches outside this public repository (a patch carries
+> context lines of the private extension's source) and are applied with
+> `--ext-patch-dir=DIR` together with `--with-udp`:
+>
+> ```bash
+> bash RglSetup.sh prepare --with-udp --ext-patch-dir=/path/to/udp-patches ...
+> ```
+>
+> `--with-udp` alone still builds a library that loads and sends packets, but
+> the packets may not be accepted downstream (for example, Autoware does not
+> engage). `RglSetup.sh` cannot tell the two builds apart, so pass the patch
+> directory whenever you build the UDP extension. Once RobotecAI ships the
+> fixes, the patches become no-ops (already-applied patches are skipped) and
+> `--ext-patch-dir` can be dropped. `--ext-patch-dir` without `--with-udp` is
+> ignored with a warning.
 
 ## Phase 2 verification with tier4/nebula
 
