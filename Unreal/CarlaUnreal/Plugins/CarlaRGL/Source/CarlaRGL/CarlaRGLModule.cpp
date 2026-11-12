@@ -36,8 +36,20 @@ void FCarlaRGLModule::StartupModule()
 
     // 1. Load and init RclcppBridge FIRST (before RGL and before CARLA's DDS).
     //    This calls rclcpp::init() so RGL's Ros2InitGuard sees rclcpp::ok()==true.
+    //    The bridge only serves RGL's own ROS 2 publisher, so it is used only when RGL's ROS 2
+    //    runtime (ros2_standalone, copied next to RGL by Unreal/CMakeLists.txt) is present, and
+    //    never in commandlets such as the cook. Without that runtime, rclcpp would resolve to the
+    //    sourced system ROS 2, whose middleware then runs against the Fast-DDS that CARLA already
+    //    bundles (same soname, different build) and crashes in rmw create_participant.
     FString BridgePath = FPaths::Combine(BinDir, TEXT("libRclcppBridge.so"));
-    if (RclcppBridge::Load(TCHAR_TO_UTF8(*BridgePath)))
+    const bool bHasRglRos2Runtime = FPaths::FileExists(FPaths::Combine(BinDir, TEXT("librclcpp.so")));
+    if (IsRunningCommandlet() || !bHasRglRos2Runtime)
+    {
+        UE_LOG(LogCarlaRGL, Log,
+            TEXT("CarlaRGL: RclcppBridge skipped (commandlet=%d, rgl_ros2_runtime=%d)."),
+            IsRunningCommandlet() ? 1 : 0, bHasRglRos2Runtime ? 1 : 0);
+    }
+    else if (RclcppBridge::Load(TCHAR_TO_UTF8(*BridgePath)))
     {
         if (RclcppBridge::Init())
         {
