@@ -8,7 +8,13 @@
 #pragma once
 
 #include "BaseCarlaMovementComponent.h"
+#include "Misc/Optional.h"
 #include "DefaultMovementComponent.generated.h"
+
+namespace Chaos
+{
+  enum class ESleepType : uint8;
+}
 
 
 UCLASS(Blueprintable, meta=(BlueprintSpawnableComponent) )
@@ -29,6 +35,11 @@ public:
   int32 GetVehicleCurrentGear() const override;
 
   float GetVehicleForwardSpeed() const override;
+
+private:
+
+  bool bWasThrottleApplied = false;
+  TOptional<Chaos::ESleepType> PreviousSleepType;
 
 };
 
