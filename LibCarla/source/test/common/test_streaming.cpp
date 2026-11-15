@@ -407,3 +407,26 @@ TEST(streaming, ros_topic_visibility_manual_toggle) {
   srv.DisableForROS(sensor_id);
   EXPECT_FALSE(srv.IsEnabledForROS(sensor_id));
 }
+
+// AreStreamClientsListening() counts only clients subscribed to the stream
+// itself. The ROS visibility every stream gets at birth with the default flag on
+// must not count: sensors that never publish through the stream's ROS 2 path
+// (sensor.lidar.rgl) would otherwise produce data each tick for nobody.
+TEST(streaming, stream_clients_listening_ignores_ros_visibility) {
+  using namespace carla::streaming;
+
+  Server srv(TESTING_PORT);
+  srv.SetROS2TopicVisibilityDefaultEnabled(true);
+  srv.AsyncRun(1u);
+  auto stream = srv.MakeStream();
+  EXPECT_TRUE(stream.AreClientsListening());
+  EXPECT_FALSE(stream.AreStreamClientsListening());
+
+  Client c;
+  c.AsyncRun(1u);
+  c.Subscribe(stream.token(), [](auto) {});
+  for (auto i = 0; i < 300 && !stream.AreStreamClientsListening(); ++i) {
+    std::this_thread::sleep_for(10ms);
+  }
+  EXPECT_TRUE(stream.AreStreamClientsListening());
+}

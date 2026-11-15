@@ -169,6 +169,7 @@
 
 * Fixed **`/vehicle/status/gear_status` reporting NEUTRAL** while an Autoware-driven vehicle moves forward. Acceleration control never engages the transmission. While it is active, `GetVehicleCurrentGear()` now reports the first forward gear, so Autoware sees DRIVE. `get_telemetry_data()` reports the same gear.
 * Fixed camera fx in the ROS 2 `CameraInfo`, large map actor tagging, and camera frame and timestamp consistency.
+* Fixed every **`sensor.lidar.rgl` reading all its points back from the GPU and repacking them on every scan** when the server runs with `--ros2`, even with no client listening. Streams are enabled for ROS 2 when they are created (`ROS2TopicVisibility`, on by default), and the lidar counted that as a listener, although its point cloud reaches ROS 2 only through RGL itself. It now produces data for the stream only when a client listens to it or the points are drawn.
 
 #### Traffic Manager and agents
 
