@@ -9,7 +9,6 @@
 #include <atomic>
 
 #include "carla/Logging.h"
-#include "carla/ros2/AutowareSteeringCompensation.h"
 #include "carla/ros2/middleware/QosProfile.h"
 #include "carla/ros2/subscribers/SubscriberImpl.h"
 #include "carla/ros2/types/msg/Control.h"
@@ -94,12 +93,9 @@ ROS2CallbackData AutowareControlSubscriber::GetMessage() {
 
   // Set lateral negative, because CARLA treats positive as right and Autoware
   // expects positive to represent left (all when moving forward).
-  const float raw_steering = -control_in.lateral.steering_tire_angle;
-
-  // Apply steering compensation lookup table (measured on Lincoln MKZ). This
-  // reduces understeer / outward drift by mapping Autoware's target tire angle
-  // to a vehicle input that better matches the requested actual tire angle.
-  control_out.steer = autoware_steering_compensation::GetSteeringInput(raw_steering);
+  // The tire angle [rad] is passed on as is: the vehicle turns it into its
+  // normalized steer input with its own steering model, on the Unreal side.
+  control_out.steer = -control_in.lateral.steering_tire_angle;
   control_out.steer_speed = 0.0f;
   if (control_in.lateral.is_defined_steering_tire_rotation_rate) {
     control_out.steer_speed = -control_in.lateral.steering_tire_rotation_rate;

@@ -34,6 +34,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "PhysicsEngine/PhysicsObjectExternalInterface.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
+#include "SteeringSystem.h"
 #include <util/ue-header-guard-end.h>
 
 // =============================================================================
@@ -707,6 +708,246 @@ float ACarlaWheeledVehicle::GetMaximumSteerAngle() const
   // whole server down from BeginPlay; report a sensible steering default.
   UE_LOG(LogCarla, Warning, TEXT("%s: no wheel setups, returning default max steer angle"), *GetName());
   return 35.0f;
+}
+
+// Segments of the steer input range [0, 1] that the tire angle table samples.
+static constexpr int32 CarlaSteerTireAngleTableSegments = 40;
+
+// Bicycle-model angle of a pair of front wheels steered to LeftRad and
+// RightRad (both in [0, pi/2)): the angle whose cotangent is the mean of the
+// two wheels' cotangents. atan(2 / (cot L + cot R)) rewritten with
+// cot L + cot R = sin(L + R) / (sin L sin R), so that it is 0 at 0.
+static float CarlaBicycleTireAngle(float LeftRad, float RightRad)
+{
+  const float Numerator = 2.0f * FMath::Sin(LeftRad) * FMath::Sin(RightRad);
+  if (Numerator <= 0.0f)
+  {
+    return 0.0f;
+  }
+  return FMath::Atan2(Numerator, FMath::Sin(LeftRad + RightRad));
+}
+
+// Tire angle of a table built by UpdateSteerTireAngleTable (at least two
+// samples) at the steer input magnitude SteerMagnitude.
+static float CarlaSteerTireAngleAt(const TArray<float> &Table, float SteerMagnitude)
+{
+  const int32 Segments = Table.Num() - 1;
+  const float X = FMath::Clamp(SteerMagnitude, 0.0f, 1.0f) * static_cast<float>(Segments);
+  const int32 K = FMath::Min(static_cast<int32>(X), Segments - 1);
+  return FMath::Lerp(Table[K], Table[K + 1], X - static_cast<float>(K));
+}
+
+void ACarlaWheeledVehicle::UpdateSteerTireAngleTable() const
+{
+  const UChaosWheeledVehicleMovementComponent *Movement = GetChaosWheeledVehicleMovementComponent();
+
+  // Everything the table depends on that can change at run time:
+  // ApplyVehiclePhysicsControl sets the wheels' maximum steer angles and
+  // whether they steer, and the runtime wheels only exist once the Chaos
+  // vehicle has finished its physics initialization, after the spawn frame.
+  TArray<float> Key;
+  if (Movement == nullptr)
+  {
+    Key.Add(-1.0f);
+  }
+  else
+  {
+    Key.Add(static_cast<float>(Movement->WheelSetups.Num()));
+    Key.Add(static_cast<float>(Movement->Wheels.Num()));
+    Key.Add(static_cast<float>(static_cast<uint8>(Movement->SteeringSetup.SteeringType)));
+    Key.Add(Movement->SteeringSetup.AngleRatio);
+    for (int32 i = 0; i < Movement->Wheels.Num(); ++i)
+    {
+      const UChaosVehicleWheel *Wheel = Movement->Wheels[i];
+      Key.Add((Wheel != nullptr && Wheel->bAffectedBySteering) ? Wheel->MaxSteerAngle : -1.0f);
+    }
+  }
+  if (Key == SteerTireAngleTableKey)
+  {
+    return;
+  }
+  SteerTireAngleTableKey = MoveTemp(Key);
+  SteerTireAngleTable.Reset();
+  SteerTireAngleLinearMaxRad = FMath::DegreesToRadians(GetMaximumSteerAngle());
+
+  const int32 WheelCount = (Movement != nullptr) ? Movement->WheelSetups.Num() : 0;
+  if (WheelCount == 0 || Movement->Wheels.Num() != WheelCount)
+  {
+    UE_LOG(LogCarla, Verbose,
+        TEXT("SteerTireAngleTable vehicle=%s result=linear reason=no_chaos_wheels max_rad=%.4f"),
+        *GetName(), SteerTireAngleLinearMaxRad);
+    return;
+  }
+
+  // The wheels' resting positions in the vehicle frame [cm], placed as the
+  // engine places them (UChaosVehicleMovementComponent::GetWheelRestingPosition,
+  // which is protected): the wheel bone, plus the wheel class offset, plus the
+  // wheel setup's additional offset. The wheel track dimensions follow
+  // UChaosWheeledVehicleMovementComponent::CalculateWheelLayoutDimensions
+  // (also protected): twice the largest |X| (wheelbase) and |Y| (track).
+  const USkeletalMeshComponent *VehicleMesh = GetMesh();
+  TArray<FVector> RestingPositions;
+  RestingPositions.Reserve(WheelCount);
+  FVector2D WheelTrackDimensions(0.0, 0.0);
+  for (int32 i = 0; i < WheelCount; ++i)
+  {
+    const FChaosWheelSetup &WheelSetup = Movement->WheelSetups[i];
+    FVector Position = WheelSetup.AdditionalOffset;
+    if (const UChaosVehicleWheel *WheelDefaults = WheelSetup.WheelClass.GetDefaultObject())
+    {
+      Position += WheelDefaults->Offset;
+    }
+    if (VehicleMesh != nullptr)
+    {
+      Position += VehicleMesh->GetSocketTransform(WheelSetup.BoneName, RTS_Component).GetLocation();
+    }
+    RestingPositions.Add(Position);
+    WheelTrackDimensions.X = FMath::Max(WheelTrackDimensions.X, FMath::Abs(Position.X));
+    WheelTrackDimensions.Y = FMath::Max(WheelTrackDimensions.Y, FMath::Abs(Position.Y));
+  }
+  WheelTrackDimensions *= 2.0;
+
+  // The front-most steered wheel on each side (resting Y < 0 is left).
+  int32 LeftIndex = INDEX_NONE;
+  int32 RightIndex = INDEX_NONE;
+  int32 CentreIndex = INDEX_NONE;
+  for (int32 i = 0; i < WheelCount; ++i)
+  {
+    const UChaosVehicleWheel *Wheel = Movement->Wheels[i];
+    if (Wheel == nullptr || !Wheel->bAffectedBySteering || Wheel->MaxSteerAngle <= 0.0f)
+    {
+      continue;
+    }
+    const double Side = RestingPositions[i].Y;
+    int32 &Index = (Side < 0.0) ? LeftIndex : ((Side > 0.0) ? RightIndex : CentreIndex);
+    if (Index == INDEX_NONE || RestingPositions[i].X > RestingPositions[Index].X)
+    {
+      Index = i;
+    }
+  }
+  const bool bWheelPair = (LeftIndex != INDEX_NONE) && (RightIndex != INDEX_NONE);
+  const int32 SingleIndex = (CentreIndex != INDEX_NONE) ? CentreIndex
+      : ((LeftIndex != INDEX_NONE) ? LeftIndex : RightIndex);
+  if (!bWheelPair && SingleIndex == INDEX_NONE)
+  {
+    UE_LOG(LogCarla, Verbose,
+        TEXT("SteerTireAngleTable vehicle=%s result=linear reason=no_steered_wheel max_rad=%.4f"),
+        *GetName(), SteerTireAngleLinearMaxRad);
+    return;
+  }
+
+  // The engine's steering model, built as the movement component builds it
+  // for the physics thread, from a copy of the steering setup: filling the
+  // physics config of the component's own setup would rewrite the config the
+  // running steering simulation reads.
+  FVehicleSteeringConfig SteeringConfig = Movement->SteeringSetup;
+  Chaos::FSimpleSteeringSim SteeringSim(&SteeringConfig.GetPhysicsSteeringConfig(WheelTrackDimensions));
+
+  // Wheel angle [rad] at a steer input; WheelSide is the sign of the wheel's
+  // resting Y, as in the engine's ProcessSteering.
+  const auto WheelAngleRad = [&](int32 WheelIndex, float Steer) -> float
+  {
+    const float MaxSteerAngleDeg = Movement->Wheels[WheelIndex]->MaxSteerAngle;
+    const float WheelSide = static_cast<float>(RestingPositions[WheelIndex].Y);
+    return FMath::Abs(FMath::DegreesToRadians(
+        SteeringSim.GetSteeringAngle(Steer, MaxSteerAngleDeg, WheelSide)));
+  };
+
+  // Steering is mirror-symmetric, so the table covers |steer| in [0, 1] and
+  // the getters restore the sign; zero input is zero angle.
+  TArray<float> Table;
+  Table.SetNumZeroed(CarlaSteerTireAngleTableSegments + 1);
+  bool bIncreasing = true;
+  for (int32 k = 1; k <= CarlaSteerTireAngleTableSegments; ++k)
+  {
+    const float Steer = static_cast<float>(k) / static_cast<float>(CarlaSteerTireAngleTableSegments);
+    Table[k] = bWheelPair
+        ? CarlaBicycleTireAngle(WheelAngleRad(LeftIndex, Steer), WheelAngleRad(RightIndex, Steer))
+        : WheelAngleRad(SingleIndex, Steer);
+    // Also false for a NaN.
+    if (!(Table[k] > Table[k - 1]))
+    {
+      bIncreasing = false;
+    }
+  }
+  if (!bIncreasing)
+  {
+    // The inverse needs a strictly increasing table.
+    UE_LOG(LogCarla, Warning,
+        TEXT("SteerTireAngleTable vehicle=%s result=linear reason=not_increasing steering_type=%d max_rad=%.4f"),
+        *GetName(), static_cast<int32>(Movement->SteeringSetup.SteeringType), SteerTireAngleLinearMaxRad);
+    return;
+  }
+  SteerTireAngleTable = MoveTemp(Table);
+
+  UE_LOG(LogCarla, Verbose,
+      TEXT("SteerTireAngleTable vehicle=%s result=table steering_type=%d angle_ratio=%.3f ")
+      TEXT("wheelbase_cm=%.1f track_cm=%.1f left_wheel=%d right_wheel=%d single_wheel=%d ")
+      TEXT("tire_rad_at_0.10=%.4f tire_rad_at_0.25=%.4f tire_rad_at_0.50=%.4f ")
+      TEXT("tire_rad_at_0.70=%.4f tire_rad_at_1.00=%.4f"),
+      *GetName(),
+      static_cast<int32>(Movement->SteeringSetup.SteeringType),
+      Movement->SteeringSetup.AngleRatio,
+      WheelTrackDimensions.X, WheelTrackDimensions.Y,
+      bWheelPair ? LeftIndex : INDEX_NONE,
+      bWheelPair ? RightIndex : INDEX_NONE,
+      bWheelPair ? INDEX_NONE : SingleIndex,
+      CarlaSteerTireAngleAt(SteerTireAngleTable, 0.10f),
+      CarlaSteerTireAngleAt(SteerTireAngleTable, 0.25f),
+      CarlaSteerTireAngleAt(SteerTireAngleTable, 0.50f),
+      CarlaSteerTireAngleAt(SteerTireAngleTable, 0.70f),
+      CarlaSteerTireAngleAt(SteerTireAngleTable, 1.00f));
+}
+
+float ACarlaWheeledVehicle::GetTireAngleForSteerInput(float Steer) const
+{
+  if (FMath::IsNaN(Steer))
+  {
+    return 0.0f;
+  }
+  UpdateSteerTireAngleTable();
+  const float Magnitude = FMath::Min(FMath::Abs(Steer), 1.0f);
+  const float Angle = (SteerTireAngleTable.Num() > 0)
+      ? CarlaSteerTireAngleAt(SteerTireAngleTable, Magnitude)
+      : Magnitude * SteerTireAngleLinearMaxRad;
+  return (Steer < 0.0f) ? -Angle : Angle;
+}
+
+float ACarlaWheeledVehicle::GetSteerInputForTireAngle(float TireAngleRad) const
+{
+  if (FMath::IsNaN(TireAngleRad))
+  {
+    return 0.0f;
+  }
+  UpdateSteerTireAngleTable();
+  const float Magnitude = FMath::Abs(TireAngleRad);
+  const TArray<float> &Table = SteerTireAngleTable;
+  float Input = 0.0f;
+  if (Table.Num() > 0)
+  {
+    if (Magnitude >= Table.Last())
+    {
+      Input = 1.0f;
+    }
+    else
+    {
+      // Table[0] == 0 <= Magnitude < Table.Last() and the table increases
+      // strictly, so this stops inside the table.
+      int32 K = 1;
+      while (Table[K] <= Magnitude)
+      {
+        ++K;
+      }
+      const float T = (Magnitude - Table[K - 1]) / (Table[K] - Table[K - 1]);
+      Input = (static_cast<float>(K - 1) + T) / static_cast<float>(Table.Num() - 1);
+    }
+  }
+  else if (SteerTireAngleLinearMaxRad > 0.0f)
+  {
+    Input = Magnitude / SteerTireAngleLinearMaxRad;
+  }
+  Input = FMath::Min(Input, 1.0f);
+  return (TireAngleRad < 0.0f) ? -Input : Input;
 }
 
 // =============================================================================
