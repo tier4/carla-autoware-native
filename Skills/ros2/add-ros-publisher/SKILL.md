@@ -49,7 +49,7 @@ and it has none of the Autoware rows ([[check-ue5-limitations]]):
 | middleware | `IPublisherMiddleware` impls | same, plus `ActiveMiddleware.{h,cpp}` |
 | map publisher | `CarlaMapPublisher` | **removed** — do not model a new publisher on it |
 | DVS camera | `CarlaDVSPublisher` | `CarlaDVSCameraPublisher` |
-| Autoware | — | `AutowareGNSSPublisher`, `AutowareVehicleStatusPublisher`, `AutowareControlSubscriber`, `AutowareSteeringCompensation.h` |
+| Autoware | — | `AutowareGNSSPublisher`, `AutowareVehicleStatusPublisher`, `AutowareControlSubscriber` |
 
 0.10.0 also factors the per-sensor maths out of the publishers into reusable
 headers you should use rather than re-derive: `CameraIntrinsics`, `ImuMath`,

@@ -31,9 +31,14 @@ and the server was started with the **single-dash** `-ros2` flag
 ([[run-carla-ue58-server]]).
 
 The pieces are ue58-only. `AutowareGNSSPublisher`,
-`AutowareVehicleStatusPublisher`, `AutowareControlSubscriber` and
-`AutowareSteeringCompensation.h` do not exist in the UE4 tree, and neither do the
-`sensor.other.autoware_gnss` / `sensor.other.vehicle_status` blueprints.
+`AutowareVehicleStatusPublisher` and `AutowareControlSubscriber` do not exist in
+the UE4 tree, and neither do the `sensor.other.autoware_gnss` /
+`sensor.other.vehicle_status` blueprints.
+
+`steering_tire_angle` (command and report) is mapped to and from each vehicle's
+normalized steer input by `ACarlaWheeledVehicle::GetSteerInputForTireAngle` /
+`GetTireAngleForSteerInput`, from that vehicle's own steering model in Chaos;
+there is no per-vehicle steering calibration to do.
 
 ## Instructions
 

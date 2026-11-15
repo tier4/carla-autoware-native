@@ -497,10 +497,10 @@ Read this before filing bugs — most of it is inherited and known.
   Bench2Drive / CARLA 0.9.15-era imagery. Behavior on UE5.8 visuals is
   **unvalidated** — expect degraded performance in some scenes; treat e2e mode
   as a pipeline reference, not a driving-quality benchmark.
-- **Control calibration.** The steering compensation was measured on the
-  Lincoln MKZ. Other ego
-  blueprints will track more loosely until you re-tune the vehicle model /
-  controller parameters.
+- **Control calibration.** The steering tire angle is mapped per vehicle from
+  its own steering model, but Autoware's vehicle model and controller gains
+  match the Lincoln MKZ. Other ego blueprints will track more loosely until you
+  re-tune the vehicle model / controller parameters.
 - **`fixed_delta_seconds` coupling.** Sensor rates, the sync-mode tick, and
   Autoware's expectations are coupled through the simulator step
   (`autoware_demo.py` sets it). Changing it changes effective sensor

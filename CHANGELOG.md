@@ -168,6 +168,7 @@
 #### ROS 2
 
 * Fixed **`/vehicle/status/gear_status` reporting NEUTRAL** while an Autoware-driven vehicle moves forward. Acceleration control never engages the transmission. While it is active, `GetVehicleCurrentGear()` now reports the first forward gear, so Autoware sees DRIVE. `get_telemetry_data()` reports the same gear.
+* Fixed **Autoware's steering tire angle being wrong on every vehicle but the Lincoln MKZ**. The command and the `steering_status` report went through one lookup table measured on the MKZ, so a vehicle with a smaller maximum wheel angle turned its wheels well short of the commanded angle. Each vehicle now maps the tire angle to and from its steer input with its own steering model in Chaos (wheel maximum steer angles, steering type, wheel layout), and `AutowareSteeringCompensation.h` is gone.
 * Fixed camera fx in the ROS 2 `CameraInfo`, large map actor tagging, and camera frame and timestamp consistency.
 
 #### Traffic Manager and agents

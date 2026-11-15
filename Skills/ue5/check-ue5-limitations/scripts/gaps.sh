@@ -32,7 +32,7 @@ Missing on UE 5.5 (ue5-dev) — verified by diffing the trees, not assumed.
 
 2. Autoware integration — absent entirely
    No AutowareGNSSPublisher, AutowareVehicleStatusPublisher,
-   AutowareControlSubscriber, AutowareSteeringCompensation.h; no
+   AutowareControlSubscriber; no
    sensor.other.autoware_gnss, no sensor.other.vehicle_status.
    -> run-autoware-ue58 has NO 5.5 counterpart. Do not attempt it.
 

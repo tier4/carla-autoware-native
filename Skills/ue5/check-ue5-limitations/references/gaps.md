@@ -48,7 +48,7 @@ QoS step differs (no `QosProfile.h`), everything else in that skill applies.
 
 Absent on 5.5: `publishers/AutowareGNSSPublisher.*`,
 `publishers/AutowareVehicleStatusPublisher.*`,
-`subscribers/AutowareControlSubscriber.*`, `ros2/AutowareSteeringCompensation.h`,
+`subscribers/AutowareControlSubscriber.*`,
 and the two blueprints `sensor.other.autoware_gnss` /
 `sensor.other.vehicle_status` (0 references in
 `ActorBlueprintFunctionLibrary.cpp` against 1 each on 5.8).
