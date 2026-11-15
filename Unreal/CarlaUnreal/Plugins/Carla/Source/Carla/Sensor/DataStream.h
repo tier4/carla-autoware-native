@@ -68,6 +68,12 @@ public:
     return Stream->AreClientsListening();
   }
 
+  bool AreStreamClientsListening()
+  {
+    check(Stream.has_value());
+    return Stream->AreStreamClientsListening();
+  }
+
 private:
 
   std::optional<StreamType> Stream;

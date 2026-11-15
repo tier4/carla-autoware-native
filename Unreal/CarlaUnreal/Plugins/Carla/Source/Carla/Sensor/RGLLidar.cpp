@@ -143,7 +143,7 @@ void ARGLLidar::PostPhysTick(UWorld* World, ELevelTick TickType, float DeltaSeco
     }
 
     // Send data to clients via the CARLA data pipeline (skip if no listeners)
-    if (AreClientsListening())
+    if (AreStreamClientsListening())
     {
         auto DataStream = GetDataStream(*this);
         DataStream.SerializeAndSend(*this, LidarMeasurement, DataStream.PopBufferFromPool());
@@ -234,7 +234,12 @@ void ARGLLidar::SimulateLidar(float DeltaSeconds)
     IRGLBackend* Backend = FRGLBackendRegistry::Get();
     if (!Backend) return;
 
-    const bool bNeedResults = AreClientsListening() || bRglShowLidarPoints;
+    // The point cloud of this sensor reaches ROS only through RGL itself (its own
+    // ROS2 node or UDP packets), never through the ROS2 path of the data stream. The
+    // ROS visibility of the stream (on by default, ROS2TopicVisibility) therefore
+    // must not count as a listener: it would read every point back from the GPU and
+    // repack it each scan for nobody.
+    const bool bNeedResults = AreStreamClientsListening() || bRglShowLidarPoints;
 
     FRGLTickResult Result = Backend->Tick(
         RGLSessionHandle,
