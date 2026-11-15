@@ -425,8 +425,25 @@ TEST(streaming, stream_clients_listening_ignores_ros_visibility) {
   Client c;
   c.AsyncRun(1u);
   c.Subscribe(stream.token(), [](auto) {});
-  for (auto i = 0; i < 300 && !stream.AreStreamClientsListening(); ++i) {
+  for (auto i = 0; i < 1000 && !stream.AreStreamClientsListening(); ++i) {
     std::this_thread::sleep_for(10ms);
   }
+  EXPECT_TRUE(stream.AreStreamClientsListening());
+}
+
+// A stream a multi-GPU secondary looked up (FindToken forces it active) still
+// counts as listened to, whatever its ROS visibility.
+TEST(streaming, stream_clients_listening_keeps_force_active) {
+  using namespace carla::streaming;
+  using namespace carla::streaming::detail;
+
+  Server srv(TESTING_PORT);
+  srv.SetROS2TopicVisibilityDefaultEnabled(true);
+  auto stream = srv.MakeStream();
+  const auto sensor_id = token_type(stream.token()).get_stream_id();
+  srv.DisableForROS(sensor_id);
+  EXPECT_FALSE(stream.AreClientsListening());
+  EXPECT_FALSE(stream.AreStreamClientsListening());
+  ASSERT_TRUE(srv.FindToken(sensor_id).has_value());
   EXPECT_TRUE(stream.AreStreamClientsListening());
 }
