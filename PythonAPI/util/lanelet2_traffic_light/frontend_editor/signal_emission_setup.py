@@ -12,15 +12,15 @@ import unreal
 REFERENCE_PEAK = 100000.0
 # Peak input values include the authored color and intensity parameters.
 EMISSION_SCALES = {
-    "/T4/TrafficLightSample/VehicleTrafficLight/Lens": REFERENCE_PEAK / 30.0,
-    "/T4/Lanelet2TrafficLight/M_PedestrianFigure": REFERENCE_PEAK / (30.0 * 90.0),
-    "/T4/TrafficLightSample/VehicleTrafficLight/M_JPArrowLit": REFERENCE_PEAK / 20.0,
-    "/T4/TrafficLightSample/FlashingBeacon/M_JPFlashingBeaconLit": REFERENCE_PEAK / 20.0,
+    "/T4/TrafficLightSample/VehicleTrafficLight/Lens": REFERENCE_PEAK / 30.0 * 2.0,
+    "/T4/Lanelet2TrafficLight/M_PedestrianFigure": REFERENCE_PEAK / (30.0 * 90.0) * 16.0,
+    "/T4/TrafficLightSample/VehicleTrafficLight/M_JPArrowLit": REFERENCE_PEAK / 20.0 * 2.0,
+    "/T4/TrafficLightSample/FlashingBeacon/M_JPFlashingBeaconLit": REFERENCE_PEAK / 20.0 * 2.0,
 }
 SCALE_DESCRIPTION = "Physical daylight emission scale"
 OUTPUT_DESCRIPTION = "Exposure-limited signal emission"
 NIGHT_SCALE = 0.01
-EXPOSURE_LIMIT = 1.0
+EXPOSURE_LIMIT = 16.0
 WEATHER_COLLECTION = "/Game/Carla/Blueprints/Weather/Materials/WeatherMaterialParameters"
 
 
