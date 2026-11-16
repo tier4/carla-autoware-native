@@ -66,6 +66,10 @@ class ZenohPublisherMiddleware : public IPublisherMiddleware {
     // The profile is advertised in the liveliness token so rmw_zenoh peers see
     // a compatible endpoint; zenoh delivery semantics are not differentiated
     // (see zenoh_qos_keyexpr).
+    if (qos.HasTimedPolicies()) {
+      log_warning("ZenohPublisherMiddleware (", topic_name,
+                  "): deadline, lifespan and liveliness are advertised but not enforced");
+    }
     return InitImpl(topic_name, zenoh_qos_keyexpr(qos));
   }
 

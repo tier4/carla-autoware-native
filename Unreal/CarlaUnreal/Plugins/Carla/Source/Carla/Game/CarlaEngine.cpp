@@ -535,7 +535,7 @@ void FCarlaEngine::NotifyInitGame(const UCarlaSettings &Settings)
       {
         if (!Spec.IsEmpty() && !ROS2->SetSensorQos(Class, TCHAR_TO_UTF8(*Spec)))
         {
-          UE_LOG(LogCarla, Error, TEXT("ROS2: invalid %s QoS '%s' (expected <reliable|best_effort>[:<depth>]); using the default."), Name, *Spec);
+          UE_LOG(LogCarla, Error, TEXT("ROS2: invalid %s QoS '%s' (expected <reliable|best_effort>[:<depth>] or key=value pairs); using the default."), Name, *Spec);
         }
       };
       ApplySensorQos(carla::ros2::ROS2::SensorQosClass::Camera, Settings.ROS2CameraQos, TEXT("camera"));

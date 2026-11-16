@@ -107,10 +107,14 @@ public:
   // subscribers and marks the vehicle as the Autoware ego so
   // ProcessDataFromStatusSensor accepts its status stream. Default behavior
   // (both flags false) is unchanged for non-Autoware users.
+  // autoware_control_qos, when set, replaces the QoS of the six Autoware
+  // command subscribers (default RELIABLE / TRANSIENT_LOCAL / KEEP_LAST 1);
+  // it is ignored without enable_autoware_control.
   void RegisterVehicle(
       void *actor, std::string ros_name, std::string frame_id, ActorCallback callback,
       bool enable_ackermann_control = false,
-      bool enable_autoware_control = false);
+      bool enable_autoware_control = false,
+      std::optional<QosProfile> autoware_control_qos = std::nullopt);
   void UnregisterVehicle(void *actor);
 
   // Exact-topic-name override (tier4 port of the ros_topic_name attribute
@@ -125,7 +129,8 @@ public:
   // Applies to camera publishers created after the call.
   void SetCameraImageTopicSuffix(std::string suffix);
   // tier4: optional QoS of the sensor data topics, "<reliability>[:<depth>]"
-  // (see QosProfile::FromString). Unset (the default) keeps the middleware
+  // or the key=value form with any of the eight policies (see
+  // QosProfile::FromString). Unset (the default) keeps the middleware
   // default, as upstream. Applies to publishers created after the call.
   enum class SensorQosClass : uint8_t { Camera = 0, Lidar = 1, Imu = 2 };
   bool SetSensorQos(SensorQosClass sensor_class, const std::string &spec);

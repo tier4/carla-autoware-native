@@ -166,7 +166,10 @@ public:
   FString ROS2CameraImageTopic = TEXT("image");
 
   /// tier4: optional QoS of the ROS2 sensor data topics, "<reliable|best_effort>[:<depth>]"
-  /// (e.g. "best_effort:1"). Empty (default) keeps the middleware default, as upstream.
+  /// (e.g. "best_effort:1") or comma-separated key=value pairs over the eight ROS 2 QoS
+  /// policies (e.g. "reliability=best_effort,durability=volatile,history=keep_last,depth=1,
+  /// deadline=inf,lifespan=inf,liveliness=automatic,lease=inf"; see QosProfile::FromString).
+  /// Empty (default) keeps the middleware default, as upstream.
   /// Set via -ros2-camera-qos= / -ros2-lidar-qos= / -ros2-imu-qos= or ROS2CameraQos /
   /// ROS2LidarQos / ROS2ImuQos in the [CARLA/Server] section of the CARLA settings file.
   UPROPERTY(Category = "Quality Settings/ROS2",

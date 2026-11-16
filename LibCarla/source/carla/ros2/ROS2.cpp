@@ -293,7 +293,8 @@ void ROS2::UnregisterSensorLocked(void *actor) {
 void ROS2::RegisterVehicle(
     void *actor, std::string ros_name, std::string frame_id, ActorCallback callback,
     bool enable_ackermann_control,
-    bool enable_autoware_control) {
+    bool enable_autoware_control,
+    std::optional<QosProfile> autoware_control_qos) {
   std::lock_guard<std::mutex> lock(_mutex);
   DropPublishersLocked(actor);
   _registrations.insert_or_assign(
@@ -319,7 +320,9 @@ void ROS2::RegisterVehicle(
   // ego control subscriber); Ackermann stays opt-in per youtalk's review.
   if (enable_autoware_control) {
     _autoware_vehicles.insert(actor);
-    _subscribers.insert({actor, std::make_shared<AutowareControlSubscriber>(actor, std::move(frame_id))});
+    _subscribers.insert({actor, std::make_shared<AutowareControlSubscriber>(
+        actor, std::move(frame_id),
+        autoware_control_qos.value_or(QosProfile::ReliableTransientLocal()))});
   } else if (enable_ackermann_control) {
     _subscribers.insert({actor, std::make_shared<AckermannControlSubscriber>(actor, base_topic_name, std::move(frame_id))});
   } else {
@@ -345,7 +348,8 @@ void ROS2::SetCameraImageTopicSuffix(std::string suffix) {
 bool ROS2::SetSensorQos(SensorQosClass sensor_class, const std::string &spec) {
   QosProfile qos;
   if (!QosProfile::FromString(spec, qos)) {
-    log_error("ROS2::SetSensorQos: invalid QoS", spec, "(expected <reliable|best_effort>[:<depth>])");
+    log_error("ROS2::SetSensorQos: invalid QoS", spec,
+              "(expected <reliable|best_effort>[:<depth>] or key=value pairs, see QosProfile::FromString)");
     return false;
   }
   std::lock_guard<std::mutex> lock(_mutex);

@@ -75,8 +75,11 @@ them, so it cannot drift from your build. Measured contract:
 | `rt/vehicle/status/hazard_lights_status` | `rt/vehicle/engage` |
 
 Status is `RELIABLE / VOLATILE / KEEP_LAST 1`; commands are `RELIABLE /
-TRANSIENT_LOCAL / KEEP_LAST 1`, so a late-joining simulator still receives the
-last command. A ROS 2 node sees these without the `rt/` prefix.
+TRANSIENT_LOCAL / KEEP_LAST 1` by default, so a late-joining simulator still
+receives the last command. An Autoware that publishes its commands VOLATILE
+never matches those readers (the ego does not move): set the vehicle attribute
+`ros2_autoware_control_qos` to a VOLATILE profile, listing all eight policies
+(see `Docs/autoware.md`). A ROS 2 node sees these without the `rt/` prefix.
 
 `sensors` confirms the rig's blueprints exist and prints each one's ROS
 attributes. Both `ros_name` (a topic *segment*) and `ros_topic_name` (the exact

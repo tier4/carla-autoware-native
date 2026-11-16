@@ -143,7 +143,30 @@ CARLA subscribes to these:
 | `/control/command/emergency_cmd` | `tier4_vehicle_msgs/VehicleEmergencyStamped` | Received, not applied. |
 | `/vehicle/engage` | `autoware_vehicle_msgs/Engage` | Received, not applied. |
 
-CARLA publishes the status topics as RELIABLE and VOLATILE with depth 1. It subscribes to the topics above as RELIABLE and TRANSIENT_LOCAL with depth 1. A publisher to them must offer TRANSIENT_LOCAL durability, for example `ros2 topic pub --qos-durability transient_local ...`.
+CARLA publishes the status topics as RELIABLE and VOLATILE with depth 1. By default it subscribes to the topics above as RELIABLE and TRANSIENT_LOCAL with depth 1, so a publisher to them must offer TRANSIENT_LOCAL durability, for example `ros2 topic pub --qos-durability transient_local ...`.
+
+An Autoware version that publishes its commands VOLATILE does not match those readers: set the `ros2_autoware_control_qos` attribute before spawning to give all six command subscribers another QoS. The value is a comma-separated list of the eight ROS 2 QoS policies:
+
+```py
+ego_bp.set_attribute('ros2_autoware_control_qos',
+    'reliability=reliable,durability=volatile,history=keep_last,depth=1,'
+    'deadline=inf,lifespan=inf,liveliness=automatic,lease=inf')
+```
+
+| Key | Values |
+| --- | --- |
+| `reliability` | `reliable`, `best_effort` |
+| `durability` | `volatile`, `transient_local` |
+| `history` | `keep_last`, `keep_all` |
+| `depth` | 1 to 100000 |
+| `deadline` | seconds greater than zero (up to nine decimals), or `inf` |
+| `lifespan` | seconds, or `inf` |
+| `liveliness` | `automatic`, `manual_by_topic` |
+| `lease` | the liveliness lease duration: seconds, or `inf` |
+
+A key left out keeps the default of that policy (RELIABLE, VOLATILE, KEEP_LAST, depth 1, no deadline, infinite lifespan, AUTOMATIC liveliness with an infinite lease), so list all eight to stay independent of the defaults. An empty value keeps the subscribers' default QoS, and a value that does not parse fails the spawn. `ros2 topic info --verbose /control/command/control_cmd` shows the QoS of CARLA's subscription. A VOLATILE reader matches both VOLATILE and TRANSIENT_LOCAL publishers, but does not receive a command published before it joined.
+
+The `-ros2-camera-qos=`, `-ros2-lidar-qos=` and `-ros2-imu-qos=` server options take the same list, or the short form `<reliable|best_effort>[:<depth>]`.
 
 The steering tire angle in `control_cmd` and `steering_status` is the front wheels' angle in a bicycle model. CARLA maps it to and from each vehicle's steer input with that vehicle's own steering model in the physics engine (its wheels' maximum steer angles, its steering type and its wheel layout), so a vehicle needs no steering calibration of its own. The mapping assumes a flat steering curve, which `ros2_autoware_control` sets when the vehicle spawns, and leaves out tire slip.
 

@@ -5,6 +5,7 @@
 #pragma once
 
 #include "carla/ros2/middleware/ISubscriberMiddleware.h"
+#include "carla/ros2/middleware/cyclonedds/CycloneDDSQos.h"
 #include "carla/ros2/middleware/cyclonedds/CycloneDDSSertype.h"
 #include "carla/ros2/types/CdrSerialization.h"
 #include "carla/ros2/types/CdrTopicInfo.h"
@@ -104,20 +105,7 @@ class CycloneDDSSubscriberMiddleware : public ISubscriberMiddleware {
 
     dds_qos_t* qos = dds_create_qos();
     if (qos_profile != nullptr) {
-      dds_qset_reliability(qos,
-          qos_profile->reliability == QosProfile::Reliability::Reliable
-              ? DDS_RELIABILITY_RELIABLE
-              : DDS_RELIABILITY_BEST_EFFORT,
-          DDS_SECS(1));
-      dds_qset_durability(qos,
-          qos_profile->durability == QosProfile::Durability::TransientLocal
-              ? DDS_DURABILITY_TRANSIENT_LOCAL
-              : DDS_DURABILITY_VOLATILE);
-      dds_qset_history(qos,
-          qos_profile->history == QosProfile::History::KeepLast
-              ? DDS_HISTORY_KEEP_LAST
-              : DDS_HISTORY_KEEP_ALL,
-          qos_profile->history_depth);
+      ApplyQosProfile(*qos_profile, qos);
     } else {
       dds_qset_reliability(qos, DDS_RELIABILITY_RELIABLE, DDS_SECS(1));
       dds_qset_history(qos, DDS_HISTORY_KEEP_LAST, 1);
