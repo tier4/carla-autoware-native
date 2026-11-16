@@ -7,7 +7,6 @@
 #include "carla/ros2/publishers/AutowareVehicleStatusPublisher.h"
 
 #include "carla/Logging.h"
-#include "carla/ros2/AutowareSteeringCompensation.h"
 #include "carla/ros2/middleware/QosProfile.h"
 #include "carla/ros2/publishers/PublisherImpl.h"
 #include "carla/ros2/types/msg/ControlModeReport.h"
@@ -72,11 +71,10 @@ void AutowareVehicleStatusPublisher::SetVelocity(
 
 void AutowareVehicleStatusPublisher::SetSteering(float steering_tire_angle) {
   auto *report = _impl->steering.GetMessage();
-  // Report the *actual* tire angle: apply the inverse compensation LUT so the
-  // published state matches what the command-side GetSteeringInput mapping
-  // asked the vehicle to do (tier4 AutowarePublisher::SetSteering).
-  report->steering_tire_angle =
-      autoware_steering_compensation::GetSteeringOutput(steering_tire_angle);
+  // Already the tire angle: the vehicle status sensor maps the vehicle's steer
+  // input to it with the vehicle's own steering model, the inverse of the
+  // mapping applied to the command.
+  report->steering_tire_angle = steering_tire_angle;
 }
 
 void AutowareVehicleStatusPublisher::SetControlMode(const ControlMode mode) {

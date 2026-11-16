@@ -31,8 +31,9 @@ namespace ros2 {
 //
 // Control application (tier4 AutowareController::GetControl): only
 // longitudinal.acceleration drives the vehicle (velocity/jerk intentionally
-// ignored — pure acceleration control); steer =
-// GetSteeringInput(-steering_tire_angle) via the compensation LUT; steer_speed
+// ignored — pure acceleration control); steer = -steering_tire_angle, a tire
+// angle in radians in CARLA's sign convention, which the vehicle maps to its
+// normalized steer input with its own steering model; steer_speed
 // = -steering_tire_rotation_rate when defined, else 0. The remaining commands
 // are drained each frame but not yet applied (tier4 TODO preserved for the
 // Unreal phase).

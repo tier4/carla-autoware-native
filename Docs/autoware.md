@@ -145,6 +145,8 @@ CARLA subscribes to these:
 
 CARLA publishes the status topics as RELIABLE and VOLATILE with depth 1. It subscribes to the topics above as RELIABLE and TRANSIENT_LOCAL with depth 1. A publisher to them must offer TRANSIENT_LOCAL durability, for example `ros2 topic pub --qos-durability transient_local ...`.
 
+The steering tire angle in `control_cmd` and `steering_status` is the front wheels' angle in a bicycle model. CARLA maps it to and from each vehicle's steer input with that vehicle's own steering model in the physics engine (its wheels' maximum steer angles, its steering type and its wheel layout), so a vehicle needs no steering calibration of its own. The mapping assumes a flat steering curve, which `ros2_autoware_control` sets when the vehicle spawns, and leaves out tire slip.
+
 `autoware_demo.py` publishes the sensor kit on these topics:
 
 | Topic | Type | Sensor |
@@ -181,7 +183,7 @@ python3 -m venv ~/.venvs/carla-map-tools
 
 - **Traffic lights come from the simulator, not from perception.** In `classical` mode the launcher starts two helpers that read CARLA's traffic-light states, match each light to its lanelet2 regulatory element and publish them on Autoware's external input, `/perception/traffic_light_recognition/external/traffic_signals`. The camera classifier is deliberately left unfed, because it reports `UNKNOWN` for CARLA's rendered lights and that would be merged with the authoritative state. `e2e` mode publishes no traffic-light state at all.
 - **Only `control_cmd` moves the vehicle.** Gear, indicator, hazard, emergency and engage commands are received but not applied, and `control_mode` always reports `AUTONOMOUS`.
-- **Steering is tuned for the Lincoln MKZ.** Steering compensation was measured on it and Autoware's `sample_vehicle` gains match it; other vehicles track their path more loosely until re-tuned.
+- **Autoware's `sample_vehicle` matches the Lincoln MKZ.** Its gains were tuned against it. The steering tire angle is mapped per vehicle (see [Topics](#topics)), but other vehicles track their path more loosely until Autoware's vehicle parameters and gains are re-tuned for them.
 - **Goals must be on a driving lane.** An off-lane goal is rejected by Autoware's mission planner after startup, and the vehicle never moves.
 - **The simulation step drives sensor rates.** Changing `--hz_rate` changes the effective sensor frequencies Autoware sees. The launcher runs `autoware_demo.py --hz_rate 20 --resync`, which is the validated configuration, rather than the script's own default of 100.
 - **VAD is not validated on Unreal Engine 5.8 visuals.** Its weights were trained on CARLA 0.9.15 imagery; treat `e2e` as a pipeline reference. Its first run builds TensorRT engines, which takes a long time once and is then cached.

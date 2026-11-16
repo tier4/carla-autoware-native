@@ -83,9 +83,8 @@ public:
   AutowareVehicleStatusPublisher &operator=(const AutowareVehicleStatusPublisher &) = delete;
 
   void SetVelocity(float longitudinal_velocity, float lateral_velocity, float heading_rate);
-  /// @param steering_tire_angle CARLA-side steering value; the inverse
-  /// compensation LUT (GetSteeringOutput) is applied before publishing so
-  /// Autoware sees the actual tire angle.
+  /// @param steering_tire_angle Tire angle [rad] in Autoware's sign convention
+  /// (positive to the left), published as given.
   void SetSteering(float steering_tire_angle);
   void SetControlMode(ControlMode mode);
   void SetGear(Gear gear);

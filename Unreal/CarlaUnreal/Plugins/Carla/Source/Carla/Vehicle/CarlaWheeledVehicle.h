@@ -162,6 +162,20 @@ public:
   UFUNCTION(Category = "CARLA Wheeled Vehicle", BlueprintCallable)
   float GetMaximumSteerAngle() const;
 
+  /// Bicycle-model tire angle, in radians, that the normalized steer input
+  /// Steer ([-1, 1], positive to the right) turns the front wheels to, with the
+  /// same sign. Computed from the engine's steering model for this vehicle's
+  /// wheels and steering setup, at a steering speed scale of 1 (a flat steering
+  /// curve, as vehicles under Autoware control have). Falls back to Steer
+  /// times GetMaximumSteerAngle() in radians when the vehicle has no usable
+  /// wheel setup. Game thread only.
+  float GetTireAngleForSteerInput(float Steer) const;
+
+  /// Inverse of GetTireAngleForSteerInput: the normalized steer input, clamped
+  /// to [-1, 1], that turns the front wheels to the bicycle-model tire angle
+  /// TireAngleRad (radians, positive to the right). Game thread only.
+  float GetSteerInputForTireAngle(float TireAngleRad) const;
+
   /// @}
   // ===========================================================================
   /// @name AI debug state
@@ -604,6 +618,22 @@ private:
   /// Applies LastPhysicsControl.Wheels to the live Chaos wheels. Call it after
   /// every RecreatePhysicsState(), which resets them to the class defaults.
   void ApplyWheelPhysicsControl();
+
+  /// Rebuilds SteerTireAngleTable when its inputs (the steered wheels' maximum
+  /// angles, the steering type and angle ratio, the wheel count) changed since
+  /// the last build. Called from the const tire angle getters, hence the
+  /// mutable cache below; those getters only run on the game thread.
+  void UpdateSteerTireAngleTable() const;
+
+  /// What SteerTireAngleTable was built from, to detect a change.
+  mutable TArray<float> SteerTireAngleTableKey;
+
+  /// Bicycle-model tire angle [rad] at the steer inputs k / (Num() - 1),
+  /// k = 0 .. Num() - 1, strictly increasing. Empty while the linear fallback
+  /// (SteerTireAngleLinearMaxRad per unit of steer input) is in use.
+  mutable TArray<float> SteerTireAngleTable;
+
+  mutable float SteerTireAngleLinearMaxRad = 0.0f;
 
   bool bAckermannControlActive = false;
   FAckermannController AckermannController;

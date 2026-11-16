@@ -44,8 +44,7 @@ cmd_probe() {
   local ros2="${CARLA_UE58_ROOT}/LibCarla/source/carla/ros2"
   for f in publishers/AutowareGNSSPublisher.cpp \
            publishers/AutowareVehicleStatusPublisher.cpp \
-           subscribers/AutowareControlSubscriber.cpp \
-           AutowareSteeringCompensation.h; do
+           subscribers/AutowareControlSubscriber.cpp; do
     [ -f "${ros2}/${f}" ] && say "  present ${f}" || say "  MISSING ${f}"
   done
 

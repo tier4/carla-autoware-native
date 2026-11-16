@@ -116,7 +116,9 @@ public class Carla :
       "PhysicsCore",
       "MeshConversion",
       "Chaos",
-      "ChaosVehicles"
+      "ChaosVehicles",
+      // Chaos::FSimpleSteeringSim (ACarlaWheeledVehicle's tire angle mapping).
+      "ChaosVehiclesCore"
     });
 
     PublicDependencyModuleNames.AddRange(new string[]

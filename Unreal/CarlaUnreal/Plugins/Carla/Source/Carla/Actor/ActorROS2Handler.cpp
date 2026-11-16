@@ -53,8 +53,11 @@ void ActorROS2Handler::operator()(carla::ros2::VehicleAccelerationControl &Sourc
   ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(_Actor);
   if (!IsValid(Vehicle)) return;
 
-  // /control/command/control_cmd: use acceleration [m/s^2] + steering for acceleration control
-  Vehicle->ApplyVehicleAccelerationControl(Source.acceleration, Source.steer, Source.steer_speed);
+  // /control/command/control_cmd: use acceleration [m/s^2] + steering for acceleration control.
+  // Source.steer is the commanded tire angle [rad, CARLA sign]; this vehicle's
+  // own steering model turns it into the normalized steer input.
+  const float Steer = Vehicle->GetSteerInputForTireAngle(Source.steer);
+  Vehicle->ApplyVehicleAccelerationControl(Source.acceleration, Steer, Source.steer_speed);
 }
 
 void ActorROS2Handler::operator()(carla::ros2::MessageControl Message)

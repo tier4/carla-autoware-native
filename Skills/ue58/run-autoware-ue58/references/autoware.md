@@ -11,7 +11,6 @@ CARLA 0.10.0) or measured against a live 0.10.0 server on this machine. The
 | `AutowareVehicleStatusPublisher` | `LibCarla/source/carla/ros2/publishers/` | read |
 | `AutowareGNSSPublisher` | same | read |
 | `AutowareControlSubscriber` | `LibCarla/source/carla/ros2/subscribers/` | read |
-| `AutowareSteeringCompensation.h` | `LibCarla/source/carla/ros2/` | read |
 | `sensor.other.autoware_gnss` | blueprint library, 11 attributes | **measured** |
 | `sensor.other.vehicle_status` | blueprint library, 5 attributes | **measured** |
 | `autoware_demo.py` | `PythonAPI/examples/` | read |

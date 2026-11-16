@@ -50,7 +50,7 @@ bash scripts/gaps.sh diff      # measured, if a ue58 tree is also present
 | Gap | What is absent on 5.5 | What it breaks |
 |---|---|---|
 | **ROS 2 middleware** | `ros2/middleware/` (RMW abstraction, `QosProfile.h`, `ActiveMiddleware`) and the `CARLA_CYCLONEDDS_*` / `CARLA_ZENOH_C_*` options | FastDDS only — `--rmw cyclonedds` / `--rmw zenoh` do not exist ([[run-carla-ue58-server]]); [[add-ros-publisher]]'s `QosProfile.h` step does not apply |
-| **Autoware** | both publishers, the control subscriber, `AutowareSteeringCompensation.h`, `sensor.other.autoware_gnss`, `sensor.other.vehicle_status` | [[run-autoware-ue58]] has **no 5.5 counterpart** |
+| **Autoware** | both publishers, the control subscriber, `sensor.other.autoware_gnss`, `sensor.other.vehicle_status` | [[run-autoware-ue58]] has **no 5.5 counterpart** |
 | **DLSS + ray-traced lens** | `enable_dlss`, `dlss_screen_percentage`, `SceneCaptureCamera_RayTracedLens.cpp`, `CARLA_DLSS_SDK_PATH` | `sensor.camera.rt_lens` does not exist; [[create-sensor]]'s DLSS attributes are 5.8-only |
 | **OFPA large-map mount** | `MountExternalPackageRoots` in `Carla.cpp` | **Town12 / Town13 / Town15 load with an empty World Partition and a black screen.** 5.8 absorbed this patch upstream; on 5.5 it is still a manual fix |
 | **A few API additions** | `World.get_ego_spawn_points`, `World.set_publish_tf` / `get_publish_tf`, `World.spawn_custom_mesh`, `Actor.enable_constant_acceleration` / `disable_constant_acceleration` | those calls raise `AttributeError`; the rest of the python-api group applies unchanged |
