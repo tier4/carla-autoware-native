@@ -63,6 +63,11 @@ private:
     /// Simulate LiDAR for the current tick: delegates to IRGLBackend.
     void SimulateLidar(float DeltaSeconds);
 
+    /// Self cutout: find the vehicle this sensor is attached to (through any number of
+    /// intermediate actors) and tell the backend when it changes. Called every tick, since
+    /// the sensor is attached after it is spawned.
+    void UpdateRglSelfCutoutVehicle(IRGLBackend& Backend);
+
     // ---- Configuration ----
 
     /// LiDAR parameters (channels, range, FOV, etc.) - same struct as ARayCastLidar.
@@ -97,6 +102,16 @@ private:
 
     /// If true, RGL handles ROS2 publishing; skip CARLA's built-in ROS2 publish.
     bool bRglRos2Active = false;
+
+    /// Self cutout radius in meters ("rgl_self_cutout_radius"); 0 = off. The vehicle's surfaces
+    /// within it (and in this lidar's vertical field of view) are removed for every RGL lidar.
+    float RglSelfCutoutRadius = 0.0f;
+
+    /// Vehicle last reported to the backend for the self cutout.
+    TWeakObjectPtr<AActor> RglSelfCutoutVehicle;
+
+    /// True once the self cutout vehicle (possibly none) has been reported.
+    bool bRglSelfCutoutReported = false;
 
     /// Draw LiDAR points in the UE5 viewport. Called from PostPhysTick (game thread).
     void RglDrawLidarPoints(UWorld* World);

@@ -95,6 +95,7 @@
 
 #### Sensors and content
 
+* **Added `rgl_self_cutout_radius` to `sensor.lidar.rgl`** (metres, default 0 = off). Since RGL sees skeletal meshes, a lidar mounted inside a vehicle whose mesh models the lidar housing as a closed shape saw nothing but that housing. With a radius set, the faces of the parent vehicle that lie within the radius of the lidar and inside its vertical field of view are left out of the RGL scene. The faces disappear for every RGL lidar in the scene, so keep the radius about the size of the housing.
 * **Clamped `sensor.camera.rt_lens`'s `samples_per_pixel`** to `r.PathTracing.MaxFramePassCount`, with a warning: asking for more samples than the engine can run in a frame used to deliver a partially accumulated, noisier image every frame.
 * **Static props now report their semantic tags** (`Static`) through `actor.semantic_tags`, `get_actor()` and `get_actors()`; the segmentation cameras were already right.
 * **Disabled Nanite on content meshes with translucent materials** (Town11/Town13 road signs, Town13/15 building glass, bus stops, streetlights). Nanite only supports opaque and masked blends, so those sections rendered with the default material (whole glass towers were missing from Town13) and spammed `Invalid material` warnings.

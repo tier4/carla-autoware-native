@@ -16,10 +16,12 @@
 
 #include <util/ue-header-guard-begin.h>
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Math/UnrealMathUtility.h"
 #include <util/ue-header-guard-end.h>
 
 #include <cmath>
+#include <cstdio>
 
 // ============================================================================
 // Helper macros
@@ -643,6 +645,59 @@ void FRGLBackendImpl::DestroySession(FRGLSessionHandle Handle)
 }
 
 // ============================================================================
+// SetSelfCutout
+// ============================================================================
+
+void FRGLBackendImpl::SetSelfCutout(FRGLSessionHandle Handle, AActor* Vehicle, float RadiusCm)
+{
+    if (!Handle)
+    {
+        return;
+    }
+    FRGLSession* Session = static_cast<FRGLSession*>(Handle);
+    Session->SelfCutoutVehicle = Vehicle;
+    Session->SelfCutoutRadiusCm = FMath::Max(0.0f, RadiusCm);
+    if (Session->SelfCutoutRadiusCm <= 0.0f)
+    {
+        return;
+    }
+
+    // Vertical field of view of the ray pattern (see GenerateRayPattern): the per-channel angles when
+    // given (channels beyond that list fire at 0 degrees), else the uniform [lower_fov, upper_fov].
+    const FLidarDescription& Desc = Session->Config.LidarDesc;
+    float MinElevation = FMath::Min(Desc.LowerFovLimit, Desc.UpperFovLimit);
+    float MaxElevation = FMath::Max(Desc.LowerFovLimit, Desc.UpperFovLimit);
+    if (Desc.VerticalAngles.Num() > 0)
+    {
+        MinElevation = MaxElevation = Desc.VerticalAngles[0];
+        for (const float Angle : Desc.VerticalAngles)
+        {
+            MinElevation = FMath::Min(MinElevation, Angle);
+            MaxElevation = FMath::Max(MaxElevation, Angle);
+        }
+        if (Desc.Channels > static_cast<uint32>(Desc.VerticalAngles.Num()))
+        {
+            MinElevation = FMath::Min(MinElevation, 0.0f);
+            MaxElevation = FMath::Max(MaxElevation, 0.0f);
+        }
+    }
+    Session->SelfCutoutMinElevationDeg = MinElevation;
+    Session->SelfCutoutMaxElevationDeg = MaxElevation;
+
+    // One grep-friendly line per change (Shipping compiles RGLLog::Info out, hence stderr there). The
+    // sensor key is the session handle, as in the scene manager's rgl_self_cutout line.
+    const FString Line = FString::Printf(
+        TEXT("rgl_self_cutout_sensor sensor=0x%llx vehicle=%s radius_m=%.3f elevation_deg=%.2f..%.2f"),
+        static_cast<unsigned long long>(reinterpret_cast<UPTRINT>(Session)), *GetNameSafe(Vehicle),
+        Session->SelfCutoutRadiusCm * RGLCoord::UE_TO_RGL, MinElevation, MaxElevation);
+#if UE_BUILD_SHIPPING
+    fprintf(stderr, "%s\n", TCHAR_TO_UTF8(*Line));
+#else
+    RGLLog::Info(TCHAR_TO_UTF8(*Line));
+#endif
+}
+
+// ============================================================================
 // GenerateRayPattern
 // ============================================================================
 
@@ -963,6 +1018,16 @@ FRGLTickResult FRGLBackendImpl::Tick(
             SensorWorldTransform.GetLocation(),
             RegistrationDistanceCm,
             SimulationTime);
+        if (Session->SelfCutoutRadiusCm > 0.0f)
+        {
+            SceneMgr.SetSensorSelfCutout(
+                static_cast<const void*>(Session),
+                Session->SelfCutoutVehicle.Get(),
+                Session->SelfCutoutRadiusCm,
+                SensorWorldTransform,
+                Session->SelfCutoutMinElevationDeg,
+                Session->SelfCutoutMaxElevationDeg);
+        }
         SceneMgr.Update(World, SimulationTime);
     }
 

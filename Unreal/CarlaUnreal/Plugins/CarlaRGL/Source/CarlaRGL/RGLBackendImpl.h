@@ -64,6 +64,12 @@ struct FRGLSession
     bool bRos2Active = false;
     bool bUdpActive = false;
 
+    // ---- Self cutout (rgl_self_cutout_radius; see IRGLBackend::SetSelfCutout) ----
+    TWeakObjectPtr<AActor> SelfCutoutVehicle;
+    float SelfCutoutRadiusCm = 0.0f;           // <= 0 = off
+    float SelfCutoutMinElevationDeg = 0.0f;    // vertical field of view of the ray pattern
+    float SelfCutoutMaxElevationDeg = 0.0f;
+
     bool AllNodesValid() const
     {
         return UseRaysNode && SetRangeNode && RaysTransformNode && RaytraceNode &&
@@ -91,6 +97,7 @@ public:
         float& InOutHorizontalAngle,
         bool bNeedResults,
         bool bNeedWorldPoints) override;
+    virtual void SetSelfCutout(FRGLSessionHandle Handle, AActor* Vehicle, float RadiusCm) override;
 
 private:
     double SimulationTime = -1.0;  // Elapsed since episode start; -1 = not set

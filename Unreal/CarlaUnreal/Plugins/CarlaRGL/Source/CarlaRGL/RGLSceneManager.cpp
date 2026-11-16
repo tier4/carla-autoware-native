@@ -2159,6 +2159,7 @@ void FRGLSceneManager::ApplyTickPolicy(USkeletalMeshComponent* Comp, FSkeletalEn
 bool FRGLSceneManager::RegisterSkeletalComponent(USkeletalMeshComponent* Comp)
 {
     if (!IsValid(Comp) || SkeletalEntityMap.Contains(Comp)) return false;
+    if (WantsSelfCutout(Comp)) return RegisterSkeletalCutoutComponent(Comp);   // own meshes, never the shared cache
     USkeletalMesh* Mesh = Comp->GetSkeletalMeshAsset();
     FString Reason; int32 LOD = -1, RawBoneNum = 0;
     rgl_mesh_t M = GetOrUploadSkeletalMesh(Mesh, LOD, RawBoneNum, Reason);
@@ -2190,6 +2191,13 @@ bool FRGLSceneManager::RegisterSkeletalComponent(USkeletalMeshComponent* Comp)
 void FRGLSceneManager::UnregisterSkeletalComponent(USkeletalMeshComponent* Key)
 {
     FSkeletalEntityInfo* Info = SkeletalEntityMap.Find(Key); if (!Info) return;
+    if (Info->bCutout)
+    {
+        DestroyCutout(*Info);   // owns its mesh; nothing to release in the shared cache
+        if (USkeletalMeshComponent* Live = Info->Component.Get()) ApplyTickPolicy(Live, *Info, false);   // never through the raw key
+        SkeletalEntityMap.Remove(Key);
+        return;
+    }
     if (Info->Entity) { RglDestroyChecked(rgl_entity_destroy(Info->Entity), TEXT("rgl_entity_destroy")); Info->Entity = nullptr; }
     ReleaseSkeletalMeshReference(FSkeletalMeshKey{ Info->SkeletalMesh, Info->LODIndex });
     if (USkeletalMeshComponent* Live = Info->Component.Get()) ApplyTickPolicy(Live, *Info, false);   // never through the raw key
@@ -2207,6 +2215,22 @@ void FRGLSceneManager::TeardownSkeletal()
 
 void FRGLSceneManager::UpdateSkeletalPoses()
 {
+    // Self cutout wanted or no longer wanted (a cutout sensor attached, destroyed or evicted): move the
+    // component to the other path before posing, so it is back in the scene this tick. Skipped
+    // entirely while no sensor uses the self cutout and no component is on that path.
+    bool bCutoutInPlay = AnyCutoutSensor();
+    for (auto It = SkeletalEntityMap.CreateConstIterator(); It && !bCutoutInPlay; ++It) bCutoutInPlay = It.Value().bCutout;
+    if (bCutoutInPlay)
+    {
+        TArray<USkeletalMeshComponent*> ToSwitch;
+        for (auto& Pair : SkeletalEntityMap)
+        {
+            USkeletalMeshComponent* Live = Pair.Value.Component.Get();
+            if (Live && IsValid(Live) && Live->IsRegistered() && WantsSelfCutout(Live) != Pair.Value.bCutout) ToSwitch.Add(Pair.Key);
+        }
+        for (USkeletalMeshComponent* K : ToSwitch) { UnregisterSkeletalComponent(K); RegisterSkeletalComponent(K); }
+    }
+
     TArray<USkeletalMeshComponent*> ToRemove;
     for (auto& Pair : SkeletalEntityMap)
     {
@@ -2222,6 +2246,11 @@ void FRGLSceneManager::UpdateSkeletalPoses()
         {
             if (Info.Entity) { RglDestroyChecked(rgl_entity_destroy(Info.Entity), TEXT("rgl_entity_destroy")); Info.Entity = nullptr; }
             WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("no complete pose this tick; pending"));
+            continue;
+        }
+        if (Info.bCutout)
+        {
+            UpdateCutoutEntity(Comp, Info);   // on failure the entity stays pending and is retried next tick
             continue;
         }
         if (!Info.Entity)
@@ -2307,6 +2336,231 @@ void FRGLSceneManager::SyncSkeletalComponents(UWorld* World)
                      " added=", Added, " removed=", ToRemove.Num() + OverBudget.Num(), " range-skipped=", RangeSkipped, " retry-later=", RetryLater);
 }
 
+// ============================================================================
+// Self cutout (rgl_self_cutout_radius)
+// ============================================================================
+// A vehicle carrying a sensor with a cutout radius is registered on its own path: its skeletal mesh is
+// extracted per component (no shared cache) and only the triangles that are not near any of its cutout
+// sensors (RGLSelfCutout::ClassifyTriangles) go into the RGL scene. The near triangles are a hole for
+// every sensor in the scene, other vehicles' included; the RGL raytrace graphs are not touched. The kept
+// mesh is rebuilt whenever the set of cutout sensors or their settings change.
+
+void FRGLSceneManager::SetSensorSelfCutout(const void* SensorId, AActor* Vehicle, float RadiusCm, const FTransform& SensorWorldTransform,
+                                           float MinElevationDeg, float MaxElevationDeg)
+{
+    FSensorRegistration* S = RegisteredSensors.Find(SensorId);
+    if (!S) return;   // RegisterSensor() first
+    const bool bVehicle = IsValid(Vehicle);
+    S->CutoutVehicle = bVehicle ? Vehicle : nullptr;
+    S->CutoutRadiusCm = (bVehicle && RadiusCm > 0.0f) ? RadiusCm : 0.0f;
+    S->CutoutMinElevationDeg = FMath::Min(MinElevationDeg, MaxElevationDeg);
+    S->CutoutMaxElevationDeg = FMath::Max(MinElevationDeg, MaxElevationDeg);
+    if (bVehicle)
+    {
+        // Sensor and vehicle transforms of the same tick: the relative pose stays valid in later ticks,
+        // when this sensor's own world transform may lag behind the vehicle (sensors tick in turn).
+        S->CutoutSensorToVehicle = SensorWorldTransform.GetRelativeTransform(Vehicle->GetActorTransform());
+    }
+}
+
+bool FRGLSceneManager::AnyCutoutSensor() const
+{
+    for (const auto& Pair : RegisteredSensors) if (Pair.Value.CutoutRadiusCm > 0.0f) return true;
+    return false;
+}
+
+bool FRGLSceneManager::WantsSelfCutout(const USkeletalMeshComponent* Comp) const
+{
+    const AActor* Owner = Comp ? Comp->GetOwner() : nullptr;
+    if (!Owner) return false;
+    for (const auto& Pair : RegisteredSensors)
+        if (Pair.Value.CutoutRadiusCm > 0.0f && Pair.Value.CutoutVehicle.Get() == Owner) return true;
+    return false;
+}
+
+void FRGLSceneManager::GatherCutoutConfig(const AActor* Owner, TArray<RGLSelfCutout::FSensorConfig>& Out) const
+{
+    Out.Reset();
+    if (!Owner) return;
+    for (const auto& Pair : RegisteredSensors)
+    {
+        const FSensorRegistration& S = Pair.Value;
+        if (!(S.CutoutRadiusCm > 0.0f) || S.CutoutVehicle.Get() != Owner) continue;
+        RGLSelfCutout::FSensorConfig& C = Out.AddDefaulted_GetRef();
+        C.Key = reinterpret_cast<UPTRINT>(Pair.Key);
+        C.RadiusCm = S.CutoutRadiusCm;
+        C.MinElevationDeg = S.CutoutMinElevationDeg;
+        C.MaxElevationDeg = S.CutoutMaxElevationDeg;
+        C.SensorToOwner = S.CutoutSensorToVehicle;
+    }
+    RGLSelfCutout::SortConfig(Out);
+}
+
+bool FRGLSceneManager::RegisterSkeletalCutoutComponent(USkeletalMeshComponent* Comp)
+{
+    USkeletalMesh* Mesh = Comp->GetSkeletalMeshAsset();
+    FString Reason;
+    const int32 MinLOD = CVarRGLSkeletalMinLOD.GetValueOnGameThread();
+    const int32 LOD = RGLSkeletal::SelectReadableLOD(Mesh, Reason, MinLOD);
+    if (LOD < 0)
+    {
+        WarnSkeletalOnce(Comp, Mesh, TEXT("skipped: ") + Reason);   // readiness (spec §3.1): retried at a later sync
+        return false;
+    }
+    TSharedPtr<FRGLSkeletalMeshData> Data = MakeShared<FRGLSkeletalMeshData>();
+    bool bOk = RGLSkeletal::ExtractSkeletalMesh(Mesh, *Data, Reason, MinLOD);
+    if (bOk && Data->LODIndex != LOD) { bOk = false; Reason = FString::Printf(TEXT("LOD mismatch: SelectReadableLOD=%d ExtractSkeletalMesh=%d"), LOD, Data->LODIndex); }
+    if (bOk && Data->Indices.Num() == 0) { bOk = false; Reason = TEXT("no triangles"); }
+    if (!bOk)
+    {
+        // Readiness passed, so this is not recoverable (spec §6.1): same permanent skip as the shared path.
+        SkeletalSkipped.Add(FSkeletalSkipKey(FObjectKey(Comp), FObjectKey(Mesh)));
+        fprintf(stderr, "CarlaRGL[skeletal]: permanently skipping %s (%s): %s\n",
+                TCHAR_TO_UTF8(*Comp->GetPathName()), TCHAR_TO_UTF8(*Mesh->GetName()), TCHAR_TO_UTF8(*Reason));
+        WarnSkeletalOnce(Comp, Mesh, TEXT("skipped: ") + Reason);
+        return false;
+    }
+    FSkeletalEntityInfo Info;
+    Info.Component = Comp; Info.SkeletalMesh = Mesh; Info.LODIndex = LOD; Info.RawBoneNum = Data->RawBoneNum;
+    Info.PoseScratch.SetNumUninitialized(Data->RawBoneNum);
+    Info.bCutout = true;
+    Info.CutoutSource = Data;
+    ApplyTickPolicy(Comp, Info, CVarRGLSkeletalAlwaysTickPose.GetValueOnGameThread() != 0);
+    UE_LOG(LogCarlaRGL, Log, TEXT("RGLSceneManager[cutout] registered %s (%s LOD=%d verts=%d tris=%d)"),
+           *Comp->GetPathName(), *Mesh->GetName(), LOD, Data->Vertices.Num(), Data->Indices.Num());
+    SkeletalEntityMap.Add(Comp, MoveTemp(Info));   // the kept mesh is built from the first valid pose
+    return true;
+}
+
+void FRGLSceneManager::DestroyCutout(FSkeletalEntityInfo& Info)
+{
+    if (Info.Entity) { RglDestroyChecked(rgl_entity_destroy(Info.Entity), TEXT("rgl_entity_destroy")); Info.Entity = nullptr; }   // entity before its mesh
+    if (Info.CutoutMesh) { RglDestroyChecked(rgl_mesh_destroy(Info.CutoutMesh), TEXT("rgl_mesh_destroy")); Info.CutoutMesh = nullptr; }
+    Info.CutoutConfig.Reset();
+    Info.CutoutKeptTriangles = 0;
+    Info.CutoutRemovedTriangles = 0;
+    Info.bCutoutBuilt = false;
+}
+
+bool FRGLSceneManager::UpdateCutoutEntity(USkeletalMeshComponent* Comp, FSkeletalEntityInfo& Info)
+{
+    TArray<RGLSelfCutout::FSensorConfig> Config;
+    GatherCutoutConfig(Comp->GetOwner(), Config);
+    if (!Info.bCutoutBuilt || !RGLSelfCutout::SameConfig(Config, Info.CutoutConfig))
+    {
+        DestroyCutout(Info);
+        if (!BuildCutoutMesh(Comp, Info, Config))
+        {
+            DestroyCutout(Info);
+            return false;
+        }
+    }
+    if (!Info.CutoutMesh) return true;   // every triangle is near a cutout sensor: nothing to register
+    // From here on as on the shared path: entity on the first valid pose, re-posed every tick, dropped
+    // (mesh kept) when the pose is lost.
+    if (!Info.Entity)
+    {
+        rgl_entity_t E = nullptr;
+        if (rgl_entity_create(&E, Scene, Info.CutoutMesh) != RGL_SUCCESS || !E)
+        {
+            WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("self cutout: rgl_entity_create failed; pending"));
+            return false;
+        }
+        Info.Entity = E;   // identity transform; world-space poses follow. Never call rgl_entity_set_transform.
+    }
+    if (rgl_entity_set_pose_world(Info.Entity, Info.PoseScratch.GetData(), Info.RawBoneNum) != RGL_SUCCESS)
+    {
+        RglDestroyChecked(rgl_entity_destroy(Info.Entity), TEXT("rgl_entity_destroy")); Info.Entity = nullptr;
+        WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("self cutout: rgl_entity_set_pose_world failed; pending"));
+        return false;
+    }
+    return true;
+}
+
+bool FRGLSceneManager::BuildCutoutMesh(USkeletalMeshComponent* Comp, FSkeletalEntityInfo& Info, const TArray<RGLSelfCutout::FSensorConfig>& Config)
+{
+    const double StartSeconds = FPlatformTime::Seconds();
+    const FRGLSkeletalMeshData* Src = Info.CutoutSource.Get();
+    const AActor* Owner = Comp->GetOwner();
+    if (!Src || !Owner) return false;
+
+    // World positions under this tick's pose; each sensor placed from this tick's vehicle pose and its
+    // fixed pose relative to the vehicle.
+    TArray<FVector> WorldM;
+    if (!RGLSelfCutout::SkinVertices(*Src, Info.PoseScratch, WorldM))
+    {
+        WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("self cutout: pose does not match the extracted mesh; pending"));
+        return false;
+    }
+    const FTransform OwnerWorld = Owner->GetActorTransform();
+    TArray<RGLSelfCutout::FSensor> Sensors;
+    for (const RGLSelfCutout::FSensorConfig& C : Config)
+    {
+        const FTransform SensorWorld = C.SensorToOwner * OwnerWorld;
+        RGLSelfCutout::FSensor& S = Sensors.AddDefaulted_GetRef();
+        S.OriginM = SensorWorld.GetLocation() * RGLCoord::UE_TO_RGL;
+        S.Rotation = SensorWorld.GetRotation();
+        S.RadiusM = C.RadiusCm * RGLCoord::UE_TO_RGL;
+        S.MinElevationDeg = C.MinElevationDeg - RGLSelfCutout::ElevationMarginDeg;
+        S.MaxElevationDeg = C.MaxElevationDeg + RGLSelfCutout::ElevationMarginDeg;
+    }
+    TArray<int32> Owners;
+    RGLSelfCutout::ClassifyTriangles(WorldM, Src->Indices, Sensors, Owners);
+
+    // Removed triangles per sensor; a triangle near several sensors is counted once, under "shared".
+    TArray<int32> NearCount;
+    NearCount.Init(0, Config.Num());
+    int32 SharedCount = 0;
+    for (const int32 O : Owners)
+    {
+        if (O == RGLSelfCutout::OwnerShared) ++SharedCount;
+        else if (NearCount.IsValidIndex(O)) ++NearCount[O];
+    }
+    int32 RemovedTotal = SharedCount;
+    for (const int32 N : NearCount) RemovedTotal += N;
+
+    // The kept mesh: the triangles near no cutout sensor, compacted to the vertices they use. It keeps
+    // every restpose, so the component's full world pose drives it as on the shared path.
+    TArray<rgl_vec3f> KeptVertices; TArray<rgl_vec3i> KeptIndices; TArray<rgl_bone_weights_t> KeptWeights;
+    const int32 Kept = RGLSelfCutout::ExtractPart(*Src, Owners, RGLSelfCutout::OwnerRest, KeptVertices, KeptIndices, KeptWeights);
+    rgl_mesh_t M = nullptr;
+    if (Kept > 0)
+    {
+        bool bOk = rgl_mesh_create(&M, KeptVertices.GetData(), KeptVertices.Num(), KeptIndices.GetData(), KeptIndices.Num()) == RGL_SUCCESS && M;
+        if (!bOk) M = nullptr;
+        bOk = bOk && rgl_mesh_set_bone_weights(M, KeptWeights.GetData(), KeptWeights.Num()) == RGL_SUCCESS;
+        bOk = bOk && rgl_mesh_set_restposes(M, Src->RestposesInv.GetData(), Src->RestposesInv.Num()) == RGL_SUCCESS;
+        if (!bOk)
+        {
+            const char* Err = nullptr; rgl_get_last_error_string(&Err);
+            if (M) RglDestroyChecked(rgl_mesh_destroy(M), TEXT("rgl_mesh_destroy"));
+            WarnSkeletalOnce(Comp, Info.SkeletalMesh, FString::Printf(TEXT("self cutout: RGL mesh setup failed (%s); pending"),
+                                                                     Err ? *FString(UTF8_TO_TCHAR(Err)) : TEXT("?")));
+            return false;
+        }
+    }
+
+    Info.CutoutMesh = M;
+    Info.CutoutKeptTriangles = Kept;
+    Info.CutoutRemovedTriangles = RemovedTotal;
+    Info.CutoutConfig = Config;
+    Info.bCutoutBuilt = true;
+    ++CutoutBuildCount;
+
+    // Sensor keys are the session handles; the backend's rgl_self_cutout_sensor line prints the same key.
+    FString RemovedStr;
+    for (int32 i = 0; i < Config.Num(); ++i)
+    {
+        RemovedStr += FString::Printf(TEXT("%s0x%llx:%d"), i ? TEXT(",") : TEXT(""), static_cast<unsigned long long>(Config[i].Key), NearCount[i]);
+    }
+    RemovedStr += FString::Printf(TEXT("%sshared:%d"), RemovedStr.IsEmpty() ? TEXT("") : TEXT(","), SharedCount);
+    EmitSceneLine(FString::Printf(
+        TEXT("rgl_self_cutout t=%.3f owner=%s comp=%s sensors=%d tris=%d kept=%d removed=%s removed_total=%d elapsed_ms=%.2f"),
+        CurrentSimTime, *GetNameSafe(Owner), *Comp->GetName(), Config.Num(), Owners.Num(), Kept,
+        *RemovedStr, RemovedTotal, (FPlatformTime::Seconds() - StartSeconds) * 1000.0));
+    return true;
+}
+
 #if !UE_BUILD_SHIPPING
 void FRGLSceneManager::SyncSkeletalNow_ForTest(UWorld* World, double SimTime)
 {
@@ -2321,6 +2575,21 @@ void FRGLSceneManager::UpdateSkeletalPosesNow_ForTest(double SimTime)
     if (SkeletalEnabled()) UpdateSkeletalPoses();
 }
 int32 FRGLSceneManager::GetSkeletalLiveEntityCount_ForTest() const { int32 N = 0; for (const auto& P : SkeletalEntityMap) N += (P.Value.Entity != nullptr); return N; }
+bool FRGLSceneManager::IsSkeletalCutout_ForTest(const USkeletalMeshComponent* Comp) const
+{
+    const FSkeletalEntityInfo* Info = SkeletalEntityMap.Find(const_cast<USkeletalMeshComponent*>(Comp));
+    return Info && Info->bCutout;
+}
+int32 FRGLSceneManager::GetSkeletalCutoutKeptTriangles_ForTest(const USkeletalMeshComponent* Comp) const
+{
+    const FSkeletalEntityInfo* Info = SkeletalEntityMap.Find(const_cast<USkeletalMeshComponent*>(Comp));
+    return (Info && Info->bCutout && Info->bCutoutBuilt) ? Info->CutoutKeptTriangles : -1;
+}
+int32 FRGLSceneManager::GetSkeletalCutoutRemovedTriangles_ForTest(const USkeletalMeshComponent* Comp) const
+{
+    const FSkeletalEntityInfo* Info = SkeletalEntityMap.Find(const_cast<USkeletalMeshComponent*>(Comp));
+    return (Info && Info->bCutout && Info->bCutoutBuilt) ? Info->CutoutRemovedTriangles : -1;
+}
 #endif
 
 #endif // WITH_RGL
