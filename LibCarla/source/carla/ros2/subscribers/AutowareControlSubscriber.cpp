@@ -55,9 +55,12 @@ AutowareControlSubscriber::AutowareControlSubscriber(
     void *vehicle, std::string frame_id)
   : BaseSubscriber(vehicle, "rt/control/command", std::move(frame_id)),
     _impl(std::make_shared<Impl>()) {
-  // QoS per tier4's AutowareController: RELIABLE / TRANSIENT_LOCAL /
-  // KEEP_LAST 1 so the latest latched command survives a late join.
-  const QosProfile qos = QosProfile::ReliableTransientLocal();
+  // RELIABLE / VOLATILE / KEEP_LAST 1. A VOLATILE reader matches both the
+  // TRANSIENT_LOCAL writers of Autoware's older vehicle_cmd_gate and the VOLATILE
+  // writers of its control_command_gate; a TRANSIENT_LOCAL reader never matches
+  // the latter, so the ego would get no command. Commands stream continuously,
+  // so the latched last sample on a late join is not needed.
+  const QosProfile qos = QosProfile::ReliableVolatile();
   bool ok = true;
   ok &= _impl->control.Init("rt/control/command/control_cmd", qos);
   ok &= _impl->gear.Init("rt/control/command/gear_cmd", qos);

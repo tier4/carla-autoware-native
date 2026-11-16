@@ -143,6 +143,7 @@
 ### Bug fixes
 
 * Fixed legacy signal emission under physical daylight, added stock night dimming, and limited exposed emission to preserve traffic-light colors.
+* Fixed the Autoware control command subscriber never matching Autoware's control_command_gate, which publishes VOLATILE: commands are now read RELIABLE / VOLATILE, which also matches the TRANSIENT_LOCAL writers of the older vehicle_cmd_gate.
 
 #### Sensors
 
