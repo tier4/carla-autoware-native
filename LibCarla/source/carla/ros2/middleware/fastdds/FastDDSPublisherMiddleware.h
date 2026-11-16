@@ -5,6 +5,7 @@
 #pragma once
 
 #include "carla/ros2/middleware/IPublisherMiddleware.h"
+#include "carla/ros2/middleware/fastdds/FastDDSQos.h"
 #include "carla/ros2/middleware/fastdds/FastDDSSharedParticipant.h"
 #include "carla/ros2/middleware/fastdds/GenericCdrPubSubType.h"
 #include "carla/ros2/types/UserDataFormat.h"
@@ -151,19 +152,7 @@ class FastDDSPublisherMiddleware
     wqos.publish_mode().kind = efd::ASYNCHRONOUS_PUBLISH_MODE;
 
     if (qos != nullptr) {
-      wqos.reliability().kind =
-          qos->reliability == QosProfile::Reliability::Reliable
-              ? efd::RELIABLE_RELIABILITY_QOS
-              : efd::BEST_EFFORT_RELIABILITY_QOS;
-      wqos.durability().kind =
-          qos->durability == QosProfile::Durability::TransientLocal
-              ? efd::TRANSIENT_LOCAL_DURABILITY_QOS
-              : efd::VOLATILE_DURABILITY_QOS;
-      wqos.history().kind =
-          qos->history == QosProfile::History::KeepLast
-              ? efd::KEEP_LAST_HISTORY_QOS
-              : efd::KEEP_ALL_HISTORY_QOS;
-      wqos.history().depth = qos->history_depth;
+      ApplyQosProfile(*qos, wqos);
     }
 
     // Set USER_DATA (PID_USER_DATA = 0x002c per OMG DDSI-RTPS v2.5 §9.6.2.2.2)

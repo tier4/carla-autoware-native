@@ -72,6 +72,10 @@ class ZenohSubscriberMiddleware : public ISubscriberMiddleware {
     // a compatible endpoint; zenoh delivery semantics are not differentiated
     // (no querying-subscriber, so TRANSIENT_LOCAL late-join latching is not
     // provided — see zenoh_qos_keyexpr).
+    if (qos.HasTimedPolicies()) {
+      log_warning("ZenohSubscriberMiddleware (", topic_name,
+                  "): deadline, lifespan and liveliness are advertised but not enforced");
+    }
     return InitImpl(topic_name, message_ptr, new_message_flag,
                     zenoh_qos_keyexpr(qos));
   }

@@ -105,6 +105,23 @@ TPair<EActorSpawnResultStatus, FCarlaActor*> UActorDispatcher::SpawnActor(
     return MakeTuple(EActorSpawnResultStatus::InvalidDescription, nullptr);
   }
 
+  #ifdef WITH_ROS2
+  // Reject a malformed Autoware command QoS before anything is spawned: the
+  // client gets an error instead of a vehicle whose command readers quietly
+  // use another QoS than the one asked for.
+  if (const FActorAttribute *QosAttr = Description.Variations.Find(TEXT("ros2_autoware_control_qos")))
+  {
+    carla::ros2::QosProfile Qos;
+    if (!QosAttr->Value.IsEmpty() &&
+        !carla::ros2::QosProfile::FromString(std::string(TCHAR_TO_UTF8(*QosAttr->Value)), Qos))
+    {
+      UE_LOG(LogCarla, Error, TEXT("Invalid ros2_autoware_control_qos '%s' for '%s'"),
+          *QosAttr->Value, *Description.Id);
+      return MakeTuple(EActorSpawnResultStatus::InvalidDescription, nullptr);
+    }
+  }
+  #endif
+
   Description.Class = *Class;
   FActorSpawnResult Result = SpawnFunctions[Description.UId - 1](Transform, Description);
 
@@ -278,6 +295,7 @@ FCarlaActor* UActorDispatcher::RegisterActor(
       bool bIsHero = false;
       bool bEnableAckermannControl = false;
       bool bEnableAutowareControl = false;
+      std::optional<carla::ros2::QosProfile> AutowareControlQos;
       for (auto &&Attr : Description.Variations)
       {
         if (Attr.Key == "role_name" && (Attr.Value.Value == "hero" || Attr.Value.Value == "ego"))
@@ -292,6 +310,15 @@ FCarlaActor* UActorDispatcher::RegisterActor(
         {
           bEnableAutowareControl = Attr.Value.Value.ToBool();
         }
+        else if (Attr.Key == "ros2_autoware_control_qos" && !Attr.Value.Value.IsEmpty())
+        {
+          // SpawnActor already rejected a value that does not parse.
+          carla::ros2::QosProfile Qos;
+          if (carla::ros2::QosProfile::FromString(std::string(TCHAR_TO_UTF8(*Attr.Value.Value)), Qos))
+          {
+            AutowareControlQos = Qos;
+          }
+        }
       }
       if (bIsHero)
       {
@@ -300,13 +327,18 @@ FCarlaActor* UActorDispatcher::RegisterActor(
           // Autoware maps steering 1:1 to wheel angle; a speed-dependent
           // steering curve would silently rescale the command (tier4 port).
           ActorROS2Handler::FlattenSteeringCurve(&Actor);
+          const carla::ros2::QosProfile EffectiveQos =
+              AutowareControlQos.value_or(carla::ros2::QosProfile::ReliableTransientLocal());
+          UE_LOG(LogCarla, Log, TEXT("ROS2: Autoware command QoS (%s): %s"),
+              AutowareControlQos.has_value() ? TEXT("ros2_autoware_control_qos") : TEXT("default"),
+              UTF8_TO_TCHAR(EffectiveQos.ToString().c_str()));
         }
         ROS2->RegisterVehicle(static_cast<void*>(&Actor), ResolvedRosName, ResolvedRosName, [ResolvedRosName](void *Actor, carla::ros2::ROS2CallbackData Data) -> void
         {
           AActor *UEActor = reinterpret_cast<AActor *>(Actor);
           ActorROS2Handler Handler(UEActor, ResolvedRosName);
           std::visit(Handler, Data);
-        }, bEnableAckermannControl, bEnableAutowareControl);
+        }, bEnableAckermannControl, bEnableAutowareControl, AutowareControlQos);
         #if defined(WITH_ROS2_DEMO)
         ROS2->AddBasicSubscriberCallback(static_cast<void*>(&Actor), ResolvedRosName, [ResolvedRosName](void *Actor, carla::ros2::ROS2MessageCallbackData Data) -> void
         {

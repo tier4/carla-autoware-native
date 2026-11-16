@@ -5,6 +5,7 @@
 #pragma once
 
 #include "carla/ros2/middleware/ISubscriberMiddleware.h"
+#include "carla/ros2/middleware/fastdds/FastDDSQos.h"
 #include "carla/ros2/middleware/fastdds/FastDDSSharedParticipant.h"
 #include "carla/ros2/middleware/fastdds/GenericCdrPubSubType.h"
 #include "carla/ros2/types/UserDataFormat.h"
@@ -157,19 +158,7 @@ class FastDDSSubscriberMiddleware
     efd::DataReaderQos rqos = efd::DATAREADER_QOS_DEFAULT;
 
     if (qos != nullptr) {
-      rqos.reliability().kind =
-          qos->reliability == QosProfile::Reliability::Reliable
-              ? efd::RELIABLE_RELIABILITY_QOS
-              : efd::BEST_EFFORT_RELIABILITY_QOS;
-      rqos.durability().kind =
-          qos->durability == QosProfile::Durability::TransientLocal
-              ? efd::TRANSIENT_LOCAL_DURABILITY_QOS
-              : efd::VOLATILE_DURABILITY_QOS;
-      rqos.history().kind =
-          qos->history == QosProfile::History::KeepLast
-              ? efd::KEEP_LAST_HISTORY_QOS
-              : efd::KEEP_ALL_HISTORY_QOS;
-      rqos.history().depth = qos->history_depth;
+      ApplyQosProfile(*qos, rqos);
     }
 
     // Set USER_DATA (PID_USER_DATA = 0x002c per OMG DDSI-RTPS v2.5 §9.6.2.2.2)

@@ -35,24 +35,38 @@ constexpr const char* kZenohDefaultQos     = "::,1:,:,:,,";
 ///    <deadline_s>,<deadline_ns>:<lifespan_s>,<lifespan_ns>:
 ///    <liveliness_kind>,<liveliness_s>,<liveliness_ns>"
 /// with RMW enum integer values (RELIABLE=1 / BEST_EFFORT=2,
-/// TRANSIENT_LOCAL=1 / VOLATILE=2, KEEP_LAST=1 / KEEP_ALL=2) and empty
-/// fields meaning "system default" (compare kZenohDefaultQos).
+/// TRANSIENT_LOCAL=1 / VOLATILE=2, KEEP_LAST=1 / KEEP_ALL=2,
+/// AUTOMATIC=1 / MANUAL_BY_TOPIC=3) and empty fields meaning "system
+/// default" (compare kZenohDefaultQos). An infinite duration and AUTOMATIC
+/// liveliness are written as the empty default, so a profile that keeps
+/// those defaults yields the same segment as before they were encoded.
 ///
 /// NOTE: this only *advertises* the QoS in the graph cache so rmw_zenoh
 /// peers report compatible endpoints. Zenoh delivery semantics are not
 /// differentiated per profile by this backend (in particular there is no
 /// querying-subscriber support, so TRANSIENT_LOCAL late-join latching is
-/// not provided). Needs validation against rmw_zenoh during the smoke
-/// phase.
+/// not provided, and deadline, lifespan and liveliness are not enforced).
+/// Needs validation against rmw_zenoh during the smoke phase.
 inline std::string zenoh_qos_keyexpr(const QosProfile& qos) {
+  const auto duration = [](std::int64_t ns) -> std::string {
+    if (ns == QosProfile::kInfinite) {
+      return ",";
+    }
+    return std::to_string(ns / 1000000000) + "," + std::to_string(ns % 1000000000);
+  };
   const char* rel =
       qos.reliability == QosProfile::Reliability::Reliable ? "1" : "2";
   const char* dur =
       qos.durability == QosProfile::Durability::TransientLocal ? "1" : "2";
   const char* hist =
       qos.history == QosProfile::History::KeepLast ? "1" : "2";
+  const char* live =
+      qos.liveliness == QosProfile::Liveliness::Automatic ? "" : "3";
   return std::string(rel) + ":" + dur + ":" + hist + "," +
-         std::to_string(qos.history_depth) + ":,:,:,,";
+         std::to_string(qos.history_depth) + ":" +
+         duration(qos.deadline_ns) + ":" +
+         duration(qos.lifespan_ns) + ":" +
+         live + "," + duration(qos.liveliness_lease_ns);
 }
 
 /// Monotonic per-process counter used to assign a unique entity id (eid) to

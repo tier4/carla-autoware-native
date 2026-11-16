@@ -52,12 +52,14 @@ public:
 };
 
 AutowareControlSubscriber::AutowareControlSubscriber(
-    void *vehicle, std::string frame_id)
+    void *vehicle, std::string frame_id, const QosProfile &qos)
   : BaseSubscriber(vehicle, "rt/control/command", std::move(frame_id)),
     _impl(std::make_shared<Impl>()) {
-  // QoS per tier4's AutowareController: RELIABLE / TRANSIENT_LOCAL /
-  // KEEP_LAST 1 so the latest latched command survives a late join.
-  const QosProfile qos = QosProfile::ReliableTransientLocal();
+  // The default (see the header) is tier4's AutowareController QoS:
+  // RELIABLE / TRANSIENT_LOCAL / KEEP_LAST 1 so the latest latched command
+  // survives a late join. A VOLATILE profile is needed when Autoware
+  // publishes the commands VOLATILE: a TRANSIENT_LOCAL reader does not
+  // match a VOLATILE writer.
   bool ok = true;
   ok &= _impl->control.Init("rt/control/command/control_cmd", qos);
   ok &= _impl->gear.Init("rt/control/command/gear_cmd", qos);

@@ -195,16 +195,18 @@ void UCarlaSettings::LoadSettings()
     {
       ROS2CameraImageTopic = CameraImageTopicValue;
     }
+    // The key=value QoS form is comma separated: read past the commas that
+    // FParse::Value treats as the end of a value by default.
     FString QosValue;
-    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-camera-qos="), QosValue))
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-camera-qos="), QosValue, false))
     {
       ROS2CameraQos = QosValue;
     }
-    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-lidar-qos="), QosValue))
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-lidar-qos="), QosValue, false))
     {
       ROS2LidarQos = QosValue;
     }
-    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-imu-qos="), QosValue))
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-imu-qos="), QosValue, false))
     {
       ROS2ImuQos = QosValue;
     }

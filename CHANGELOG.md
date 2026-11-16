@@ -51,6 +51,7 @@
 * Added **stop-sign support and more reliable traffic-light lane linking** to the CARLA-Autoware map generator, plus a traffic-light state bridge for Autoware.
 * Added a closed-loop example for **NVIDIA Alpamayo 2 Super**: it captures the model's calibrated cameras and ego-motion history, runs the trajectory inference, shows the predicted path and the model's Chain of Causation reasoning, and turns the trajectory into vehicle control, with CARLA-rendered cameras on any map or NuRec cameras on a reconstructed real-world scene. See `Docs/nvidia_alpamayo.md`.
 * Added a **choice of ROS 2 middleware**: the native connector sits behind a middleware abstraction supporting FastDDS, CycloneDDS and Zenoh, selected at launch with `--rmw=`. `--ros-domain-id=<N>` sets the domain id (falling back to `ROS_DOMAIN_ID`, then 0), and `ROS2TopicVisibility` sets whether sensor topics are exposed by default.
+* Added the **`ros2_autoware_control_qos` vehicle attribute**, which sets the QoS of the Autoware command subscribers, for an Autoware that publishes its commands VOLATILE. The default stays RELIABLE / TRANSIENT_LOCAL / depth 1. The value lists the ROS 2 QoS policies as `key=value` pairs: reliability, durability, history, depth, deadline, lifespan, liveliness and the liveliness lease. The sensor QoS options `-ros2-camera-qos=`, `-ros2-lidar-qos=` and `-ros2-imu-qos=` accept the same form. FastDDS and CycloneDDS apply all eight policies; Zenoh advertises them but does not enforce the deadline, the lifespan or the liveliness.
 
 #### Scenarios
 

@@ -10,6 +10,7 @@
 #include <string>
 
 #include "carla/ros2/ROS2CallbackData.h"
+#include "carla/ros2/middleware/QosProfile.h"
 #include "carla/ros2/subscribers/BaseSubscriber.h"
 
 namespace carla {
@@ -21,7 +22,8 @@ namespace ros2 {
 // (superseded).
 //
 // Topics (fixed absolute names, DDS "rt/" prefix, QoS RELIABLE /
-// TRANSIENT_LOCAL / KEEP_LAST depth 1 per tier4):
+// TRANSIENT_LOCAL / KEEP_LAST depth 1 per tier4 unless the caller passes
+// another profile, which then applies to all six):
 //   /control/command/control_cmd         autoware_control_msgs/Control
 //   /control/command/gear_cmd            autoware_vehicle_msgs/GearCommand
 //   /control/command/turn_indicators_cmd autoware_vehicle_msgs/TurnIndicatorsCommand
@@ -39,7 +41,9 @@ namespace ros2 {
 // Unreal phase).
 class AutowareControlSubscriber : public BaseSubscriber {
 public:
-  AutowareControlSubscriber(void *vehicle, std::string frame_id);
+  AutowareControlSubscriber(
+      void *vehicle, std::string frame_id,
+      const QosProfile &qos = QosProfile::ReliableTransientLocal());
   ~AutowareControlSubscriber() override;
 
   /// Drains the six command topics once per frame (called from
