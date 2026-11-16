@@ -29,6 +29,8 @@
 #include "Components/SkinnedMeshComponent.h"   // EVisibilityBasedAnimTickOption
 #include <util/ue-header-guard-end.h>
 
+#include "RGLSelfCutout.h"
+
 // Forward declarations
 class UWorld;
 class AActor;
@@ -78,6 +80,15 @@ public:
         S.LastUpdateTime = Now;
     }
 
+    /// Self cutout (rgl_self_cutout_radius) of a registered sensor: the triangles of Vehicle's skeletal
+    /// meshes within RadiusCm of the sensor and inside [MinElevationDeg, MaxElevationDeg] (its vertical
+    /// field of view, sensor frame) are left out of the RGL scene. No sensor sees them, including
+    /// sensors on other vehicles, so the radius should stay about the size of the sensor's housing.
+    /// Call each tick after RegisterSensor() and before Update(). Sensors that never call it, and
+    /// RadiusCm <= 0, keep the default path.
+    void SetSensorSelfCutout(const void* SensorId, AActor* Vehicle, float RadiusCm, const FTransform& SensorWorldTransform,
+                             float MinElevationDeg, float MaxElevationDeg);
+
     /// Set the world sync interval in simulation seconds. Default: 1.0s. Minimum: 0.1s.
     void SetSyncInterval(float Seconds) { SyncIntervalSeconds = FMath::Max(0.1f, Seconds); }
 
@@ -94,6 +105,12 @@ public:
     int32 GetSkeletalLiveEntityCount_ForTest() const;
     int32 GetSkeletalMeshCacheCount_ForTest() const { return SkeletalMeshCache.Num(); }
     bool  IsSkeletalRegistered_ForTest(const USkeletalMeshComponent* Comp) const { return SkeletalEntityMap.Contains(const_cast<USkeletalMeshComponent*>(Comp)); }
+    bool  IsSkeletalCutout_ForTest(const USkeletalMeshComponent* Comp) const;
+    /// Triangles of Comp kept in the scene / left out as near a cutout sensor; -1 = no cutout mesh built.
+    int32 GetSkeletalCutoutKeptTriangles_ForTest(const USkeletalMeshComponent* Comp) const;
+    int32 GetSkeletalCutoutRemovedTriangles_ForTest(const USkeletalMeshComponent* Comp) const;
+    /// Number of cutout meshes built since this instance was created.
+    int32 GetSkeletalCutoutBuildCount_ForTest() const { return CutoutBuildCount; }
 #endif
 
 private:
@@ -205,6 +222,16 @@ private:
         EVisibilityBasedAnimTickOption         SavedTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
         bool                                   bSavedURO = true;
         bool                                   bTickPolicyApplied = false;
+        // Self cutout path: the owner carries a sensor with rgl_self_cutout_radius > 0. Entity is built
+        // on CutoutMesh (owned here, never in SkeletalMeshCache): the triangles not near any of those
+        // sensors. CutoutMesh is rebuilt whenever CutoutConfig changes.
+        bool                                   bCutout = false;
+        bool                                   bCutoutBuilt = false;    // CutoutMesh matches CutoutConfig
+        rgl_mesh_t                             CutoutMesh = nullptr;    // nullptr when no triangle is kept
+        int32                                  CutoutKeptTriangles = 0;
+        int32                                  CutoutRemovedTriangles = 0;
+        TSharedPtr<FRGLSkeletalMeshData>       CutoutSource;            // extracted once at registration
+        TArray<RGLSelfCutout::FSensorConfig>   CutoutConfig;
     };
     struct FSkeletalMeshKey
     {
@@ -239,6 +266,20 @@ private:
     void  WarnSkeletalOnce(const USkeletalMeshComponent* Comp, const USkeletalMesh* Mesh, const FString& Msg);
     rgl_mesh_t GetOrUploadSkeletalMesh(USkeletalMesh* Mesh, int32& OutLOD, int32& OutRawBoneNum, FString& OutReason);
     void  ReleaseSkeletalMeshReference(const FSkeletalMeshKey& Key);
+
+    // ---- Self cutout (rgl_self_cutout_radius) ----
+    int32 CutoutBuildCount = 0;
+    bool  AnyCutoutSensor() const;
+    bool  WantsSelfCutout(const USkeletalMeshComponent* Comp) const;
+    void  GatherCutoutConfig(const AActor* Owner, TArray<RGLSelfCutout::FSensorConfig>& Out) const;
+    /// Registration on the cutout path: own extraction, no shared mesh cache.
+    bool  RegisterSkeletalCutoutComponent(USkeletalMeshComponent* Comp);
+    /// Pose step of a cutout component (pose already in Info.PoseScratch): rebuild CutoutMesh if the
+    /// configuration changed, then create/pose Entity on it. False = pending, retried next tick.
+    bool  UpdateCutoutEntity(USkeletalMeshComponent* Comp, FSkeletalEntityInfo& Info);
+    bool  BuildCutoutMesh(USkeletalMeshComponent* Comp, FSkeletalEntityInfo& Info, const TArray<RGLSelfCutout::FSensorConfig>& Config);
+    /// Destroys Entity and CutoutMesh and forgets the configuration they were built for.
+    void  DestroyCutout(FSkeletalEntityInfo& Info);
 
     /// Create a large ground plane in the RGL scene to represent the road surface.
     void CreateGroundPlane();
@@ -340,6 +381,12 @@ private:
         FVector LastSyncPosition = FVector::ZeroVector;
         bool    bLastSyncValid = false;
         double  LastUpdateTime = 0.0;              // sim time of last RegisterSensor()
+        // Self cutout (SetSensorSelfCutout); CutoutRadiusCm <= 0 = off.
+        TWeakObjectPtr<AActor> CutoutVehicle;
+        float      CutoutRadiusCm = 0.0f;
+        float      CutoutMinElevationDeg = 0.0f;
+        float      CutoutMaxElevationDeg = 0.0f;
+        FTransform CutoutSensorToVehicle = FTransform::Identity;   // taken in the same tick as the vehicle pose
     };
     /// Key = sensor id (session handle). Pointer key uses pointer hashing.
     TMap<const void*, FSensorRegistration> RegisteredSensors;

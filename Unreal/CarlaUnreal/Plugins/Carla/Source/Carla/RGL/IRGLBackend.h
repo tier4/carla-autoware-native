@@ -2,6 +2,8 @@
 #include "CoreMinimal.h"
 #include "Carla/Sensor/LidarDescription.h"
 
+class AActor;
+
 using FRGLSessionHandle = void*;
 
 struct FRGLSessionConfig
@@ -41,6 +43,12 @@ public:
         float& InOutHorizontalAngle,
         bool bNeedResults,
         bool bNeedWorldPoints) = 0;
+    /// Self cutout (rgl_self_cutout_radius): the surfaces of Vehicle within RadiusCm of this sensor
+    /// and inside its vertical field of view are left out of the scene, for every sensor (other
+    /// vehicles' included); the radius should stay about the size of the sensor's housing.
+    /// Vehicle may be nullptr (sensor not attached to a vehicle yet). RadiusCm <= 0 = off.
+    /// The sensor calls it again whenever the vehicle it is attached to changes.
+    virtual void SetSelfCutout(FRGLSessionHandle /*Handle*/, AActor* /*Vehicle*/, float /*RadiusCm*/) {}
 };
 
 class CARLA_API FRGLBackendRegistry

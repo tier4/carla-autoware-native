@@ -9,9 +9,11 @@
 #include "Carla/Actor/ActorBlueprintFunctionLibrary.h"
 #include "Carla/Game/CarlaStatics.h"
 #include "Carla/RGL/IRGLBackend.h"
+#include "Carla/Vehicle/CarlaWheeledVehicle.h"
 
 #include <util/ue-header-guard-begin.h>
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "Math/UnrealMathUtility.h"
 #include "Components/LineBatchComponent.h"
 #include <util/ue-header-guard-end.h>
@@ -75,6 +77,16 @@ void ARGLLidar::Set(const FActorDescription& ActorDescription)
     if (LifeTimeAttr.has_value())
     {
         RglLidarDrawLifeTime = FMath::Max(0.0f, FCString::Atof(*LifeTimeAttr->Value));
+    }
+
+    auto SelfCutoutAttr = GetAttribute(TEXT("rgl_self_cutout_radius"));
+    if (SelfCutoutAttr.has_value())
+    {
+        RglSelfCutoutRadius = FMath::Max(0.0f, FCString::Atof(*SelfCutoutAttr->Value));
+    }
+    if (RglSelfCutoutRadius > 0.0f)
+    {
+        UE_LOG(LogCarla, Log, TEXT("ARGLLidar: self cutout radius=%.3f m"), RglSelfCutoutRadius);
     }
 
     UE_LOG(LogCarla, Log,
@@ -236,6 +248,11 @@ void ARGLLidar::SimulateLidar(float DeltaSeconds)
 
     const bool bNeedResults = AreClientsListening() || bRglShowLidarPoints;
 
+    if (RglSelfCutoutRadius > 0.0f)
+    {
+        UpdateRglSelfCutoutVehicle(*Backend);
+    }
+
     FRGLTickResult Result = Backend->Tick(
         RGLSessionHandle,
         GetActorTransform(),
@@ -276,6 +293,41 @@ void ARGLLidar::SimulateLidar(float DeltaSeconds)
         RglLidarDrawWorldPoints = MoveTemp(Result.WorldPoints);
         RglLidarDrawIntensities = MoveTemp(Result.WorldIntensities);
     }
+}
+
+void ARGLLidar::UpdateRglSelfCutoutVehicle(IRGLBackend& Backend)
+{
+    // The vehicle is the first ACarlaWheeledVehicle up the attach chain; without one, the first
+    // APawn. Clients often attach sensors through intermediate (empty) actors, so walk every level.
+    AActor* Vehicle = nullptr;
+    AActor* FirstPawn = nullptr;
+    int32 Depth = 0;
+    for (AActor* Parent = GetAttachParentActor(); Parent && Depth < 32; Parent = Parent->GetAttachParentActor(), ++Depth)
+    {
+        if (Parent->IsA<ACarlaWheeledVehicle>())
+        {
+            Vehicle = Parent;
+            break;
+        }
+        if (!FirstPawn && Parent->IsA<APawn>())
+        {
+            FirstPawn = Parent;
+        }
+    }
+    if (!Vehicle)
+    {
+        Vehicle = FirstPawn;
+    }
+
+    if (bRglSelfCutoutReported && RglSelfCutoutVehicle.Get() == Vehicle)
+    {
+        return;
+    }
+    RglSelfCutoutVehicle = Vehicle;
+    bRglSelfCutoutReported = true;
+    Backend.SetSelfCutout(RGLSessionHandle, Vehicle, RglSelfCutoutRadius * 100.0f);
+    UE_LOG(LogCarla, Log, TEXT("ARGLLidar: self cutout vehicle=%s radius=%.3f m"),
+        Vehicle ? *Vehicle->GetName() : TEXT("none"), RglSelfCutoutRadius);
 }
 
 // ============================================================================

@@ -1671,6 +1671,17 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     RglLidarDrawLifeTime.RecommendedValues = { TEXT("0.2") };
     RglLidarDrawLifeTime.bRestrictToRecommended = false;
 
+    // [RGL] rgl_self_cutout_radius (m): surfaces of the vehicle this lidar is attached to that lie
+    // within this radius of the lidar and inside its vertical field of view are left out of the RGL
+    // scene (e.g. a vehicle whose mesh models the lidar housings). They then disappear for every RGL
+    // lidar in the scene, including lidars on other vehicles, so keep the radius about the size of
+    // the housing. 0 = off.
+    FActorVariation RglSelfCutoutRadius;
+    RglSelfCutoutRadius.Id = TEXT("rgl_self_cutout_radius");
+    RglSelfCutoutRadius.Type = EActorAttributeType::Float;
+    RglSelfCutoutRadius.RecommendedValues = { TEXT("0.0") };
+    RglSelfCutoutRadius.bRestrictToRecommended = false;
+
     // [RGL] ROS2 publish via RGL extension (independent of CARLA's built-in ROS2)
     FActorVariation RglRos2Topic;
     RglRos2Topic.Id = TEXT("rgl_lidar_topic_name");
@@ -1920,6 +1931,7 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       RglShowLidarPoints,
       RglLidarDrawPointRate,
       RglLidarDrawLifeTime,
+      RglSelfCutoutRadius,
       RglRos2Topic,
       RglRos2FrameId,
       RglRos2Reliability,
