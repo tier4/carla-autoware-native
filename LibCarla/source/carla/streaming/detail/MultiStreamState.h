@@ -78,6 +78,12 @@ namespace detail {
       return (_sessions.size() > 0 || _force_active || _enabled_for_ros);
     }
 
+    /// Like AreClientsListening(), but does not count the ROS visibility of the
+    /// stream. For sensors that never publish through the ROS2 path of the stream.
+    bool AreStreamClientsListening() {
+      return (_sessions.size() > 0 || _force_active);
+    }
+
     void ConnectSession(std::shared_ptr<Session> session) final {
       DEBUG_ASSERT(session != nullptr);
       std::scoped_lock<std::mutex> lock(_mutex);

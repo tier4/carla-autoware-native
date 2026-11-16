@@ -126,6 +126,13 @@ public:
     return Stream.AreClientsListening();
   }
 
+  /// True when a client subscribed to the data stream itself. Unlike
+  /// AreClientsListening() this ignores the ROS visibility of the stream.
+  bool AreStreamClientsListening()
+  {
+    return Stream.AreStreamClientsListening();
+  }
+
   void Tick(const float DeltaTime) final;
 
   virtual void PrePhysTick(float DeltaSeconds) {}

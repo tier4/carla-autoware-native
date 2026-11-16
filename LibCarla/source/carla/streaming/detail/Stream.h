@@ -67,6 +67,11 @@ namespace detail {
       return _shared_state ? _shared_state->AreClientsListening() : false;
     }
 
+    bool AreStreamClientsListening()
+    {
+      return _shared_state ? _shared_state->AreStreamClientsListening() : false;
+    }
+
   private:
 
     friend class detail::Dispatcher;
