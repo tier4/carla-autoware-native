@@ -122,6 +122,12 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None):
         # ISM-instance part of the misses (older lines without the key count as 0)
         "missing_ism_in_range_p95": int(percentile(g("missing_ism_in_range"), 95)),
         "missing_ism_sync_max": int(max(g("missing_ism_sync"), default=0)),
+        "sync_elapsed_ms_p50": percentile(sync_ms, 50),
+        "sync_elapsed_ms_p95": percentile(sync_ms, 95),
+        # tick tail (client world.tick() wall time); na without a tick log
+        "tick_over_100ms": sum(1 for v in tick_ms if v > 100.0) if tick_ms else None,
+        "tick_ms_p99": percentile(list(tick_ms), 99) if tick_ms else None,
+        "tick_ms_max": max(tick_ms) if tick_ms else None,
     }
 
 
@@ -136,6 +142,8 @@ _ORDER = [
     ("audit_ms_p95", "%.3f"), ("frame_ms_max", "%.2f"),
     ("frames_over_100ms", "%d"), ("sync_elapsed_ms_max", "%.2f"),
     ("tick_ms_p95", "%.2f"), ("missing_ism_in_range_p95", "%d"), ("missing_ism_sync_max", "%d"),
+    ("sync_elapsed_ms_p50", "%.2f"), ("sync_elapsed_ms_p95", "%.2f"), ("tick_over_100ms", "%d"),
+    ("tick_ms_p99", "%.2f"), ("tick_ms_max", "%.2f"),
 ]
 
 

@@ -36,6 +36,7 @@ Route length requirements (checked by run_scenario.py, `reason=route_too_short`)
   S4           : >= 1.5 km + 200 m.
 """
 import json
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
@@ -91,6 +92,8 @@ class Scenario:
     max_route_m: Optional[float] = None  # use only the first max_route_m of the map's route (keeps stage 0 short)
     events: Tuple[str, ...] = ()        # runner-side behaviours, see run_scenario.py
     fixed_duration_s: Optional[float] = None    # when not route-based
+    fixed_ticks: Optional[int] = None   # exact tick count (STATIC: settle + hold ticks, set by the runner)
+    hold: bool = False                  # the ego does not move: it stays at one point of the route
     description: str = ""
 
 
@@ -126,6 +129,9 @@ SCENARIOS = {
     "S7": _s(name="S7", map="Town15", radius_expected_m=None, events=("load_world_cycle_3",),
              fixed_duration_s=480.0, tile_stream_m=150, actor_active_m=150,
              description="load_world Town15 <-> Odaiba, 3 round trips"),
+    "STATIC": _s(name="STATIC", map="Town15", tile_stream_m=3000, actor_active_m=2000,
+                 radius_expected_m=3000.0, hold=True,
+                 description="ego parked at the route point nearest --hold-near (settle + hold ticks)"),
     "CONTROL": _s(name="CONTROL", map="Odaiba", tile_stream_m=3000, actor_active_m=2000,
                   radius_expected_m=-1.0, min_route_m=5500.0,
                   description="non-WP control: Odaiba and Town10HD_Opt, S1 speed and LiDAR"),
@@ -148,10 +154,13 @@ def _truncate(route, max_m):
     return tuple(out)
 
 
-def route_for(scenario_name, map_name):
-    """Return the polyline (cut to the scenario's max_route_m) or None when it is not set."""
+def route_for(scenario_name, map_name, sc=None):
+    """Return the polyline (cut to the scenario's max_route_m) or None when it is not set.
+
+    sc: the scenario to use instead of the table's one (the runner passes its overridden copy).
+    """
     route = ROUTES.get(map_name)
-    sc = SCENARIOS.get(scenario_name)
+    sc = sc if sc is not None else SCENARIOS.get(scenario_name)
     if route_is_set(route) and sc is not None and sc.max_route_m is not None:
         route = _truncate(route, sc.max_route_m)
     return route
@@ -168,8 +177,17 @@ def route_length(route):
     return total
 
 
+def scenario_ticks(sc, route):
+    """Number of world ticks the scenario runs."""
+    if sc.fixed_ticks is not None:
+        return sc.fixed_ticks
+    return int(math.ceil(scenario_duration_s(sc, route) / FIXED_DT))
+
+
 def scenario_duration_s(sc, route):
     """Driving time of the scenario in seconds (without the +300 s timeout margin)."""
+    if sc.fixed_ticks is not None:
+        return sc.fixed_ticks * FIXED_DT
     if sc.fixed_duration_s is not None:
         return sc.fixed_duration_s
     path = route_length(route)

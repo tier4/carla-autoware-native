@@ -86,7 +86,31 @@ def test_line_order_and_keys():
         "stream_covered0_frames", "parent_stream_radius_m", "radius_expected_m",
         "radius_mismatch", "levels_added_total", "audit_ms_p95", "frame_ms_max",
         "frames_over_100ms", "sync_elapsed_ms_max", "tick_ms_p95",
-        "missing_ism_in_range_p95", "missing_ism_sync_max"]
+        "missing_ism_in_range_p95", "missing_ism_sync_max",
+        "sync_elapsed_ms_p50", "sync_elapsed_ms_p95", "tick_over_100ms", "tick_ms_p99", "tick_ms_max"]
+
+
+def _sync(elapsed_ms):
+    return "LogCarlaRGL: rgl_scene_sync t=1.000 trigger=time scanned=5 elapsed_ms=%.2f entities=10 meshes=3" % elapsed_ms
+
+
+def test_sync_percentiles_and_tick_over_100ms():
+    lines = [_sync(10.0 * i) for i in range(1, 11)]           # elapsed_ms 10..100 step 10
+    r = summarize.summarize_lines(lines, "S1", "Town15", 200.0, tick_ms=[99.0, 101.0])
+    assert r["sync_elapsed_ms_p50"] == 50.0 and r["sync_elapsed_ms_p95"] == 100.0 and r["tick_over_100ms"] == 1
+    assert r["tick_ms_max"] == 101.0 and r["tick_ms_p99"] == 101.0
+
+
+def test_tick_tail_keys_are_na_without_tick_log_and_exact_at_100ms():
+    r = summarize.summarize_lines([_sync(5.0)], "S1", "Town15", 200.0)
+    assert r["tick_over_100ms"] is None and r["tick_ms_p99"] is None and r["tick_ms_max"] is None
+    text = summarize.format_summary(r)
+    assert "tick_over_100ms=na" in text and "tick_ms_p99=na" in text and "tick_ms_max=na" in text
+    exact = summarize.summarize_lines([_sync(5.0)], "S1", "Town15", 200.0, tick_ms=[100.0, 100.0])
+    assert exact["tick_over_100ms"] == 0              # strictly greater than 100 ms
+    tail = [10.0] * 99 + [250.0]
+    r2 = summarize.summarize_lines([_sync(5.0)], "S1", "Town15", 200.0, tick_ms=tail)
+    assert r2["tick_ms_p99"] == 10.0 and r2["tick_ms_max"] == 250.0   # nearest rank: the 99th of 100 is still 10
 
 
 def test_ism_breakdown_and_old_lines():
