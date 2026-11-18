@@ -85,4 +85,15 @@ def test_line_order_and_keys():
         "mesh_mismatch_max", "stale_instance_max", "hlod_registered_max",
         "stream_covered0_frames", "parent_stream_radius_m", "radius_expected_m",
         "radius_mismatch", "levels_added_total", "audit_ms_p95", "frame_ms_max",
-        "frames_over_100ms", "sync_elapsed_ms_max", "tick_ms_p95"]
+        "frames_over_100ms", "sync_elapsed_ms_max", "tick_ms_p95",
+        "missing_ism_in_range_p95", "missing_ism_sync_max"]
+
+
+def test_ism_breakdown_and_old_lines():
+    lines = [_audit(1, missing_in_range=5, missing_ism_in_range=4, missing_ism_sync=3),
+             _audit(2, missing_in_range=1)]          # an older line without the ISM keys counts as 0
+    # _audit() writes every key it is given, so drop the ISM keys from the second line
+    lines[1] = lines[1].replace(" missing_ism_in_range=0", "").replace(" missing_ism_sync=0", "")
+    r = summarize.summarize_lines(lines, "S1p", "Town15", 200.0)
+    assert r["missing_ism_in_range_p95"] == 4
+    assert r["missing_ism_sync_max"] == 3

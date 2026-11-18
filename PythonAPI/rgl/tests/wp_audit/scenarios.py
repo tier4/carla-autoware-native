@@ -35,6 +35,8 @@ Route length requirements (checked by run_scenario.py, `reason=route_too_short`)
                  inside a lap.
   S4           : >= 1.5 km + 200 m.
 """
+import json
+import os
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -45,10 +47,29 @@ FIXED_DT = 0.05
 LIDAR_Z = 2.0
 LIDAR_MODEL = "HesaiPandar128E4X"
 
-# TODO(route): placeholders. None means "not set"; see the module docstring.
-TOWN15_ROUTE: Route = None      # TODO: freeze from pick_route.py --mode town15
-ODAIBA_ROUTE: Route = None      # TODO: from the CS Odaiba V2I scenario (see above)
-TOWN10_ROUTE: Route = None      # TODO: freeze from pick_route.py --mode town10
+# Frozen routes (2026-11-18), one JSON list of [x, y, z] per map in routes/<map>.json (CARLA m):
+#   Town15       : pick_route.py --mode town15 --load --length 6000 --step 10 on the t345b package
+#                  (waypoints without Terrain under the road), 600 points, ~6000 m.
+#   Town10HD_Opt : pick_route.py --mode town10 --load --length 6000 --step 10, 600 points, ~6000 m.
+#   Odaiba       : lanelet2 map 2516 (autoware_map/Odaiba/lanelet2_map.osm), lanelets chained from the CS V2I
+#                  scenario start 2314486, keeping only the 1131 lanelets whose centerline hits the CARLA
+#                  ground within 2 m; CARLA x = local_x - 92008.5, y = -(local_y - 45335.1), z = ele
+#                  (ss2_carla_bridge knowledge 003/019). 2222 points, 6558 m.
+# A missing file leaves the map's route unset (run_scenario.py then stops with route_not_set).
+_ROUTE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "routes")
+
+
+def _load_route(map_name) -> Route:
+    path = os.path.join(_ROUTE_DIR, map_name + ".json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return tuple(tuple(float(c) for c in p) for p in json.load(f))
+
+
+TOWN15_ROUTE: Route = _load_route("Town15")
+ODAIBA_ROUTE: Route = _load_route("Odaiba")
+TOWN10_ROUTE: Route = _load_route("Town10HD_Opt")
 
 ROUTES = {"Town15": TOWN15_ROUTE, "Odaiba": ODAIBA_ROUTE, "Town10HD_Opt": TOWN10_ROUTE}
 
@@ -67,6 +88,7 @@ class Scenario:
     laps: int = 1
     pingpong: bool = False              # S5: forward and back
     min_route_m: float = 0.0
+    max_route_m: Optional[float] = None  # use only the first max_route_m of the map's route (keeps stage 0 short)
     events: Tuple[str, ...] = ()        # runner-side behaviours, see run_scenario.py
     fixed_duration_s: Optional[float] = None    # when not route-based
     description: str = ""
@@ -83,38 +105,56 @@ SCENARIOS = {
              radius_expected_m=3000.0, min_route_m=6000.0,
              description="6 km at the default radii (Movable, P6, P7)"),
     "S1p": _s(name="S1p", map="Town15", tile_stream_m=150, actor_active_m=150,
-              radius_expected_m=150.0, min_route_m=500.0,
+              radius_expected_m=150.0, min_route_m=500.0, max_route_m=1500.0,
               description="same road with 150 m radii (P1, P2, P3, P5)"),
     "S2": _s(name="S2", map="Town15", tile_stream_m=150, actor_active_m=150,
              ego_role="npc_lidar", radius_expected_m=200.0, lidar_range_m=200.0,
-             min_route_m=500.0, description="non-hero vehicle carrying a 200 m LiDAR"),
+             min_route_m=500.0, max_route_m=1500.0, description="non-hero vehicle carrying a 200 m LiDAR"),
     "S3": _s(name="S3", map="Town15", tile_stream_m=150, actor_active_m=150,
-             sensor_mode="roadside", radius_expected_m=-1.0, min_route_m=500.0,
+             sensor_mode="roadside", radius_expected_m=-1.0, min_route_m=500.0, max_route_m=1500.0,
              description="parentless roadside sensor, hero passes by"),
     "S4": _s(name="S4", map="Town15", tile_stream_m=150, actor_active_m=150,
-             radius_expected_m=150.0, min_route_m=1700.0,
+             radius_expected_m=150.0, min_route_m=1700.0, max_route_m=1800.0,
              events=("teleport_ahead_1500", "teleport_back", "respawn"),
              description="teleport 1.5 km ahead, back, and respawn"),
     "S5": _s(name="S5", map="Town15", tile_stream_m=150, actor_active_m=150,
-             radius_expected_m=150.0, laps=3, pingpong=True, min_route_m=500.0,
+             radius_expected_m=150.0, laps=3, pingpong=True, min_route_m=500.0, max_route_m=600.0,
              description="S1p road, 3 round trips (a lap longer than the 61 s GC interval)"),
     "S6": _s(name="S6", map="Town15", tile_stream_m=150, actor_active_m=150,
-             radius_expected_m=150.0, min_route_m=500.0, events=("second_sensor_at_tick_10",),
+             radius_expected_m=150.0, min_route_m=500.0, max_route_m=1500.0, events=("second_sensor_at_tick_10",),
              description="second sensor right after the initial streaming"),
     "S7": _s(name="S7", map="Town15", radius_expected_m=None, events=("load_world_cycle_3",),
              fixed_duration_s=480.0, tile_stream_m=150, actor_active_m=150,
              description="load_world Town15 <-> Odaiba, 3 round trips"),
     "CONTROL": _s(name="CONTROL", map="Odaiba", tile_stream_m=3000, actor_active_m=2000,
-                  radius_expected_m=-1.0, min_route_m=6000.0,
+                  radius_expected_m=-1.0, min_route_m=5500.0,
                   description="non-WP control: Odaiba and Town10HD_Opt, S1 speed and LiDAR"),
 }
 
 TODO_MARK = "route_not_set"
 
 
+def _truncate(route, max_m):
+    """The first max_m metres of the polyline (the last point interpolated)."""
+    out, total = [route[0]], 0.0
+    for a, b in zip(route[:-1], route[1:]):
+        seg = sum((b[k] - a[k]) ** 2 for k in range(3)) ** 0.5
+        if total + seg >= max_m:
+            f = (max_m - total) / seg if seg > 0 else 0.0
+            out.append(tuple(a[k] + f * (b[k] - a[k]) for k in range(3)))
+            return tuple(out)
+        out.append(b)
+        total += seg
+    return tuple(out)
+
+
 def route_for(scenario_name, map_name):
-    """Return the polyline or None when it is still a placeholder."""
-    return ROUTES.get(map_name)
+    """Return the polyline (cut to the scenario's max_route_m) or None when it is not set."""
+    route = ROUTES.get(map_name)
+    sc = SCENARIOS.get(scenario_name)
+    if route_is_set(route) and sc is not None and sc.max_route_m is not None:
+        route = _truncate(route, sc.max_route_m)
+    return route
 
 
 def route_is_set(route):

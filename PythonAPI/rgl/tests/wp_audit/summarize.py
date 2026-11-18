@@ -119,6 +119,9 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None):
         "frames_over_100ms": sum(1 for v in frame_ms if v > 100.0),
         "sync_elapsed_ms_max": max(sync_ms, default=0.0),
         "tick_ms_p95": percentile(list(tick_ms), 95) if tick_ms else None,
+        # ISM-instance part of the misses (older lines without the key count as 0)
+        "missing_ism_in_range_p95": int(percentile(g("missing_ism_in_range"), 95)),
+        "missing_ism_sync_max": int(max(g("missing_ism_sync"), default=0)),
     }
 
 
@@ -132,7 +135,7 @@ _ORDER = [
     ("radius_mismatch", "%d"), ("levels_added_total", "%d"),
     ("audit_ms_p95", "%.3f"), ("frame_ms_max", "%.2f"),
     ("frames_over_100ms", "%d"), ("sync_elapsed_ms_max", "%.2f"),
-    ("tick_ms_p95", "%.2f"),
+    ("tick_ms_p95", "%.2f"), ("missing_ism_in_range_p95", "%d"), ("missing_ism_sync_max", "%d"),
 ]
 
 

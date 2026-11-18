@@ -29,7 +29,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, ".."))          # PythonAPI/rgl (lidar_models)
+sys.path.insert(0, os.path.join(HERE, "..", ".."))    # PythonAPI/rgl (lidar_models); HERE = PythonAPI/rgl/tests/wp_audit
 
 import scenarios as sc_mod  # noqa: E402
 
@@ -433,6 +433,8 @@ def main(argv):
         status, reason = "invalid", e.reason
     except Exception as e:  # noqa: BLE001
         status, reason = "error", "%s" % type(e).__name__
+        import traceback
+        traceback.print_exc()   # the run.txt line keeps only the type; the stack goes to the runner's stderr
     finally:
         stopped = "na"
         if proc is not None:
