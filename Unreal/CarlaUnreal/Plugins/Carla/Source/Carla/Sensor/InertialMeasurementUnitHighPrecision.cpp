@@ -14,12 +14,18 @@
 #include "PhysicsEngine/BodyInstance.h"
 #include "Physics/Experimental/PhysScene_Chaos.h"
 #include "PBDRigidsSolver.h" // complete Chaos::FPBDRigidsSolver for *SimCallbackObject_External
+#include "HAL/PlatformProcess.h" // raw sink: GetDllHandle / GetDllExport
 #include <util/ue-header-guard-end.h>
 
 // LibCarla headers: disable-ue4-macros block.
 #include <util/disable-ue4-macros.h>
 #include "carla/geom/Math.h"
 #include "carla/ros2/ROS2.h"
+#if PLATFORM_LINUX
+// ImuMath.h uses M_PI, which only LibCarla's own targets define on MSVC; the
+// raw sink is Linux only, so include it there.
+#include "carla/ros2/publishers/ImuMath.h"
+#endif
 #include <util/enable-ue4-macros.h>
 
 AInertialMeasurementUnitHighPrecision::AInertialMeasurementUnitHighPrecision(
@@ -56,6 +62,128 @@ void AInertialMeasurementUnitHighPrecision::Set(const FActorDescription &ActorDe
 
   OutputRateHz = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToFloat(
       TEXT("output_rate_hz"), ActorDescription.Variations, 200.0f);
+
+  RawSinkLibrary = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToString(
+      TEXT("raw_sink_library"), ActorDescription.Variations, TEXT(""));
+  RawSinkConfig = UActorBlueprintFunctionLibrary::RetrieveActorAttributeToString(
+      TEXT("raw_sink_config"), ActorDescription.Variations, TEXT(""));
+}
+
+// =========================================================================
+// Raw sink: an external shared library receives every sample through the C
+// interface in carla_imu_raw_sink.h. It is independent of the ROS 2 publish
+// (enable_for_ros): each output can be switched on or off on its own.
+// =========================================================================
+
+namespace
+{
+  // Called from a sink-owned thread; UE_LOG is thread safe.
+  void RawSinkLog(void *User, int Level, const char *Message)
+  {
+    const FString &Name = *static_cast<const FString *>(User);
+    const FString Text = UTF8_TO_TCHAR(Message);
+    if (Level == CARLA_IMU_RAW_SINK_LOG_ERROR)
+    {
+      UE_LOG(LogCarla, Error, TEXT("%s: %s"), *Name, *Text);
+    }
+    else if (Level == CARLA_IMU_RAW_SINK_LOG_WARNING)
+    {
+      UE_LOG(LogCarla, Warning, TEXT("%s: %s"), *Name, *Text);
+    }
+    else
+    {
+      UE_LOG(LogCarla, Log, TEXT("%s: %s"), *Name, *Text);
+    }
+  }
+} // namespace
+
+void AInertialMeasurementUnitHighPrecision::StartRawSinkOnce()
+{
+  if (RawSinkLibrary.IsEmpty() || bRawSinkTried)
+  {
+    return;
+  }
+  bRawSinkTried = true;
+
+#if PLATFORM_LINUX
+  RawSinkDll = FPlatformProcess::GetDllHandle(*RawSinkLibrary);
+  if (RawSinkDll == nullptr)
+  {
+    UE_LOG(LogCarla, Error,
+        TEXT("%s: could not load raw_sink_library '%s'; no raw output for this sensor."),
+        *GetName(), *RawSinkLibrary);
+    return;
+  }
+  const auto AbiVersion = reinterpret_cast<carla_imu_raw_sink_abi_version_fn>(
+      FPlatformProcess::GetDllExport(RawSinkDll, TEXT("carla_imu_raw_sink_abi_version")));
+  const auto Create = reinterpret_cast<carla_imu_raw_sink_create_fn>(
+      FPlatformProcess::GetDllExport(RawSinkDll, TEXT("carla_imu_raw_sink_create")));
+  RawSinkPush = reinterpret_cast<carla_imu_raw_sink_push_fn>(
+      FPlatformProcess::GetDllExport(RawSinkDll, TEXT("carla_imu_raw_sink_push")));
+  RawSinkDestroy = reinterpret_cast<carla_imu_raw_sink_destroy_fn>(
+      FPlatformProcess::GetDllExport(RawSinkDll, TEXT("carla_imu_raw_sink_destroy")));
+  if (AbiVersion == nullptr || Create == nullptr || RawSinkPush == nullptr ||
+      RawSinkDestroy == nullptr || AbiVersion() != CARLA_IMU_RAW_SINK_ABI_VERSION)
+  {
+    UE_LOG(LogCarla, Error,
+        TEXT("%s: '%s' is not an IMU raw sink of ABI version %d; "
+             "no raw output for this sensor."),
+        *GetName(), *RawSinkLibrary, CARLA_IMU_RAW_SINK_ABI_VERSION);
+    StopRawSink();
+    return;
+  }
+
+  RawSinkLogName = new FString(GetName());
+  char ErrorText[512] = {0};
+  RawSink = Create(TCHAR_TO_UTF8(*RawSinkConfig), &RawSinkLog, RawSinkLogName,
+      ErrorText, sizeof(ErrorText));
+  if (RawSink == nullptr)
+  {
+    UE_LOG(LogCarla, Error,
+        TEXT("%s: raw sink '%s' did not start: %s; no raw output for this sensor."),
+        *GetName(), *RawSinkLibrary, UTF8_TO_TCHAR(ErrorText));
+    StopRawSink();
+    return;
+  }
+  UE_LOG(LogCarla, Log, TEXT("%s: raw sink '%s' started"), *GetName(), *RawSinkLibrary);
+#else
+  UE_LOG(LogCarla, Error,
+      TEXT("%s: raw_sink_library is only supported on Linux; no raw output for this sensor."),
+      *GetName());
+#endif
+}
+
+bool AInertialMeasurementUnitHighPrecision::IsStreamEnabledForRos()
+{
+  // This sensor publishes to ROS 2 itself (per substep), not through the
+  // stream, so it has to look at the stream's ROS flag the way the client's
+  // enable_for_ros / disable_for_ros set it (single-GPU streaming server).
+  auto *GameInstance = UCarlaStatics::GetGameInstance(GetWorld());
+  if (GameInstance == nullptr)
+  {
+    return true;
+  }
+  const auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
+  return GameInstance->GetServer().GetStreamingServer().IsEnabledForROS(StreamId);
+}
+
+void AInertialMeasurementUnitHighPrecision::StopRawSink()
+{
+  if (RawSink != nullptr && RawSinkDestroy != nullptr)
+  {
+    // Joins the sink's threads; its log callback is not called after this.
+    RawSinkDestroy(RawSink);
+  }
+  RawSink = nullptr;
+  RawSinkPush = nullptr;
+  RawSinkDestroy = nullptr;
+  delete RawSinkLogName;
+  RawSinkLogName = nullptr;
+  if (RawSinkDll != nullptr)
+  {
+    FPlatformProcess::FreeDllHandle(RawSinkDll);
+    RawSinkDll = nullptr;
+  }
 }
 
 // =========================================================================
@@ -170,7 +298,15 @@ void AInertialMeasurementUnitHighPrecision::UnregisterSubstepCallback()
 void AInertialMeasurementUnitHighPrecision::EndPlay(EEndPlayReason::Type EndPlayReason)
 {
   UnregisterSubstepCallback();
+  StopRawSink();
   Super::EndPlay(EndPlayReason);
+}
+
+void AInertialMeasurementUnitHighPrecision::BeginDestroy()
+{
+  // Actors destroyed without EndPlay must not leave a sink thread running.
+  StopRawSink();
+  Super::BeginDestroy();
 }
 
 // =========================================================================
@@ -185,9 +321,30 @@ void AInertialMeasurementUnitHighPrecision::PublishSubstepSample(
 {
   auto DataStream = GetDataStream(*this);
 
+#if PLATFORM_LINUX
+  if (RawSink != nullptr)
+  {
+    // Same CARLA -> REP-103 conversion as the ROS 2 IMU publisher, so the sink
+    // receives exactly what the topic would have carried.
+    const auto Accel = carla::ros2::AccelToRos(Accelerometer.x, Accelerometer.y, Accelerometer.z);
+    const auto Gyro = carla::ros2::GyroToRos(Gyroscope.x, Gyroscope.y, Gyroscope.z);
+    carla_imu_raw_sample RawSample;
+    RawSample.sim_time_s = GetEpisode().GetElapsedGameTime() - TimeOffsetSeconds;
+    for (int Axis = 0; Axis < 3; ++Axis)
+    {
+      RawSample.gyro_radps[Axis] = Gyro[Axis];
+      RawSample.accel_mps2[Axis] = Accel[Axis];
+    }
+    RawSinkPush(RawSink, &RawSample);
+  }
+#endif
+
   #if defined(WITH_ROS2)
+  // Independent of the raw sink: the ROS 2 publish follows this sensor's ROS
+  // flag (enable_for_ros / disable_for_ros, on by default with the server's
+  // default topic visibility), so either output can be on or off.
   auto ROS2 = carla::ros2::ROS2::GetInstance();
-  if (ROS2->IsEnabled())
+  if (ROS2->IsEnabled() && bRos2StreamEnabled)
   {
     TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Send");
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
@@ -248,6 +405,10 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTick(
     UWorld* World, ELevelTick TickType, float DeltaTime)
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(AInertialMeasurementUnitHighPrecision::PostPhysTick);
+
+  StartRawSinkOnce();
+  // Read once per frame: the samples of this frame are published below.
+  bRos2StreamEnabled = IsStreamEnabledForRos();
 
   // Upsample-only mode: skip substep registration entirely; emit ZOH samples.
   if (ConfiguredMode == EIMUOutputMode::Upsample)

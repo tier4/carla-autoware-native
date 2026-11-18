@@ -1448,7 +1448,25 @@ FActorDefinition UActorBlueprintFunctionLibrary::MakeIMUHighPrecisionDefinition(
   OutputRateHz.RecommendedValues = { TEXT("200.0") };
   OutputRateHz.bRestrictToRecommended = false;
 
-  Definition.Variations.Append({ SubstepMode, OutputRateHz });
+  // Raw sink: absolute path of a shared library implementing the C interface
+  // in Sensor/carla_imu_raw_sink.h. When set, every sample also goes to the
+  // library; the ROS 2 publish stays switched by enable_for_ros, so the two
+  // outputs are independent. The server loads and runs this library, so only
+  // use trusted files. Linux only.
+  FActorVariation RawSinkLibrary;
+  RawSinkLibrary.Id = TEXT("raw_sink_library");
+  RawSinkLibrary.Type = EActorAttributeType::String;
+  RawSinkLibrary.RecommendedValues = { TEXT("") };
+  RawSinkLibrary.bRestrictToRecommended = false;
+
+  // Passed to the raw sink as is; its meaning belongs to the library.
+  FActorVariation RawSinkConfig;
+  RawSinkConfig.Id = TEXT("raw_sink_config");
+  RawSinkConfig.Type = EActorAttributeType::String;
+  RawSinkConfig.RecommendedValues = { TEXT("") };
+  RawSinkConfig.bRestrictToRecommended = false;
+
+  Definition.Variations.Append({ SubstepMode, OutputRateHz, RawSinkLibrary, RawSinkConfig });
 
   return Definition;
 }
