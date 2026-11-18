@@ -1706,6 +1706,8 @@ Sensors attachable to an actor. Each one is documented in [Sensors reference](re
 | `noise_lon_bias` | Float | `0` | `0.0` | yes |
 | `noise_lon_stddev` | Float | `0` | `0.0` | yes |
 | `noise_seed` | Int | `0` | `0` | yes |
+| `raw_sink_config` | String | `""` | `` | yes |
+| `raw_sink_library` | String | `""` | `` | yes |
 | `role_name` | String | `default` | `default` | yes |
 | `ros_name` | String | `sensor.other.autoware_gnss` | `sensor.other.autoware_gnss` | yes |
 | `ros_topic_name` | String | `sensor.other.autoware_gnss` | `sensor.other.autoware_gnss` | yes |
