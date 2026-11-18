@@ -434,7 +434,7 @@ def tick_timed(world, tick_log):
 
 
 def spawn_npc(world, bp_lib, tf):
-    bp = bp_lib.find(NPC_BLUEPRINT)
+    bp = pick_ego_blueprint(bp_lib)[0]   # NPC_BLUEPRINT, or the first vehicle of a slim package that lacks it
     bp.set_attribute("role_name", "npc_cycle")
     npc = world.try_spawn_actor(bp, tf)
     if npc is None:

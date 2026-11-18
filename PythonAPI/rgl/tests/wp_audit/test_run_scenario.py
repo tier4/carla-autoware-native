@@ -111,3 +111,38 @@ def test_dash_values_are_merged_for_argparse():
         ["--server-arg=-rgl-x=1", "--det", "--hold-near=-5,2", "--out", "o"]
     assert run_scenario.merge_dash_values(["--server-arg=-a=1", "--hold-near=3,4"]) == ["--server-arg=-a=1", "--hold-near=3,4"]
     assert run_scenario.merge_dash_values(["--out", "-weird"]) == ["--out", "-weird"]   # only the two options are touched
+
+
+def test_npc_blueprint_falls_back_when_the_default_car_is_missing():
+    """The slim package has no vehicle.lincoln.mkz_2020: spawn_npc must use the same fallback as the ego."""
+    class BP:
+        def __init__(self, i):
+            self.id = i
+            self.attrs = {}
+
+        def set_attribute(self, k, v):
+            self.attrs[k] = v
+
+    class Lib:
+        def __init__(self, ids):
+            self.bps = [BP(i) for i in ids]
+
+        def filter(self, pat):
+            if pat.endswith("*"):
+                return [b for b in self.bps if b.id.startswith(pat[:-1])]
+            return [b for b in self.bps if b.id == pat]
+
+        def find(self, i):
+            raise IndexError("blueprint %r not found" % i)
+
+    class World:
+        def try_spawn_actor(self, bp, tf):
+            class A:
+                def set_simulate_physics(self, v):
+                    pass
+            a = A()
+            a.bp = bp
+            return a
+
+    npc = run_scenario.spawn_npc(World(), Lib(["vehicle.kia.niro"]), None)
+    assert npc.bp.id == "vehicle.kia.niro" and npc.bp.attrs["role_name"] == "npc_cycle"
