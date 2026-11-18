@@ -257,7 +257,10 @@ add_dependencies (
 # CARLA_PYTHON_VERSIONS other than the one found above gets its own build of
 # this project, reduced to the client and the Python API, that writes its
 # wheel to the same dist directory. They run one after another and before the
-# main wheel, since all of them build from PythonAPI/carla.
+# main wheel, since all of them build from PythonAPI/carla. Each one gets this
+# build's CARLA_RELEASE_VERSION, empty included: all of them write the same
+# LibCarla/source/carla/Version.h, so a sub-build resolving its own version
+# would also change the main build's.
 
 
 if (CARLA_PYTHON_VERSIONS)
@@ -378,6 +381,7 @@ foreach (EXTRA_PYTHON_VERSION ${CARLA_PYTHON_VERSIONS})
       -DPython3_EXECUTABLE=${EXTRA_PYTHON_EXECUTABLE}
       -DPython_EXECUTABLE=${EXTRA_PYTHON_EXECUTABLE}
       -DCARLA_PYTHON_VERSIONS=
+      -DCARLA_RELEASE_VERSION=${CARLA_RELEASE_VERSION}
       -DCARLA_PYTHON_API_DIST_PATH=${CARLA_PYTHON_API_DIST_PATH}
       ${CARLA_PYTHON_API_FETCHCONTENT_ARGS}
     BUILD_COMMAND
