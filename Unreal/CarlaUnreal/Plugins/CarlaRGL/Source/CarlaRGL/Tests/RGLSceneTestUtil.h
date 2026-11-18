@@ -2,7 +2,7 @@
 // Shared fixture and helpers of the scene tests (CarlaRGL.SceneAudit.*, CarlaRGL.SceneSync.*) on the game world of
 // EmptyMap. The scene manager of a world is shared by every test, so counts are compared as differences around each
 // step (Diff), and every test works around its own base point (BaseFor), 1 km from the others.
-// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-15, 17-19, 21, 22, 31-33, 40, 46, 47, 60 (SceneSync; 12 by the two
+// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-15, 17-19, 21-24, 31-34, 40, 46, 47, 60 (SceneSync; 12 by the two
 // level-sync tests).
 // Give each new test a slot nobody else uses.
 
@@ -19,6 +19,8 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "HAL/IConsoleManager.h"
 #include "UObject/Package.h"
+#include "PhysicsEngine/BodySetup.h"
+#include "PhysicsEngine/AggregateGeom.h"
 #if WITH_EDITOR
 #include "StaticMeshCompiler.h"
 #endif
@@ -86,6 +88,25 @@ inline UStaticMesh* NewNamedTransientMesh(const TCHAR* BaseName)
 {
     const FName Name = MakeUniqueObjectName(GetTransientPackage(), UStaticMesh::StaticClass(), FName(BaseName));
     return NewObject<UStaticMesh>(GetTransientPackage(), Name, RF_Transient);
+}
+
+/// A transient static mesh (NewNamedTransientMesh) that the scene manager can upload without render data: its simple
+/// collision is one box of BoxCm, which the extraction's last fallback reads. Unlike a DuplicateObject copy of an engine
+/// mesh (its body setup is duplicatetransient, so only render data would be left, read back from a null RHI), it needs
+/// no build and no GPU. Not standalone: the next garbage collection takes it once nothing uses it.
+inline void AddBoxCollision(UStaticMesh* Mesh, float BoxCm)
+{
+    Mesh->CreateBodySetup();
+    if (UBodySetup* Body = Mesh->GetBodySetup())
+    {
+        Body->AggGeom.BoxElems.Add(FKBoxElem(BoxCm));
+    }
+}
+inline UStaticMesh* NewTransientBoxMesh(const TCHAR* BaseName, float BoxCm)
+{
+    UStaticMesh* Mesh = NewNamedTransientMesh(BaseName);
+    AddBoxCollision(Mesh, BoxCm);
+    return Mesh;
 }
 
 /// Base point of a test: 2 km west, (Slot + 1) km south, 300 m up (the skeletal tests stay near x = 0).

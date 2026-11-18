@@ -308,7 +308,7 @@ bool FSceneAuditDoesNotChangeSceneTest::RunTest(const FString& Parameters)
     SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f), { FVector::ZeroVector, FVector(0.f, 300.f, 0.f) }, Owner);
     F.Keep(Owner);
     F.Sync();
-    if (Ball) Ball->Destroy();   // its mesh becomes an idle cache entry (FindCachedMesh would destroy a stale one)
+    if (Ball) Ball->Destroy();   // its mesh becomes an idle cache entry (its key still resolves: no purge takes it)
     F.Sync();
 
     const FRGLSceneManager::FSceneCounts C0 = F.SM.GetSceneCounts_ForTest();

@@ -1216,10 +1216,9 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
     }
 
     // Cache the mesh
-    FCachedMesh& Cached = MeshCache.Add(StaticMesh);
-    Cached.Mesh = RGLMesh;
-    Cached.Asset = StaticMesh;
-    FailedMeshRetrySync.Remove(FObjectKey(StaticMesh));
+    const FObjectKey MeshKey(StaticMesh);
+    MeshCache.Add(MeshKey).Mesh = RGLMesh;
+    FailedMeshRetrySync.Remove(MeshKey);
 #if !UE_BUILD_SHIPPING
     ++MeshUploads_ForTest;
 #endif
@@ -1241,37 +1240,20 @@ void FRGLSceneManager::RememberMeshFailure(UStaticMesh* StaticMesh)
     ++MeshFailuresSinceLog;
 }
 
-rgl_mesh_t FRGLSceneManager::FindCachedMesh(UStaticMesh* StaticMesh)
+rgl_mesh_t FRGLSceneManager::FindCachedMesh(const UStaticMesh* StaticMesh) const
 {
-    if (!StaticMesh)
-    {
-        return nullptr;
-    }
-
-    FCachedMesh* Found = MeshCache.Find(StaticMesh);
-    if (!Found)
-    {
-        return nullptr;
-    }
-
-    // An idle entry outlives the entities that kept its asset alive, so the asset may have been garbage
-    // collected and the address handed to another UStaticMesh. Never serve the old geometry for it.
-    // (A referenced entry keeps the original behaviour: its entities still use the mesh.)
-    if (Found->Asset.Get() != StaticMesh && !MeshRefCounts.Contains(StaticMesh))
-    {
-        const int32 LruIndex = IdleMeshLru.Find(StaticMesh);
-        if (LruIndex != INDEX_NONE)
-        {
-            DestroyIdleMeshAt(LruIndex);
-            return nullptr;
-        }
-    }
-    return Found->Mesh;
+    // A cache entry (live or idle) can outlive its asset: an idle one outlives the entities that kept the asset alive,
+    // and a live one lasts until the next Update removes the entities of a destroyed component. If the asset was
+    // collected and its address handed to another UStaticMesh, that mesh has another FObjectKey (GC serial) and misses
+    // here, so the old geometry is never served for it (P2). A stale entry leaves with its last reference, or, kept as
+    // idle (rgl.Scene.IdleMeshCacheMax > 0), at the next sync's PurgeIdleMeshes.
+    const FCachedMesh* Found = StaticMesh ? MeshCache.Find(FObjectKey(StaticMesh)) : nullptr;
+    return Found ? Found->Mesh : nullptr;
 }
 
 void FRGLSceneManager::DestroyIdleMeshAt(int32 LruIndex)
 {
-    UStaticMesh* Key = IdleMeshLru[LruIndex];
+    const FObjectKey Key = IdleMeshLru[LruIndex];
     IdleMeshLru.RemoveAt(LruIndex);
     if (MeshRefCounts.Contains(Key))
     {
@@ -1298,11 +1280,11 @@ void FRGLSceneManager::TrimIdleMeshes(int32 MaxIdle)
 
 void FRGLSceneManager::PurgeIdleMeshes()
 {
+    // An idle entry whose key no longer resolves (its asset was collected or is garbage) can never be looked up again.
     for (int32 i = IdleMeshLru.Num() - 1; i >= 0; --i)
     {
-        UStaticMesh* Key = IdleMeshLru[i];
-        const FCachedMesh* Cached = MeshCache.Find(Key);
-        if (!Cached || Cached->Asset.Get() != Key)
+        const FObjectKey& Key = IdleMeshLru[i];
+        if (!MeshCache.Contains(Key) || !Key.ResolveObjectPtr())
         {
             DestroyIdleMeshAt(i);
         }
@@ -1311,29 +1293,29 @@ void FRGLSceneManager::PurgeIdleMeshes()
     TrimIdleMeshes(SceneIdleMeshCacheMax());
 }
 
-void FRGLSceneManager::AddMeshReference(UStaticMesh* StaticMesh, int32 Count)
+void FRGLSceneManager::AddMeshReference(const FObjectKey& MeshKey, int32 Count)
 {
-    if (!StaticMesh || Count <= 0)
+    if (MeshKey == FObjectKey() || Count <= 0)
     {
         return;
     }
 
-    int32& RefCount = MeshRefCounts.FindOrAdd(StaticMesh);
+    int32& RefCount = MeshRefCounts.FindOrAdd(MeshKey);
     if (RefCount == 0)
     {
-        IdleMeshLru.RemoveSingle(StaticMesh);   // revived from the idle LRU (no-op for a fresh mesh)
+        IdleMeshLru.RemoveSingle(MeshKey);   // revived from the idle LRU (no-op for a fresh mesh)
     }
     RefCount += Count;
 }
 
-void FRGLSceneManager::ReleaseMeshReference(UStaticMesh* StaticMesh, int32 Count)
+void FRGLSceneManager::ReleaseMeshReference(const FObjectKey& MeshKey, int32 Count)
 {
-    if (!StaticMesh || Count <= 0)
+    if (MeshKey == FObjectKey() || Count <= 0)
     {
         return;
     }
 
-    int32* RefCount = MeshRefCounts.Find(StaticMesh);
+    int32* RefCount = MeshRefCounts.Find(MeshKey);
     if (!RefCount)
     {
         return;
@@ -1345,9 +1327,9 @@ void FRGLSceneManager::ReleaseMeshReference(UStaticMesh* StaticMesh, int32 Count
         return;
     }
 
-    MeshRefCounts.Remove(StaticMesh);
+    MeshRefCounts.Remove(MeshKey);
 
-    FCachedMesh* Cached = MeshCache.Find(StaticMesh);
+    FCachedMesh* Cached = MeshCache.Find(MeshKey);
     if (!Cached)
     {
         return;
@@ -1357,8 +1339,8 @@ void FRGLSceneManager::ReleaseMeshReference(UStaticMesh* StaticMesh, int32 Count
     const int32 MaxIdle = SceneIdleMeshCacheMax();
     if (MaxIdle > 0 && Cached->Mesh)
     {
-        IdleMeshLru.RemoveSingle(StaticMesh);
-        IdleMeshLru.Add(StaticMesh);
+        IdleMeshLru.RemoveSingle(MeshKey);
+        IdleMeshLru.Add(MeshKey);
         TrimIdleMeshes(MaxIdle);
         return;
     }
@@ -1367,7 +1349,7 @@ void FRGLSceneManager::ReleaseMeshReference(UStaticMesh* StaticMesh, int32 Count
     {
         rgl_mesh_destroy(Cached->Mesh);
     }
-    MeshCache.Remove(StaticMesh);
+    MeshCache.Remove(MeshKey);
 }
 
 // ============================================================================
@@ -1602,13 +1584,14 @@ bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
     {
         return false;
     }
-    AddMeshReference(StaticMesh);
+    const FObjectKey MeshKey(StaticMesh);
+    AddMeshReference(MeshKey);
 
     rgl_entity_t Entity = nullptr;
     rgl_status_t Status = rgl_entity_create(&Entity, Scene, RGLMesh);
     if (Status != RGL_SUCCESS || !Entity)
     {
-        ReleaseMeshReference(StaticMesh);
+        ReleaseMeshReference(MeshKey);
         const char* ErrMsg = nullptr;
         rgl_get_last_error_string(&ErrMsg);
         UE_LOG(LogCarlaRGL, Warning,
@@ -1643,8 +1626,7 @@ bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
     FEntityInfo Info;
     Info.Entity = Entity;
     Info.Component = Component;
-    Info.StaticMesh = StaticMesh;
-    Info.MeshKey = FObjectKey(StaticMesh);
+    Info.MeshKey = MeshKey;
     Info.bIsStatic = (Component->Mobility == EComponentMobility::Static);
     Info.bTransformInitialized = true;
     Info.LastTransform = WorldTransform;
@@ -1666,7 +1648,7 @@ void FRGLSceneManager::UnregisterComponent(UStaticMeshComponent* Component)
         rgl_entity_destroy(Info->Entity);
         Info->Entity = nullptr;
     }
-    ReleaseMeshReference(Info->StaticMesh);
+    ReleaseMeshReference(Info->MeshKey);   // the stored key: the asset may be collected already
     EntityMap.Remove(Component);
 }
 
@@ -1733,12 +1715,12 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
     {
         return false;
     }
-    AddMeshReference(StaticMesh); // Temporary reference until at least one entity owns the mesh.
+    const FObjectKey MeshKey(StaticMesh);
+    AddMeshReference(MeshKey); // Temporary reference until at least one entity owns the mesh.
 
     FISMCEntityGroup Group;
     Group.Component = Component;
-    Group.StaticMesh = StaticMesh;
-    Group.MeshKey = FObjectKey(StaticMesh);
+    Group.MeshKey = MeshKey;
     Group.OriginalInstanceCount = NumInstances;
     Group.Entities.Reserve(Chosen.Num());
     Group.InstanceSpheres = MoveTemp(Spheres);
@@ -1766,14 +1748,14 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
 
     if (SuccessCount == 0)
     {
-        ReleaseMeshReference(StaticMesh);
+        ReleaseMeshReference(MeshKey);
         return false;
     }
 
     Group.MeshRefCount = SuccessCount;
     ISMCEntityMap.Add(Component, MoveTemp(Group));
-    AddMeshReference(StaticMesh, SuccessCount);
-    ReleaseMeshReference(StaticMesh); // Drop the temporary upload reference.
+    AddMeshReference(MeshKey, SuccessCount);
+    ReleaseMeshReference(MeshKey); // Drop the temporary upload reference.
 
     RGLLog::Info("RGLSceneManager: Registered ISMC '",
                  TCHAR_TO_UTF8(*Component->GetName()),
@@ -1800,7 +1782,7 @@ void FRGLSceneManager::UnregisterISMComponent(UInstancedStaticMeshComponent* Com
             rgl_entity_destroy(Entity);
         }
     }
-    ReleaseMeshReference(Group->StaticMesh, Group->MeshRefCount);
+    ReleaseMeshReference(Group->MeshKey, Group->MeshRefCount);   // the stored key: the asset may be collected already
     ISMCEntityMap.Remove(Component);
 }
 
@@ -1998,8 +1980,9 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
             }
 
             // Only meshes with live entities can bypass the budget: reviving an idle mesh rebuilds GAS
-            // at the next raytrace, just like creating a new mesh.
-            if (FindCachedMesh(StaticMesh) && MeshRefCounts.FindRef(StaticMesh) > 0)
+            // at the next raytrace, just like creating a new mesh. The scan runs before the removals below (D6): a
+            // component that replaces a just-destroyed one with the same asset finds that one's mesh still live.
+            if (FindCachedMesh(StaticMesh) && MeshRefCounts.FindRef(FObjectKey(StaticMesh)) > 0)
             {
                 if (RegisterComponent(Comp))   // dispatches ISMCs to RegisterISMComponent
                 {
@@ -2133,7 +2116,7 @@ void FRGLSceneManager::DrainPendingCreates(bool bUnlimited, FDrainStats& OutStat
             continue; // Includes other queued components sharing an asset that failed earlier this step.
         }
         const bool bResident = (FindCachedMesh(StaticMesh) != nullptr);
-        const bool bNeedsCreate = !bResident || MeshRefCounts.FindRef(StaticMesh) <= 0;
+        const bool bNeedsCreate = !bResident || MeshRefCounts.FindRef(FObjectKey(StaticMesh)) <= 0;
 
         // Re-check what the scan checked: still valid, visible, and within registration range.
         bool bOutOfRange = false;
@@ -2256,7 +2239,8 @@ bool FRGLSceneManager::ReevaluateIsmGroup(UInstancedStaticMeshComponent* Compone
         }
         if (!Mesh)
         {
-            Mesh = FindCachedMesh(Group.StaticMesh);
+            const FCachedMesh* Cached = MeshCache.Find(Group.MeshKey);
+            Mesh = Cached ? Cached->Mesh : nullptr;
             if (!Mesh)
             {
                 break;   // defensive: no resident mesh for a group with entities; leave the additions to a rebuild
@@ -2280,7 +2264,7 @@ bool FRGLSceneManager::ReevaluateIsmGroup(UInstancedStaticMeshComponent* Compone
         Group.InstanceWorldTransforms.Add(InstanceTransform);
         Group.RegisteredMask[i] = true;
         ++Group.MeshRefCount;
-        AddMeshReference(Group.StaticMesh);
+        AddMeshReference(Group.MeshKey);
         ++InOutChanges;
         ++OutStats.Added;
     }
@@ -2310,7 +2294,7 @@ bool FRGLSceneManager::ReevaluateIsmGroup(UInstancedStaticMeshComponent* Compone
         Group.InstanceWorldTransforms.RemoveAtSwap(k, EAllowShrinking::No);
         Group.RegisteredMask[Index] = false;
         --Group.MeshRefCount;
-        ReleaseMeshReference(Group.StaticMesh);
+        ReleaseMeshReference(Group.MeshKey);
         ++InOutChanges;
         ++OutStats.Removed;
     }
@@ -2966,8 +2950,8 @@ bool FRGLSceneManager::BuildCutoutMesh(USkeletalMeshComponent* Comp, FSkeletalEn
 // predicate, but not in RGL. "Loaded world" = registered components of visible levels (bIsVisible &&
 // !bIsBeingRemoved). A level being added (components registered over several frames before bIsVisible) or
 // removed (components unregistered over several frames while bIsVisible stays true) is in transition and its
-// components count neither way. Nothing here changes the scene: no registration, no FindCachedMesh (it destroys
-// idle meshes), no queue edits.
+// components count neither way. Nothing here changes the scene: no registration, no cache maintenance (no idle purge),
+// no queue edits.
 
 // Helpers are always called qualified (RGLSceneAudit::...): no using-directive, so neither UE's global FSphere
 // nor same-named statics of other files in a unity build can make a name ambiguous.
@@ -3272,10 +3256,10 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
         }
     }
 
-    // ---- Mesh cache: entries whose asset is gone (the raw key may already belong to another object) ----
+    // ---- Mesh cache: entries whose key no longer resolves (the asset was collected or is garbage) ----
     for (const auto& Pair : MeshCache)
     {
-        if (Pair.Value.Asset.Get() != Pair.Key)
+        if (!Pair.Key.ResolveObjectPtr())
         {
             ++R.CacheStale;
         }
@@ -3681,6 +3665,16 @@ void FRGLSceneManager::Update_ForTest(UWorld* World, double SimTime)
 void FRGLSceneManager::OnLevelAddedToWorld_ForTest(ULevel* Level, UWorld* World)
 {
     OnLevelAddedToWorld(Level, World);
+}
+void FRGLSceneManager::AddIdleMeshEntry_ForTest(const UStaticMesh* Asset)
+{
+    const FObjectKey Key(Asset);
+    if (!Asset || MeshCache.Contains(Key))
+    {
+        return;
+    }
+    MeshCache.Add(Key);
+    IdleMeshLru.Add(Key);
 }
 int32 FRGLSceneManager::GetIsmEntityCount_ForTest(const UInstancedStaticMeshComponent* Comp) const
 {

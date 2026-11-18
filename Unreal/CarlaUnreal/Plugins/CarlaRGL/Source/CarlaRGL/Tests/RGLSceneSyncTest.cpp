@@ -4,8 +4,8 @@
 // First the audit counts the World Partition fixes are judged by: missing_steady (the miss that the last sync
 // should already have registered), the ISM part of the ghosts, and spline mesh components in the scene.
 // Then the fixes: unregistered ISM components leave the scene at once (P1), adding a level with geometry in some
-// sensor's R syncs (P5), the instances of Static ISMs are re-evaluated against the sensor spheres (P3), and the name
-// rule leaves out sky domes and spheres only (N1).
+// sensor's R syncs (P5), the instances of Static ISMs are re-evaluated against the sensor spheres (P3), the name
+// rule leaves out sky domes and spheres only (N1), and the mesh cache is keyed by the asset's identity (P2).
 
 #include <util/ue-header-guard-begin.h>
 #include "CoreMinimal.h"
@@ -17,6 +17,7 @@
 #include "Components/SplineMeshComponent.h"
 #include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
+#include "UObject/GarbageCollection.h"
 #include <util/ue-header-guard-end.h>
 
 #if WITH_DEV_AUTOMATION_TESTS && defined(WITH_RGL)
@@ -765,6 +766,177 @@ bool FSceneSyncExcludedWorldCountsTest::RunTest(const FString& Parameters)
     const FRGLSceneAuditResult D = Diff(R0, R1);
     TestEqual(TEXT("the 50 m one registered"), D.Registered, 1);
     TestEqual(TEXT("excluded_by_name (inside the spheres)"), D.ExcludedByName, 0);
+    return true;
+}
+
+// ============================================================================
+// P2: the mesh cache is keyed by the asset's identity (FObjectKey), not by its address
+// ============================================================================
+
+// L3 (D6 keeps the order inside a sync: the scan, then the removals): an NPC is destroyed and the same model spawned in
+// its place between two syncs. The scan registers the new component on the mesh the old entity still holds, so nothing
+// is uploaded and nothing waits in the create queue. With rgl.Scene.IdleMeshCacheMax = 0 (set here), removing the old
+// entity before the scan would destroy the cube's RGL mesh and upload it again.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSameAssetRespawnReusesLiveMeshTest, "CarlaRGL.SceneSync.SameAssetRespawnReusesLiveMesh",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSameAssetRespawnReusesLiveMeshTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(23);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0060), Base, 10000.0);
+    FCVarGuard IdleGuard(TEXT("rgl.Scene.IdleMeshCacheMax"));
+    SetCVar(TEXT("rgl.Scene.IdleMeshCacheMax"), 0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    const FVector Loc = Base + FVector(5000.f, 0.f, 0.f);
+    AStaticMeshActor* A = F.Keep(SpawnMeshActor(World, Cube, Loc, EComponentMobility::Movable));
+    if (!TestNotNull(TEXT("cube A"), A)) return false;
+    F.Sync();
+    const FRGLSceneAuditResult R1 = F.Audit();
+    TestEqual(TEXT("A registered: movable_registered +1"), Diff(R0, R1).MovableRegistered, 1);
+
+    const int32 Uploads1 = F.SM.MeshUploads_ForTest;
+    A->Destroy();
+    TestNotNull(TEXT("cube B"), F.Keep(SpawnMeshActor(World, Cube, Loc, EComponentMobility::Movable)));
+    F.Sync();
+    const FRGLSceneAuditResult R2 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(23, F.T, R2));
+    const FRGLSceneAuditResult D = Diff(R1, R2);
+    TestEqual(TEXT("the live mesh is reused: no upload"), F.SM.MeshUploads_ForTest - Uploads1, 0);
+    TestEqual(TEXT("B replaces A: registered +0"), D.Registered, 0);
+    TestEqual(TEXT("B replaces A: movable_registered +0"), D.MovableRegistered, 0);
+    TestEqual(TEXT("no ghost"), D.Ghost, 0);
+    TestEqual(TEXT("cache_stale"), D.CacheStale, 0);
+    TestEqual(TEXT("nothing waits in the create queue"), D.Pending, 0);
+    return true;
+}
+
+// P2 (best effort): A is destroyed and garbage collected with no Update in between, so A's entity still holds the cache
+// entry of A's mesh M1 when another mesh, M2, takes M1's address. B, given M2, must get an upload of its own, not M1's
+// shape (a 1 m box where M2 is a 2 m one). B is spawned without a mesh before the collections, so its component cannot
+// take the address of A's component (the entity map is keyed by component address, outside this test). The rounds go on
+// until the allocator hands M1's address to a new mesh, at most 32; without a reuse the test warns and passes. In each
+// round M1 must be gone after the collection (checked by its key), and up to 16 meshes are made after it, because the
+// same collection frees other blocks of the allocator too; the one at M1's address, if any, is M2. M1 and M2 are
+// transient box meshes, not copies of engine meshes (see NewTransientBoxMesh). rgl.Scene.IdleMeshCacheMax = 0: an RGL
+// mesh is destroyed when its last entity leaves.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncGcReusedAddressGetsFreshMeshTest, "CarlaRGL.SceneSync.GcReusedAddressGetsFreshMesh",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncGcReusedAddressGetsFreshMeshTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    const FVector Base = BaseFor(24);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0061), Base, 10100.0);
+    FCVarGuard IdleGuard(TEXT("rgl.Scene.IdleMeshCacheMax"));
+    SetCVar(TEXT("rgl.Scene.IdleMeshCacheMax"), 0);
+    const FVector Loc = Base + FVector(5000.f, 0.f, 0.f);
+    AStaticMeshActor* B = F.Keep(SpawnMeshActor(World, nullptr, Loc, EComponentMobility::Movable));
+    if (!TestNotNull(TEXT("actor B"), B)) return false;
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    constexpr int32 MaxRounds = 32;
+    constexpr int32 MaxCandidates = 16;
+    int32 Collected = 0;
+    for (int32 Round = 0; Round < MaxRounds; ++Round)
+    {
+        UStaticMesh* M1 = NewTransientBoxMesh(TEXT("RGLGcReuseM1"), 100.f);
+        if (!TestNotNull(TEXT("M1"), M1)) return false;
+        AStaticMeshActor* A = SpawnMeshActor(World, M1, Loc, EComponentMobility::Movable);   // not kept: collected below
+        if (!TestNotNull(TEXT("actor A"), A)) return false;
+        const int32 Uploads0 = F.SM.MeshUploads_ForTest;
+        F.Sync();
+        if (F.SM.MeshUploads_ForTest == Uploads0)
+        {
+            A->Destroy();
+            AddWarning(TEXT("transient box mesh not uploadable"));
+            return true;
+        }
+        const UPTRINT M1Address = reinterpret_cast<UPTRINT>(M1);
+        const FObjectKey M1Key(M1);
+        A->Destroy();                              // no Update: A's entity keeps M1's cache entry referenced
+        CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+        if (M1Key.ResolveObjectPtrEvenIfGarbage() != nullptr)
+        {
+            F.Sync();                              // M1 survived the collection; A's entity leaves before the next round
+            continue;
+        }
+        ++Collected;
+        UStaticMesh* M2 = nullptr;
+        int32 Candidate = 0;
+        for (; Candidate < MaxCandidates && !M2; ++Candidate)
+        {
+            UStaticMesh* Mesh = NewNamedTransientMesh(TEXT("RGLGcReuseM2"));   // no body setup yet: one allocation each
+            if (reinterpret_cast<UPTRINT>(Mesh) == M1Address)
+            {
+                M2 = Mesh;
+            }
+        }
+        if (!M2)
+        {
+            F.Sync();                              // A's entity leaves before the next round
+            continue;
+        }
+        AddBoxCollision(M2, 200.f);
+        AddInfo(FString::Printf(TEXT("gc_reuse reused=1 round=%d candidate=%d collected_rounds=%d"), Round, Candidate - 1,
+                                Collected));
+        TestTrue(TEXT("B takes M2"), B->GetStaticMeshComponent()->SetStaticMesh(M2));
+        const int32 Uploads1 = F.SM.MeshUploads_ForTest;
+        F.Sync();
+        const FRGLSceneAuditResult R1 = F.Audit();
+        AddInfo(FRGLSceneManager::FormatAuditLine(24, F.T, R1));
+        const FRGLSceneAuditResult D = Diff(R0, R1);
+        TestEqual(TEXT("M2 gets its own upload: +1"), F.SM.MeshUploads_ForTest - Uploads1, 1);
+        TestEqual(TEXT("mesh_mismatch"), D.MeshMismatch, 0);
+        TestEqual(TEXT("cache_stale"), D.CacheStale, 0);
+        TestEqual(TEXT("B registered and A gone: registered +1"), D.Registered, 1);
+        TestEqual(TEXT("no ghost"), D.Ghost, 0);
+        return true;
+    }
+    AddWarning(FString::Printf(TEXT("gc_reuse reused=0 rounds=%d collected_rounds=%d candidates=%d: no address reuse"),
+                               MaxRounds, Collected, MaxCandidates));
+    return true;
+}
+
+// F14 (deterministic): an idle cache entry whose key no longer resolves (its asset is marked as garbage) counts as
+// cache_stale until the next sync's purge destroys it; an idle entry whose asset lives stays. rgl.Scene.IdleMeshCacheMax
+// is raised so that the purge, not the idle cap, decides.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncStaleCacheKeyPurgedTest, "CarlaRGL.SceneSync.StaleCacheKeyPurged",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncStaleCacheKeyPurgedTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    const FVector Base = BaseFor(34);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0062), Base, 10200.0);
+    // Declared after the fixture: restored first, so the fixture's last sync trims the live entry again.
+    FCVarGuard IdleGuard(TEXT("rgl.Scene.IdleMeshCacheMax"));
+    SetCVar(TEXT("rgl.Scene.IdleMeshCacheMax"), 16);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+    const FRGLSceneManager::FSceneCounts C0 = F.SM.GetSceneCounts_ForTest();
+
+    TStrongObjectPtr<UStaticMesh> Live(NewNamedTransientMesh(TEXT("RGLCacheKeyLive")));
+    UStaticMesh* Dead = NewNamedTransientMesh(TEXT("RGLCacheKeyDead"));
+    F.SM.AddIdleMeshEntry_ForTest(Live.Get());
+    F.SM.AddIdleMeshEntry_ForTest(Dead);
+    const FRGLSceneManager::FSceneCounts C1 = F.SM.GetSceneCounts_ForTest();
+    TestEqual(TEXT("two idle entries: cached meshes +2"), C1.CachedMeshes - C0.CachedMeshes, 2);
+    TestEqual(TEXT("two idle entries: idle meshes +2"), C1.IdleMeshes - C0.IdleMeshes, 2);
+    TestEqual(TEXT("both keys resolve: cache_stale +0"), Diff(R0, F.Audit()).CacheStale, 0);
+
+    Dead->MarkAsGarbage();
+    const FRGLSceneAuditResult R2 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(34, F.T, R2));
+    TestEqual(TEXT("the dead key: cache_stale +1"), Diff(R0, R2).CacheStale, 1);
+
+    F.Sync();
+    const FRGLSceneAuditResult R3 = F.Audit();
+    const FRGLSceneManager::FSceneCounts C3 = F.SM.GetSceneCounts_ForTest();
+    TestEqual(TEXT("after the purge: cache_stale +0"), Diff(R0, R3).CacheStale, 0);
+    TestEqual(TEXT("after the purge: the live entry stays (cached meshes +1)"), C3.CachedMeshes - C0.CachedMeshes, 1);
+    TestEqual(TEXT("after the purge: idle meshes +1"), C3.IdleMeshes - C0.IdleMeshes, 1);
     return true;
 }
 }

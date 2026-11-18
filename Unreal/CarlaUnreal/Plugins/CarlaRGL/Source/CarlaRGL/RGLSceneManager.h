@@ -4,7 +4,8 @@
 //
 // Design:
 //   - Singleton per UWorld (accessed via GetInstance)
-//   - Caches UStaticMesh* -> rgl_mesh_t to avoid re-uploading identical meshes
+//   - Caches static mesh asset -> rgl_mesh_t to avoid re-uploading identical meshes, keyed by the asset's identity
+//     (FObjectKey: after garbage collection, another asset at the same address has another key)
 //   - Creates rgl_entity_t for each UStaticMeshComponent instance
 //   - Updates entity transforms each tick; drops entities whose component left the world (unregistered) at once
 //   - Handles actor creation/destruction via periodic world scans, plus a scan when a level with static
@@ -75,7 +76,7 @@ struct FRGLSceneAuditResult
                                  // R around a sensor's current position (ISM: per instance): what the last sync should
                                  // have registered and is still needed, so not explained by sync timing or movement
     int32 SplineRegistered = 0;  // registered entities whose component is a USplineMeshComponent (uploaded undeformed)
-    int32 CacheStale = 0;        // MeshCache entries whose asset is gone (the weak asset no longer resolves to the key)
+    int32 CacheStale = 0;        // MeshCache entries whose key no longer resolves (the asset was collected or is garbage)
     int32 PendingIsm = 0;        // Static ISM groups waiting for their instances to be re-evaluated against the sensor spheres
 };
 
@@ -156,7 +157,7 @@ public:
     // ---- Scene audit (read-only) ----
 
     /// Compare the RGL static scene with the loaded world (see FRGLSceneAuditResult). Changes nothing: no
-    /// registration, no cache maintenance (FindCachedMesh is not called). Scans every actor of World.
+    /// registration, no cache maintenance (no idle purge). Scans every actor of World.
     /// OutExtras (optional) gets the name rule's world-wide counts and mesh lists (see FRGLSceneAuditExtras).
     FRGLSceneAuditResult AuditScene(UWorld* World, FRGLSceneAuditExtras* OutExtras = nullptr) const;
 
@@ -216,6 +217,9 @@ public:
     FString LastSyncTrigger_ForTest;
     /// Static meshes uploaded to RGL (rgl_mesh_create) by this instance.
     int32 MeshUploads_ForTest = 0;
+    /// Puts an idle MeshCache entry for Asset (no RGL mesh, no entity), as if its last entity had left; nothing is
+    /// uploaded. For the tests of how the cache treats an entry whose asset is gone. No-op if Asset has an entry.
+    void AddIdleMeshEntry_ForTest(const UStaticMesh* Asset);
     /// RGL entities of Comp's ISM group (0 = no group).
     int32 GetIsmEntityCount_ForTest(const UInstancedStaticMeshComponent* Comp) const;
     /// Levels waiting in the level-added list (P5).
@@ -300,9 +304,10 @@ private:
     /// Remove all RGL entities for an ISMC.
     void UnregisterISMComponent(UInstancedStaticMeshComponent* Component);
 
-    /// Track active RGL entity references to cached meshes and free unused GPU meshes.
-    void AddMeshReference(UStaticMesh* StaticMesh, int32 Count = 1);
-    void ReleaseMeshReference(UStaticMesh* StaticMesh, int32 Count = 1);
+    /// Track active RGL entity references to cached meshes and free unused GPU meshes. MeshKey = the key the entity's
+    /// mesh was cached under (FEntityInfo / FISMCEntityGroup keep it): never rebuilt from an address after GC.
+    void AddMeshReference(const FObjectKey& MeshKey, int32 Count = 1);
+    void ReleaseMeshReference(const FObjectKey& MeshKey, int32 Count = 1);
 
     /// Update all entity transforms to match current UE5 state. Entities and ISM groups whose component is gone
     /// or no longer registered leave the RGL scene here, every Update.
@@ -354,15 +359,16 @@ private:
     /// Distance from the nearest registered sensor to a bounding sphere's surface (cm). Sort key of the queue.
     float NearestSensorGapCm(const FVector& CenterCm, float BoundsRadiusCm) const;
 
-    /// Resident RGL mesh for StaticMesh (live or idle), or nullptr. An idle entry whose asset was garbage
-    /// collected (address reused by another object) is destroyed here and reported as not resident.
-    rgl_mesh_t FindCachedMesh(UStaticMesh* StaticMesh);
+    /// Resident RGL mesh for StaticMesh (live or idle), or nullptr; looked up by FObjectKey(StaticMesh). The key
+    /// carries the asset's GC serial, so an asset that took a collected one's address never gets that one's geometry.
+    rgl_mesh_t FindCachedMesh(const UStaticMesh* StaticMesh) const;
 
     /// Failed extraction/upload retries are deferred across queue rebuilds using generation-aware keys.
     bool IsMeshRetryDeferred(UStaticMesh* StaticMesh) const;
     void RememberMeshFailure(UStaticMesh* StaticMesh);
 
-    /// Idle mesh LRU maintenance (rgl.Scene.IdleMeshCacheMax).
+    /// Idle mesh LRU maintenance (rgl.Scene.IdleMeshCacheMax). PurgeIdleMeshes destroys the idle entries whose key
+    /// no longer resolves (no lookup can reach them again), then applies the cap.
     void DestroyIdleMeshAt(int32 LruIndex);
     void TrimIdleMeshes(int32 MaxIdle);
     void PurgeIdleMeshes();
@@ -449,15 +455,15 @@ private:
     /// RGL scene handle (nullptr = default scene).
     rgl_scene_t Scene = nullptr;
 
-    /// Cache: UStaticMesh* -> rgl_mesh_t (avoids duplicate uploads).
-    /// Uses TMap for UE5 compatibility and safe iteration.
+    /// Cache: static mesh asset -> rgl_mesh_t (avoids duplicate uploads), keyed by FObjectKey (P2): an asset that takes
+    /// the address of a collected one has another key (GC serial), so it never gets that one's geometry. The mesh
+    /// cache, the reference counts and the idle list all use the key; nothing rebuilds it from an address.
     /// Invariant: every entry is either referenced (MeshRefCounts > 0) or listed in IdleMeshLru.
     struct FCachedMesh
     {
         rgl_mesh_t Mesh = nullptr;
-        TWeakObjectPtr<UStaticMesh> Asset; // identity check: the raw key may be reused after GC
     };
-    TMap<UStaticMesh*, FCachedMesh> MeshCache;
+    TMap<FObjectKey, FCachedMesh> MeshCache;
 
     /// Retry failed assets after 16 syncs: transient streaming/upload failures can recover without
     /// retrying every scan. FObjectKey includes the GC serial; dead keys are purged at each sync.
@@ -467,10 +473,10 @@ private:
 
     /// Active entity references per cached mesh. At zero the mesh becomes idle (kept in IdleMeshLru)
     /// or, with rgl.Scene.IdleMeshCacheMax = 0, is destroyed at once.
-    TMap<UStaticMesh*, int32> MeshRefCounts;
+    TMap<FObjectKey, int32> MeshRefCounts;
 
     /// Unreferenced but still resident meshes, least recently idled first.
-    TArray<UStaticMesh*> IdleMeshLru;
+    TArray<FObjectKey> IdleMeshLru;
 
     /// Idle meshes destroyed (LRU overflow or stale identity) since the last rgl_scene_sync line.
     int32 IdleDestroyedSinceLog = 0;
@@ -511,8 +517,7 @@ private:
     {
         rgl_entity_t Entity = nullptr;
         TWeakObjectPtr<UStaticMeshComponent> Component;
-        UStaticMesh* StaticMesh = nullptr;     // Mesh referenced by Entity; used for cache ref-counting.
-        FObjectKey MeshKey;                    // Identity of the asset Entity was built from (GC-generation aware).
+        FObjectKey MeshKey;                    // The asset Entity was built from (GC-generation aware): its cache key.
         bool bIsStatic = false;            // True if Mobility == Static (never moves)
         bool bTransformInitialized = false; // True after first transform set
         bool bInRange = true;              // Distance culling state
@@ -525,10 +530,9 @@ private:
     {
         TArray<rgl_entity_t> Entities;
         TWeakObjectPtr<UInstancedStaticMeshComponent> Component;
-        UStaticMesh* StaticMesh = nullptr; // Mesh referenced by Entities; used for cache ref-counting.
-        FObjectKey MeshKey;                // Identity of the asset Entities were built from (GC-generation aware).
+        FObjectKey MeshKey;                // The asset Entities were built from (GC-generation aware): its cache key.
         int32 OriginalInstanceCount = 0;  // Instance count at registration time (may differ from Entities.Num() due to skipped instances)
-        int32 MeshRefCount = 0;           // Number of live RGL entities referencing StaticMesh.
+        int32 MeshRefCount = 0;           // Number of live RGL entities referencing the mesh of MeshKey.
         TArray<int32> InstanceIndices;            // Per entity (same order as Entities): the ISM instance index
         TArray<FTransform> InstanceWorldTransforms; // Per entity: the instance's world transform when its entity was made
         /// Static groups only: one sphere per instance of the component (index = instance index), taken at registration:
