@@ -3,7 +3,7 @@
 
   run_scenario.py --pkg <dir> --map <Odaiba|Town15|Town10HD_Opt>
                   --scenario <S1|S1p|S2|S3|S4|S5|S6|S7|CONTROL> --out <dir>
-                  [--no-audit] [--with-raycast] [--seed N] [--port 4000]
+                  [--no-audit] [--with-raycast] [--seed N] [--port 4000] [--speed-mps V]
 
 Starts the packaged server (the single <pkg>/*.sh launcher), drives a kinematic
 ego (physics off, set_transform every tick at a constant speed) along the
@@ -17,6 +17,7 @@ subscribed. Run this inside the venv that has the package's carla wheel.
 Not runnable on the dev PC (needs a package and a GPU).
 """
 import argparse
+import dataclasses
 import glob
 import math
 import os
@@ -379,11 +380,17 @@ def main(argv):
     ap.add_argument("--with-raycast", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--port", type=int, default=4000)
+    ap.add_argument("--speed-mps", type=float, default=None,
+                    help="override the scenario's ego speed (e.g. the range-edge gap P8 grows with speed)")
     a = ap.parse_args(argv)
 
     os.makedirs(a.out, exist_ok=True)
     random.seed(a.seed)
     sc = sc_mod.SCENARIOS[a.scenario]
+    if a.speed_mps is not None:
+        if a.speed_mps <= 0:
+            ap.error("--speed-mps must be > 0")
+        sc = dataclasses.replace(sc, speed_mps=a.speed_mps)
     wp_map = a.map == "Town15"
     expected = sc.radius_expected_m
     if expected is None:
@@ -392,7 +399,7 @@ def main(argv):
         exp_str = "%.1f" % (expected if wp_map else -1.0)
     base = dict(scenario=a.scenario, map=a.map, seed=a.seed, port=a.port,
                 no_audit=int(a.no_audit), with_raycast=int(a.with_raycast),
-                radius_expected_m=exp_str)
+                radius_expected_m=exp_str, speed_mps="%.1f" % sc.speed_mps)
     t_start = time.time()
     proc, pgid = None, None
     tick_log = []
