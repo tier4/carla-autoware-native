@@ -2739,7 +2739,7 @@ void FRGLSceneManager::SetSensorAuditParent(const void* SensorId, AActor* RootPa
     }
 }
 
-FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World) const
+FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>* OutExcludedSample) const
 {
     namespace RA = RGLSceneAudit;
 
@@ -2927,6 +2927,14 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World) const
     // ---- World side: every registered primitive of a visible level ----
     // A static mesh component is judged with the registration predicate's distance-independent part
     // (GateStaticComponent) and the two spheres above; ISMs per instance, like RegisterISMComponent.
+    auto SampleExcluded = [OutExcludedSample](const UStaticMeshComponent* SMC)
+    {
+        if (OutExcludedSample && OutExcludedSample->Num() < 20)
+        {
+            OutExcludedSample->AddUnique(FString::Printf(TEXT("%s|%s|%s"), *GetNameSafe(SMC->GetOwner()),
+                *SMC->GetName(), *GetNameSafe(SMC->GetStaticMesh())));
+        }
+    };
     auto AuditStaticComponent = [&](UStaticMeshComponent* SMC)
     {
         const EStaticGate Gate = GateStaticComponent(SMC);
@@ -2949,6 +2957,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World) const
             if (Gate == EStaticGate::ExcludedByName)
             {
                 ++R.ExcludedByName;
+                SampleExcluded(SMC);
                 return;
             }
             const FEntityInfo* Info = EntityMap.Find(SMC);
@@ -3006,6 +3015,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World) const
             if (Gate == EStaticGate::ExcludedByName)
             {
                 ++R.ExcludedByName;
+                SampleExcluded(SMC);
                 continue;
             }
             if (RegisteredInstances[i])
@@ -3019,6 +3029,8 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World) const
             }
             R.MissingSync += bInSync ? 1 : 0;
             R.MissingInRange += bInRange ? 1 : 0;
+            R.MissingIsmSync += bInSync ? 1 : 0;
+            R.MissingIsmInRange += bInRange ? 1 : 0;
         }
     };
 
@@ -3071,11 +3083,13 @@ FString FRGLSceneManager::FormatAuditLine(uint64 Frame, double SimTime, const FR
         TEXT("rgl_scene_audit frame=%llu sim_t=%.3f ghost=%d ghost_in_range=%d missing_sync=%d missing_in_range=%d "
              "mesh_mismatch=%d stale_instance=%d excluded_by_name=%d unextractable=%d non_sm_collision=%d "
              "hlod_registered=%d registered=%d pending=%d movable_registered=%d levels_added=%d since_sync_s=%.2f "
-             "stream_covered=%d parent_stream_radius_m=%.1f frame_ms=%.2f audit_ms=%.3f"),
+             "stream_covered=%d parent_stream_radius_m=%.1f frame_ms=%.2f audit_ms=%.3f "
+             "missing_ism_sync=%d missing_ism_in_range=%d"),
         static_cast<unsigned long long>(Frame), SimTime, R.Ghost, R.GhostInRange, R.MissingSync, R.MissingInRange,
         R.MeshMismatch, R.StaleInstance, R.ExcludedByName, R.Unextractable, R.NonSmCollision,
         R.HlodRegistered, R.Registered, R.Pending, R.MovableRegistered, R.LevelsAdded, R.SecondsSinceSync,
-        R.StreamCovered, static_cast<double>(R.ParentStreamRadiusM), R.FrameMs, R.AuditMs);
+        R.StreamCovered, static_cast<double>(R.ParentStreamRadiusM), R.FrameMs, R.AuditMs,
+        R.MissingIsmSync, R.MissingIsmInRange);
 }
 
 // ============================================================================
@@ -3109,9 +3123,18 @@ void FRGLSceneManager::MaybeEmitAudit(UWorld* World, double SimTime, uint64 Fram
         return;
     }
 
-    const FRGLSceneAuditResult Result = AuditScene(World);
+    TArray<FString> ExcludedSample;
+    const FRGLSceneAuditResult Result = AuditScene(World, bExcludedSampleLogged ? nullptr : &ExcludedSample);
     LevelsAddedSinceAudit = 0;
     EmitSceneLine(FormatAuditLine(Frame, (SimTime >= 0.0) ? SimTime : CurrentSimTime, Result));
+    if (ExcludedSample.Num() > 0)
+    {
+        // Once per world: which names the "Sky" rule actually leaves out (spaces would break key=value parsing).
+        bExcludedSampleLogged = true;
+        EmitSceneLine(FString::Printf(TEXT("rgl_scene_audit_excluded frame=%llu n=%d names=%s"),
+            static_cast<unsigned long long>(Frame), ExcludedSample.Num(),
+            *FString::Join(ExcludedSample, TEXT(";")).Replace(TEXT(" "), TEXT("_"))));
+    }
 #if !UE_BUILD_SHIPPING
     ++AuditLinesEmitted_ForTest;
 #endif

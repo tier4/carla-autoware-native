@@ -62,6 +62,8 @@ struct FRGLSceneAuditResult
     double AuditMs = 0.0;        // wall time of this audit
     int32 StreamCovered = -1;    // -1 = not a World Partition world; 1 = every sensor's range sphere is streamed in (Activated)
     float ParentStreamRadiusM = -1.0f; // smallest streaming-source radius on the root actor a sensor is attached to; -1 = none
+    int32 MissingIsmSync = 0;    // the ISM-instance part of MissingSync (the rest are plain static mesh components)
+    int32 MissingIsmInRange = 0; // the ISM-instance part of MissingInRange
 };
 
 /// Manages synchronization between the UE5 scene and the RGL scene.
@@ -129,7 +131,8 @@ public:
 
     /// Compare the RGL static scene with the loaded world (see FRGLSceneAuditResult). Changes nothing: no
     /// registration, no cache maintenance (FindCachedMesh is not called). Scans every actor of World.
-    FRGLSceneAuditResult AuditScene(UWorld* World) const;
+    /// OutExcludedSample (optional) collects up to 20 distinct "owner|component|mesh" names left out by the name rule.
+    FRGLSceneAuditResult AuditScene(UWorld* World, TArray<FString>* OutExcludedSample = nullptr) const;
 
     /// Range (cm) the sensor's rays reach, for missing_in_range / ghost_in_range. Call after RegisterSensor().
     /// Never set (or negative): RegistrationDistanceCm minus the 20 m unload margin.
@@ -500,6 +503,7 @@ private:
     // rgl.Scene.Audit line emission (MaybeEmitAudit)
     uint64 LastAuditFrame = 0;
     bool   bAuditFrameValid = false;
+    bool   bExcludedSampleLogged = false; // the rgl_scene_audit_excluded line was printed once for this world
     uint64 AuditUpdateCount = 0;          // distinct frames seen while the audit is on
     FDelegateHandle LevelAddedHandle;     // FWorldDelegates::LevelAddedToWorld, bound only while the audit is on
     FObjectKey AuditWorldKey;             // the world whose LevelAddedToWorld events are counted
