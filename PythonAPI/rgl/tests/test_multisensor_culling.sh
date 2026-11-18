@@ -5,48 +5,70 @@
 # Launches the packaged CARLA server, then for each sensor config resets the
 # world (clean baseline), runs the RGL demo, and reads the server's
 # RGLSceneManager log. Verifies the union behavior: a spatially separated 2nd
-# sensor must register ADDITIONAL geometry (cachedMeshes rises vs single
+# sensor must register ADDITIONAL geometry (the mesh count rises vs single
 # sensor) — the regression the old first-tick-wins single-sensor design failed.
 #
-# Runs unattended. Requires GPU + package built with `package-development`.
-# Override any VAR=... at invocation, e.g.:
-#   SEP=250 DURATION=30 bash test_multisensor_culling.sh
+# The counts come from the scene manager's `rgl_scene_sync` lines (one per
+# static sync, in every build configuration): `meshes=` (RGL meshes resident in
+# the mesh cache) and `sensors=` (registered sensors).
+#
+# Runs unattended. Requires a GPU. PKG_DIR, DEMO and PORT are required
+# (exit 2 without them); override any other VAR=... at invocation, e.g.:
+#   PKG_DIR=<package dir> DEMO=<.../rgl_test_autoware_demo.py> PORT=4000 SEP=250 bash test_multisensor_culling.sh
+# PY must be a python with the carla module and PyKDL (the demo imports both).
 # ============================================================================
 set -u
 
 # ---- config (override via env) ----
-PKG_DIR="${PKG_DIR:-/mnt/dsk0/wk0/CARLA/T4Fork.RGL/CarlaUE5/Build/Package/Carla-1.0-Linux-Development}"
-DEMO="${DEMO:-/mnt/dsk0/wk0/CARLA/T4Fork.RGL/CarlaUE5/PythonAPI/examples/rgl_test_autoware_demo.py}"
+PKG_DIR="${PKG_DIR:-}"            # packaged server dir holding exactly one launcher script (*.sh)
+DEMO="${DEMO:-}"                  # PythonAPI/examples/rgl_test_autoware_demo.py
+PORT="${PORT:-}"                  # RPC port of the server (the demo and the reset use it too)
+PY="${PY:-/mnt/dsk0/wk0/CARLA/RGLWP/venv/bin/python}"
 MAP="${MAP:-Town10HD_Opt}"
-PORT="${PORT:-2000}"
 DURATION="${DURATION:-25}"        # seconds each config runs before SIGINT
 SEP="${SEP:-150}"                 # meters between the 2 separated sensors (config c)
 NOCULL_RANGE="${NOCULL_RANGE:-5000}"  # LiDAR range (m) for the no-culling baseline (covers whole map)
 RESET_WAIT="${RESET_WAIT:-9}"     # > SensorStaleTimeoutSeconds(5s): let registry clear
 SERVER_EXTRA="${SERVER_EXTRA:--RenderOffScreen -nosound -quality-level=Low}"
+SERVER_ROS2="${SERVER_ROS2---ros2}"   # set to empty (SERVER_ROS2=) to start the server without its ROS 2 (DDS) interface
 LOG="${LOG:-/tmp/carla_server_$$.log}"
 RESULT="${RESULT:-/tmp/rgl_multisensor_result.txt}"
 
-SERVER_SH="$PKG_DIR/CarlaUnreal.sh"
+usage() { echo "[test] ERROR: $1 (required: PKG_DIR, DEMO, PORT; optional: PY, MAP, SEP, ...)" >&2; exit 2; }
+[ -n "$PKG_DIR" ] || usage "PKG_DIR is not set"
+[ -n "$DEMO" ] || usage "DEMO is not set"
+[ -n "$PORT" ] || usage "PORT is not set"
+[ -d "$PKG_DIR" ] || usage "PKG_DIR is not a directory: $PKG_DIR"
+[ -f "$DEMO" ] || usage "DEMO not found: $DEMO"
+case "$PORT" in ''|*[!0-9]*) usage "PORT is not a number: $PORT";; esac
+"$PY" -c "import carla, PyKDL" 2>/dev/null </dev/null || usage "PY ($PY) cannot import carla and PyKDL"
+LAUNCHERS=("$PKG_DIR"/*.sh)
+[ "${#LAUNCHERS[@]}" -eq 1 ] && [ -f "${LAUNCHERS[0]}" ] || usage "PKG_DIR must hold exactly one launcher script (*.sh)"
+SERVER_SH=${LAUNCHERS[0]}
+
 : > "$RESULT"
 log() { echo "[test] $*" | tee -a "$RESULT"; }
 
+SERVER_PID=
 cleanup() {
+    [ -n "$SERVER_PID" ] || return 0
     log "tearing down server group (pgid=$SERVER_PID)"
-    # CarlaUnreal.sh launches the real binary as a child; kill the whole group.
-    kill -INT  -- "-$SERVER_PID" 2>/dev/null
-    sleep 5
-    kill -9    -- "-$SERVER_PID" 2>/dev/null
-    # belt-and-suspenders: any CarlaUnreal binary still holding our port
-    pkill -9 -f "Binaries/Linux/CarlaUnreal .*carla-rpc-port=$PORT" 2>/dev/null
+    # The launcher starts the real binary as a child: signal the whole process group (setsid below), then
+    # check the group is gone. No name-based kill: it could hit another session's server.
+    kill -INT -- "-$SERVER_PID" 2>/dev/null
+    for _ in $(seq 1 15); do kill -0 -- "-$SERVER_PID" 2>/dev/null || break; sleep 1; done
+    kill -9 -- "-$SERVER_PID" 2>/dev/null
     sleep 1
+    if kill -0 -- "-$SERVER_PID" 2>/dev/null; then log "WARNING: server group $SERVER_PID still alive"; fi
+    SERVER_PID=
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT TERM   # the EXIT trap stops the server
 
 # ---- 1. launch server in its own process group (setsid) ----
-[ -x "$SERVER_SH" ] || { log "ERROR: launcher not found/executable: $SERVER_SH"; exit 2; }
-log "launching CARLA: $MAP --ros2 -prefernvidia $SERVER_EXTRA -carla-rpc-port=$PORT"
-setsid "$SERVER_SH" "$MAP" --ros2 -prefernvidia $SERVER_EXTRA -carla-rpc-port="$PORT" > "$LOG" 2>&1 &
+if (echo > "/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then log "ERROR: port $PORT is already in use"; exit 3; fi
+log "launching CARLA: $MAP $SERVER_ROS2 -prefernvidia $SERVER_EXTRA -carla-rpc-port=$PORT"
+setsid "$SERVER_SH" "$MAP" $SERVER_ROS2 -prefernvidia $SERVER_EXTRA -carla-rpc-port="$PORT" > "$LOG" 2>&1 < /dev/null &
 SERVER_PID=$!   # session leader => PGID == SERVER_PID
 
 # ---- 2. wait for RPC port ----
@@ -62,11 +84,11 @@ log "server ready; warm-up 12s"
 sleep 12
 
 # ---- helpers ----
-# max integer value of a \K-anchored PCRE across a log window (from line $1)
-max_field() { tail -n +"$1" "$LOG" | grep -oP "$2" 2>/dev/null | sort -n | tail -1; }
+# max integer value of a \K-anchored PCRE over the rgl_scene_sync lines of a log window (from line $1)
+max_sync_field() { tail -n +"$1" "$LOG" | grep -a 'rgl_scene_sync ' | grep -oP "$2" 2>/dev/null | sort -n | tail -1; }
 
 reset_world() {  # destroy lingering actors so each config starts from a clean registry
-    timeout 30 python3 - "$PORT" <<'PY' 2>/dev/null || true
+    timeout 30 "$PY" - "$PORT" <<'PY' 2>/dev/null || true
 import sys, carla
 c = carla.Client('127.0.0.1', int(sys.argv[1])); c.set_timeout(20)
 w = c.get_world()
@@ -84,16 +106,14 @@ run_config() {  # $1=name  rest=demo args
     log "--- config '$name': reset + demo $* (${DURATION}s) ---"
     reset_world
     local before; before=$(( $(wc -l < "$LOG") + 1 ))
-    env ${DEMO_ENV:-} timeout --signal=INT "$DURATION" python3 "$DEMO" --carla_lidar_type rgl "$@" \
-        > "/tmp/demo_${name}.log" 2>&1 || true
+    env ${DEMO_ENV:-} timeout --signal=INT "$DURATION" "$PY" "$DEMO" --port "$PORT" --carla_lidar_type rgl "$@" \
+        > "/tmp/demo_${name}.log" 2>&1 < /dev/null || true
     sleep 3
     VRAM[$name]=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
-    SENSORS[$name]=$(max_field "$before" 'sensors=\s*\K[0-9]+')
-    # cachedMeshes appears in sync lines ("cachedMeshes= N") and the init scan ("Uploaded N unique meshes")
-    local m1 m2; m1=$(max_field "$before" 'cachedMeshes=\s*\K[0-9]+'); m2=$(max_field "$before" 'Uploaded\s+\K[0-9]+')
-    CACHED[$name]=$(printf '%s\n%s\n' "${m1:-0}" "${m2:-0}" | sort -n | tail -1)
-    log "  VRAM=${VRAM[$name]}MiB  maxSensors=${SENSORS[$name]:-?}  maxCachedMeshes=${CACHED[$name]:-?}"
-    log "  last sync: $(tail -n +"$before" "$LOG" | grep 'Dynamic sync active' | tail -1 | sed 's/.*RGLSceneManager/RGLSceneManager/')"
+    SENSORS[$name]=$(max_sync_field "$before" ' sensors=\K[0-9]+')
+    CACHED[$name]=$(max_sync_field "$before" ' meshes=\K[0-9]+')
+    log "  VRAM=${VRAM[$name]}MiB  maxSensors=${SENSORS[$name]:-?}  maxMeshes=${CACHED[$name]:-?}"
+    log "  last sync: $(tail -n +"$before" "$LOG" | grep -a 'rgl_scene_sync ' | tail -1 | sed 's/.*rgl_scene_sync/rgl_scene_sync/')"
 }
 
 # ---- 3. run configs ----
@@ -114,28 +134,28 @@ a=${CACHED[a_single]:-0};  av=${VRAM[a_single]:-0}
 c=${CACHED[c_separated]:-0}
 sa=${SENSORS[a_single]:-0}; sc=${SENSORS[c_separated]:-0}
 pct=$(awk "BEGIN{ if ($nc+0>0) printf \"%.0f\", 100*$a/$nc; else print 0 }")
-saved_m=$(( nc - a )); saved_v=$(( ncv - av ))
+saved_m=$(( nc - a ))
 
 log "============================================================"
 log "RESULT SUMMARY  (map=$MAP, sep=${SEP}m, nocull-range=${NOCULL_RANGE}m)"
-log "  (d) NO-CULL   : maxSensors=${SENSORS[d_nocull]:-?}  maxCachedMeshes=${CACHED[d_nocull]:-?}  VRAM=${VRAM[d_nocull]:-?}MiB  (whole map registered)"
-log "  (a) single    : maxSensors=${SENSORS[a_single]:-?}  maxCachedMeshes=${CACHED[a_single]:-?}  VRAM=${VRAM[a_single]:-?}MiB"
-log "  (b) cluster x4: maxSensors=${SENSORS[b_cluster]:-?}  maxCachedMeshes=${CACHED[b_cluster]:-?}  VRAM=${VRAM[b_cluster]:-?}MiB"
-log "  (c) separated : maxSensors=${SENSORS[c_separated]:-?}  maxCachedMeshes=${CACHED[c_separated]:-?}  VRAM=${VRAM[c_separated]:-?}MiB"
+log "  (d) NO-CULL   : maxSensors=${SENSORS[d_nocull]:-?}  maxMeshes=${CACHED[d_nocull]:-?}  VRAM=${VRAM[d_nocull]:-?}MiB  (whole map registered)"
+log "  (a) single    : maxSensors=${SENSORS[a_single]:-?}  maxMeshes=${CACHED[a_single]:-?}  VRAM=${VRAM[a_single]:-?}MiB"
+log "  (b) cluster x4: maxSensors=${SENSORS[b_cluster]:-?}  maxMeshes=${CACHED[b_cluster]:-?}  VRAM=${VRAM[b_cluster]:-?}MiB"
+log "  (c) separated : maxSensors=${SENSORS[c_separated]:-?}  maxMeshes=${CACHED[c_separated]:-?}  VRAM=${VRAM[c_separated]:-?}MiB"
 log "------------------------------------------------------------"
-log "CULLING BENEFIT (registered mesh count = the RGL/OptiX VRAM driver):"
+log "CULLING BENEFIT (mesh count = the RGL/OptiX VRAM driver):"
 log "  meshes : no-cull=$nc (whole map)  culled single=$a   -> culled keeps ${pct}%, ${saved_m} fewer meshes"
 log "  VRAM (total GPU, informational only): no-cull=${ncv}MiB single=${av}MiB cluster=${VRAM[b_cluster]:-?}MiB sep=${VRAM[c_separated]:-?}MiB"
 log "  note: nvidia-smi reports TOTAL GPU memory (engine+render dominated, ~GB) so the"
 log "        mesh-registration delta is below the noise floor on a small map. The GB-scale"
 log "        VRAM saving appears on large maps where no-cull exhausts OptiX memory;"
-log "        registered mesh count is the reliable proxy (mesh data dominates OptiX VRAM)."
+log "        the mesh count is the reliable proxy (mesh data dominates OptiX VRAM)."
 log "------------------------------------------------------------"
 verdict=0
-[ "${a:-0}" -gt 0 ] || { log "FAIL: (a) produced no cachedMeshes reading"; verdict=1; }
+[ "${a:-0}" -gt 0 ] || { log "FAIL: (a) produced no rgl_scene_sync meshes= reading"; verdict=1; }
 if [ "${nc:-0}" -gt "${a:-0}" ]; then log "PASS: culling reduces registered meshes (no-cull=$nc > culled single=$a)"; else log "FAIL: expected no-cull($nc) > culled single($a) — map may fit fully within cull radius (try a larger map)"; verdict=1; fi
 if [ "${sc:-0}" -gt "${sa:-0}" ]; then log "PASS: more sensors registered when separated (c=$sc > a=$sa)"; else log "FAIL: expected sensors(c) > sensors(a), got c=$sc a=$sa"; verdict=1; fi
-if [ "${c:-0}" -gt "${a:-0}" ]; then log "PASS: union registers more geometry for separated sensors (c=$c > a=$a)"; else log "FAIL: expected cachedMeshes(c) > cachedMeshes(a), got c=$c a=$a — if c≈a, increase SEP and re-run"; verdict=1; fi
+if [ "${c:-0}" -gt "${a:-0}" ]; then log "PASS: union registers more geometry for separated sensors (c=$c > a=$a)"; else log "FAIL: expected meshes(c) > meshes(a), got c=$c a=$a — if c≈a, increase SEP and re-run"; verdict=1; fi
 [ "$verdict" = 0 ] && log "OVERALL: PASS" || log "OVERALL: FAIL (full server log: $LOG)"
 log "============================================================"
 exit "$verdict"
