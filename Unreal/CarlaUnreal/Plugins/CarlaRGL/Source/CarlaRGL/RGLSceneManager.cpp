@@ -18,6 +18,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/SplineMeshComponent.h"
 #include "GameFramework/Pawn.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/CommandLine.h"
@@ -2756,8 +2757,10 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
 
     // missing_sync: R around each sensor where the last sync saw it (what the registration rule used).
     // missing_in_range / ghost_in_range: the range the rays reach, around the current position.
+    // missing_steady: inside a SyncSphere and inside R around a sensor's current position (CurrentRSpheres).
     TArray<RA::FAuditSphere> SyncSpheres;
     TArray<RA::FAuditSphere> RangeSpheres;
+    TArray<RA::FAuditSphere> CurrentRSpheres;
     float MinParentRadiusCm = -1.0f;
     for (const auto& Pair : RegisteredSensors)
     {
@@ -2766,6 +2769,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
         {
             SyncSpheres.Add(RA::FAuditSphere{ S.LastSyncPosition, S.RegistrationDistanceCm });
         }
+        CurrentRSpheres.Add(RA::FAuditSphere{ S.Position, S.RegistrationDistanceCm });
         const float RangeCm = (S.AuditRangeCm >= 0.0f)
             ? S.AuditRangeCm
             : FMath::Max(0.0f, S.RegistrationDistanceCm - UnregistrationHysteresisCm);
@@ -2843,6 +2847,10 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
         {
             ++R.HlodRegistered;
         }
+        if (Comp->IsA<USplineMeshComponent>())
+        {
+            ++R.SplineRegistered;   // the RGL entity is the undeformed mesh; ray_cast hits the deformed collision
+        }
         if (!Comp->IsRegistered() || LevelState == RA::ELevelState::Hidden)
         {
             ++R.Ghost;
@@ -2864,10 +2872,13 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
         auto CountGhostInstance = [&](int32 EntityIndex)
         {
             ++R.Ghost;
+            ++R.GhostIsm;
             if (Group.InstanceWorldTransforms.IsValidIndex(EntityIndex))
             {
                 const FTransform& T = Group.InstanceWorldTransforms[EntityIndex];
-                R.GhostInRange += RA::InAnySphere(RangeSpheres, T.GetLocation(), MeshRadius * RA::MaxAbsScale(T)) ? 1 : 0;
+                const int32 InRange = RA::InAnySphere(RangeSpheres, T.GetLocation(), MeshRadius * RA::MaxAbsScale(T)) ? 1 : 0;
+                R.GhostInRange += InRange;
+                R.GhostIsmInRange += InRange;
             }
         };
 
@@ -2924,6 +2935,15 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
         }
     }
 
+    // ---- Mesh cache: entries whose asset is gone (the raw key may already belong to another object) ----
+    for (const auto& Pair : MeshCache)
+    {
+        if (Pair.Value.Asset.Get() != Pair.Key)
+        {
+            ++R.CacheStale;
+        }
+    }
+
     // ---- World side: every registered primitive of a visible level ----
     // A static mesh component is judged with the registration predicate's distance-independent part
     // (GateStaticComponent) and the two spheres above; ISMs per instance, like RegisterISMComponent.
@@ -2972,6 +2992,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
             }
             R.MissingSync += bCompInSync ? 1 : 0;
             R.MissingInRange += bCompInRange ? 1 : 0;
+            R.MissingSteady += (bCompInSync && RA::InAnySphere(CurrentRSpheres, Bounds.Origin, Bounds.SphereRadius)) ? 1 : 0;
             return;
         }
 
@@ -3031,6 +3052,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
             R.MissingInRange += bInRange ? 1 : 0;
             R.MissingIsmSync += bInSync ? 1 : 0;
             R.MissingIsmInRange += bInRange ? 1 : 0;
+            R.MissingSteady += (bInSync && RA::InAnySphere(CurrentRSpheres, T.GetLocation(), RadiusCm)) ? 1 : 0;
         }
     };
 
@@ -3084,12 +3106,14 @@ FString FRGLSceneManager::FormatAuditLine(uint64 Frame, double SimTime, const FR
              "mesh_mismatch=%d stale_instance=%d excluded_by_name=%d unextractable=%d non_sm_collision=%d "
              "hlod_registered=%d registered=%d pending=%d movable_registered=%d levels_added=%d since_sync_s=%.2f "
              "stream_covered=%d parent_stream_radius_m=%.1f frame_ms=%.2f audit_ms=%.3f "
-             "missing_ism_sync=%d missing_ism_in_range=%d"),
+             "missing_ism_sync=%d missing_ism_in_range=%d ghost_ism=%d ghost_ism_in_range=%d missing_steady=%d "
+             "spline_registered=%d cache_stale=%d"),
         static_cast<unsigned long long>(Frame), SimTime, R.Ghost, R.GhostInRange, R.MissingSync, R.MissingInRange,
         R.MeshMismatch, R.StaleInstance, R.ExcludedByName, R.Unextractable, R.NonSmCollision,
         R.HlodRegistered, R.Registered, R.Pending, R.MovableRegistered, R.LevelsAdded, R.SecondsSinceSync,
         R.StreamCovered, static_cast<double>(R.ParentStreamRadiusM), R.FrameMs, R.AuditMs,
-        R.MissingIsmSync, R.MissingIsmInRange);
+        R.MissingIsmSync, R.MissingIsmInRange, R.GhostIsm, R.GhostIsmInRange, R.MissingSteady,
+        R.SplineRegistered, R.CacheStale);
 }
 
 // ============================================================================

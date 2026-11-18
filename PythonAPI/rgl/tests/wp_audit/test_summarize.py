@@ -7,7 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import summarize  # noqa: E402
 
 
-def _audit(frame, missing_in_range=0, radius=200.0, **kw):
+def _audit(frame, missing_in_range=0, radius=200.0, sim_t=None, **kw):
+    """A stage-0 style audit line (no ghost_ism / missing_steady / pending_ism ... unless given in kw)."""
     f = dict(
         ghost=0, ghost_in_range=0, missing_sync=0, missing_in_range=missing_in_range,
         mesh_mismatch=0, stale_instance=0, excluded_by_name=0, unextractable=0,
@@ -18,7 +19,8 @@ def _audit(frame, missing_in_range=0, radius=200.0, **kw):
     f.update(kw)
     body = " ".join("%s=%s" % (k, ("%.1f" % v) if k == "parent_stream_radius_m" else v)
                     for k, v in f.items())
-    return "LogCarlaRGL: rgl_scene_audit frame=%d sim_t=%.3f %s" % (frame, frame * 0.05, body)
+    t = frame * 0.05 if sim_t is None else sim_t
+    return "LogCarlaRGL: rgl_scene_audit frame=%d sim_t=%.3f %s" % (frame, t, body)
 
 
 def _lines(radius):
@@ -87,11 +89,15 @@ def test_line_order_and_keys():
         "radius_mismatch", "levels_added_total", "audit_ms_p95", "frame_ms_max",
         "frames_over_100ms", "sync_elapsed_ms_max", "tick_ms_p95",
         "missing_ism_in_range_p95", "missing_ism_sync_max",
-        "sync_elapsed_ms_p50", "sync_elapsed_ms_p95", "tick_over_100ms", "tick_ms_p99", "tick_ms_max"]
+        "sync_elapsed_ms_p50", "sync_elapsed_ms_p95", "tick_over_100ms", "tick_ms_p99", "tick_ms_max",
+        "missing_steady_max", "steady_rows", "steady_valid", "missing_rows_no_pending", "missing_max_no_pending",
+        "missing_ism_p95_no_pending_ism", "ghost_ism_max", "ghost_nonism_max", "cache_stale_max",
+        "pending_ism_max", "pending_ism_run_max", "spline_registered_max", "sync_triggers", "stream_warnings"]
 
 
-def _sync(elapsed_ms):
-    return "LogCarlaRGL: rgl_scene_sync t=1.000 trigger=time scanned=5 elapsed_ms=%.2f entities=10 meshes=3" % elapsed_ms
+def _sync(elapsed_ms, trigger="time"):
+    return ("LogCarlaRGL: rgl_scene_sync t=1.000 trigger=%s scanned=5 elapsed_ms=%.2f entities=10 meshes=3"
+            % (trigger, elapsed_ms))
 
 
 def test_sync_percentiles_and_tick_over_100ms():
@@ -121,3 +127,107 @@ def test_ism_breakdown_and_old_lines():
     r = summarize.summarize_lines(lines, "S1p", "Town15", 200.0)
     assert r["missing_ism_in_range_p95"] == 4
     assert r["missing_ism_sync_max"] == 3
+
+
+# ---- stage 1 (Task 0C): steady state (D13), pending split, ISM / spline / cache breakdown, sync triggers
+
+def test_steady_requires_sync_after_level_add():
+    # a level comes in at 1.0 s; the sync that saw it is the one 0.0 s before 1.2 s (the 1.1 s line's sync is older)
+    lines = [_audit(1, sim_t=1.0, levels_added=1, since_sync_s=0.5, missing_steady=5),
+             _audit(2, sim_t=1.1, levels_added=0, since_sync_s=0.6, missing_steady=5),
+             _audit(3, sim_t=1.2, levels_added=0, since_sync_s=0.0, missing_steady=0)]
+    r = summarize.summarize_lines(lines, "S1", "Town15", 200.0)
+    assert r["missing_steady_max"] == 0 and r["steady_rows"] == 1
+
+
+def test_steady_ignores_stream_covered():
+    lines = [_audit(i + 1, stream_covered=0, pending=0, missing_steady=2) for i in range(5)]
+    r = summarize.summarize_lines(lines, "S3", "Town15", 200.0)
+    assert r["steady_rows"] == r["frames"] and r["steady_valid"] == 1
+    assert r["missing_steady_max"] == 2
+
+
+def test_steady_invalid_when_too_few():
+    lines = [_audit(i + 1, pending=0 if i == 0 else 3) for i in range(10)]
+    r = summarize.summarize_lines(lines, "S1", "Town15", 200.0)
+    assert r["steady_rows"] == 1
+    assert r["steady_valid"] == 0          # 1 < 0.2 * 10
+
+
+def test_steady_excludes_pending_ism_rows():
+    lines = [_audit(1, pending_ism=4, missing_steady=9), _audit(2, missing_steady=1)]
+    r = summarize.summarize_lines(lines, "S1", "Town15", 200.0)
+    assert r["steady_rows"] == 1 and r["missing_steady_max"] == 1
+
+
+def test_missing_rows_split_by_pending():
+    lines = [_audit(1, missing_in_range=3, pending=2), _audit(2, missing_in_range=4, pending=0)]
+    r = summarize.summarize_lines(lines, "S1", "Town15", 200.0)
+    assert r["missing_rows_no_pending"] == 1 and r["missing_max_no_pending"] == 4
+    # a pending ISM instance also excuses the row
+    r2 = summarize.summarize_lines([_audit(1, missing_in_range=4, pending=0, pending_ism=1)], "S1", "Town15", 200.0)
+    assert r2["missing_rows_no_pending"] == 0 and r2["missing_max_no_pending"] == 0
+
+
+def test_pending_ism_run_max():
+    lines = [_audit(i + 1, pending_ism=v) for i, v in enumerate([0, 1, 1, 1, 0, 1])]
+    r = summarize.summarize_lines(lines, "S4", "Town15", 200.0)
+    assert r["pending_ism_run_max"] == 3
+    assert r["pending_ism_max"] == 1
+
+
+def test_sync_trigger_counts():
+    lines = [_sync(5.0, "init"), _sync(5.0, "time"), _sync(5.0, "time"), _sync(5.0, "level")]
+    r = summarize.summarize_lines(lines, "S1", "Town15", 200.0)
+    assert r["sync_triggers"] == "init:1,time:2,distance:0,level:1"
+    assert "sync_triggers=init:1,time:2,distance:0,level:1" in summarize.format_summary(r)
+
+
+def test_old_lines_without_new_keys_count_zero():
+    # stage-0 lines: none of the stage-1 keys; a missing key counts as 0
+    lines = [_audit(1, ghost=2, missing_in_range=3, missing_sync=3), _audit(2)]
+    r = summarize.summarize_lines(lines, "S1p", "Town15", 200.0)
+    assert r["ghost_ism_max"] == 0 and r["missing_steady_max"] == 0 and r["pending_ism_max"] == 0
+    assert r["ghost_nonism_max"] == 2 and r["cache_stale_max"] == 0 and r["spline_registered_max"] == 0
+    assert r["sync_triggers"] == "init:0,time:0,distance:0,level:0" and r["stream_warnings"] == 0
+
+
+def test_breakdown_maxima_and_stream_warnings():
+    lines = [_audit(1, ghost=5, ghost_ism=4, cache_stale=2, spline_registered=7, missing_ism_in_range=6, pending_ism=1),
+             _audit(2, ghost=3, ghost_ism=0, missing_ism_in_range=2, pending_ism=0),
+             "LogCarlaRGL: rgl_scene_stream_warning t=12.000 sensor=1 uncovered_s=5.0",
+             _audit(3, ghost=0, ghost_ism=0, missing_ism_in_range=1, pending_ism=0)]
+    r = summarize.summarize_lines(lines, "S2", "Town15", 200.0)
+    assert r["ghost_ism_max"] == 4
+    assert r["ghost_nonism_max"] == 3            # max of ghost - ghost_ism per line: 1, 3, 0
+    assert r["cache_stale_max"] == 2 and r["spline_registered_max"] == 7
+    assert r["missing_ism_p95_no_pending_ism"] == 2   # rows with pending_ism=0: 2 and 1
+    assert r["stream_warnings"] == 1
+    assert r["frames"] == 3                      # the warning line is not an audit row
+
+
+def _write_run(tmp_path, no_audit, lines):
+    d = tmp_path / ("run-noaudit" if no_audit else "run-audit")
+    d.mkdir()
+    (d / "run.txt").write_text("status=ok scenario=S1 map=Town15 seed=0 port=4000 no_audit=%d "
+                               "radius_expected_m=3000.0\n" % no_audit)
+    (d / "server.stderr").write_text("\n".join(lines) + "\n")
+    return str(d)
+
+
+def test_no_audit_run_reports_radius_na(tmp_path, capsys):
+    # 0B-R2: a --no-audit run has no audit line, so there is nothing to check the radius against
+    d = _write_run(tmp_path, 1, [_sync(5.0, "init"), _sync(7.0)])
+    r = summarize.summarize_dir(d)
+    assert r["radius_mismatch"] is None
+    assert summarize.main([d]) == 0
+    out = capsys.readouterr().out
+    assert "radius_mismatch=na" in out and "status=invalid" not in out
+    assert "sync_elapsed_ms_p95=7.00" in out
+
+
+def test_audit_run_without_audit_lines_stays_invalid(tmp_path, capsys):
+    d = _write_run(tmp_path, 0, [_sync(5.0, "init")])
+    assert summarize.summarize_dir(d)["radius_mismatch"] == 1
+    summarize.main([d])
+    assert "status=invalid reason=radius_mismatch" in capsys.readouterr().out

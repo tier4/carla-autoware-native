@@ -23,148 +23,12 @@
 #include "../RGLSceneManager.h"
 #include "../RGLBackendImpl.h"
 #include "../RGLCoordinateUtils.h"
+#include "RGLSceneTestUtil.h"
 
 namespace RGLSceneAuditTests
 {
-static const TCHAR* kCube   = TEXT("/Engine/BasicShapes/Cube.Cube");
-static const TCHAR* kSphere = TEXT("/Engine/BasicShapes/Sphere.Sphere");
-static const float  kZ = 30000.f;               // 300 m up: clear of the map
-static const float  kRegistrationCm = 12000.f;  // RegisterSensor's distance: R = 120 m
-static const float  kRangeCm = 10000.f;         // SetSensorAuditRange: 100 m (R - 20 m, as for a 100 m lidar)
-
-static UWorld* GetGameWorld()
-{
-    for (const FWorldContext& Ctx : GEngine->GetWorldContexts())
-        if (Ctx.WorldType == EWorldType::Game || Ctx.WorldType == EWorldType::PIE) return Ctx.World();
-    return nullptr;
-}
-// Local copies (unity build: this file's own namespace) of the CVar helpers of the skeletal tests.
-static void SetCVar(const TCHAR* Name, int32 V) { IConsoleManager::Get().FindConsoleVariable(Name)->Set(V, ECVF_SetByCode); }
-struct FCVarGuard { FString Name; int32 Old; FCVarGuard(const TCHAR* N) : Name(N), Old(IConsoleManager::Get().FindConsoleVariable(N)->GetInt()) {} ~FCVarGuard() { SetCVar(*Name, Old); } };
-struct FStringCVarGuard
-{
-    FString Name; FString Old;
-    FStringCVarGuard(const TCHAR* N) : Name(N), Old(IConsoleManager::Get().FindConsoleVariable(N)->GetString()) {}
-    ~FStringCVarGuard() { IConsoleManager::Get().FindConsoleVariable(*Name)->Set(*Old, ECVF_SetByCode); }
-};
-
-/// Base point of a test: 2 km west, (Slot + 1) km south, 300 m up (the skeletal tests stay near x = 0).
-static FVector BaseFor(int32 Slot) { return FVector(-200000.f, -100000.f * static_cast<float>(Slot + 1), kZ); }
-
-/// A static mesh actor with the mesh and mobility set while its component is unregistered: once the world has
-/// begun play, UStaticMeshComponent::SetStaticMesh refuses a registered Static component, and the native
-/// component is registered in PostSpawnInitialize even for a deferred spawn. Mesh may be nullptr.
-static AStaticMeshActor* SpawnMeshActor(UWorld* World, UStaticMesh* Mesh, const FVector& Loc, EComponentMobility::Type Mobility,
-                                        FName Name = NAME_None, const FVector& Scale = FVector::OneVector)
-{
-    FActorSpawnParameters Params;
-    Params.Name = Name;
-    Params.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
-    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    Params.bDeferConstruction = true;
-    const FTransform Tf(FRotator::ZeroRotator, Loc, Scale);
-    AStaticMeshActor* Actor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Tf, Params);
-    if (!Actor) return nullptr;
-    UStaticMeshComponent* Comp = Actor->GetStaticMeshComponent();
-    const bool bWasRegistered = Comp->IsRegistered();
-    if (bWasRegistered) Comp->UnregisterComponent();
-    Comp->SetMobility(Mobility);
-    if (Mesh) Comp->SetStaticMesh(Mesh);
-    if (bWasRegistered) Comp->RegisterComponent();
-    Actor->FinishSpawning(Tf);
-    if (Mesh && Comp->GetStaticMesh() != Mesh)
-    {
-        UE_LOG(LogTemp, Error, TEXT("SpawnMeshActor: mesh %s was not applied to %s"), *GetNameSafe(Mesh), *Actor->GetName());
-    }
-    return Actor;
-}
-
-/// A Static ISMC (no collision: instance moves must not touch static bodies) at Loc with one instance per offset.
-static UInstancedStaticMeshComponent* SpawnIsm(UWorld* World, UStaticMesh* Mesh, const FVector& Loc,
-                                               const TArray<FVector>& LocalOffsets, AActor*& OutOwner)
-{
-    OutOwner = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity);
-    if (!OutOwner) return nullptr;
-    UInstancedStaticMeshComponent* Comp = NewObject<UInstancedStaticMeshComponent>(OutOwner);
-    Comp->SetMobility(EComponentMobility::Static);
-    Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    Comp->SetStaticMesh(Mesh);
-    OutOwner->SetRootComponent(Comp);
-    Comp->SetRelativeLocation_Direct(Loc);
-    for (const FVector& Offset : LocalOffsets) Comp->AddInstance(FTransform(Offset));
-    Comp->RegisterComponent();
-    return Comp;
-}
-
-/// After - Before on every counter (the timings and the stream fields are copied from After).
-static FRGLSceneAuditResult Diff(const FRGLSceneAuditResult& Before, const FRGLSceneAuditResult& After)
-{
-    FRGLSceneAuditResult D = After;
-    D.Ghost             -= Before.Ghost;
-    D.GhostInRange      -= Before.GhostInRange;
-    D.MissingSync       -= Before.MissingSync;
-    D.MissingInRange    -= Before.MissingInRange;
-    D.MeshMismatch      -= Before.MeshMismatch;
-    D.StaleInstance     -= Before.StaleInstance;
-    D.ExcludedByName    -= Before.ExcludedByName;
-    D.Unextractable     -= Before.Unextractable;
-    D.NonSmCollision    -= Before.NonSmCollision;
-    D.HlodRegistered    -= Before.HlodRegistered;
-    D.Registered        -= Before.Registered;
-    D.Pending           -= Before.Pending;
-    D.MovableRegistered -= Before.MovableRegistered;
-    D.LevelsAdded       -= Before.LevelsAdded;
-    D.MissingIsmSync    -= Before.MissingIsmSync;
-    D.MissingIsmInRange -= Before.MissingIsmInRange;
-    return D;
-}
-
-/// Every defect counter of the difference D is 0.
-static void TestNoDefects(FAutomationTestBase& Test, const FString& What, const FRGLSceneAuditResult& D)
-{
-    Test.TestEqual(What + TEXT(": ghost"), D.Ghost, 0);
-    Test.TestEqual(What + TEXT(": ghost_in_range"), D.GhostInRange, 0);
-    Test.TestEqual(What + TEXT(": missing_sync"), D.MissingSync, 0);
-    Test.TestEqual(What + TEXT(": missing_in_range"), D.MissingInRange, 0);
-    Test.TestEqual(What + TEXT(": mesh_mismatch"), D.MeshMismatch, 0);
-    Test.TestEqual(What + TEXT(": stale_instance"), D.StaleInstance, 0);
-    Test.TestEqual(What + TEXT(": excluded_by_name"), D.ExcludedByName, 0);
-    Test.TestEqual(What + TEXT(": unextractable"), D.Unextractable, 0);
-    Test.TestEqual(What + TEXT(": non_sm_collision"), D.NonSmCollision, 0);
-    Test.TestEqual(What + TEXT(": hlod_registered"), D.HlodRegistered, 0);
-}
-
-/// One sensor (R = 120 m, audit range 100 m) at SensorPos, scene time T; spawned actors are destroyed and the
-/// shared scene is synced clean again when the fixture goes.
-struct FAuditFixture
-{
-    UWorld* World;
-    FRGLSceneManager& SM;
-    const void* Sensor;
-    FVector SensorPos;
-    double T;
-    TArray<AActor*> Spawned;
-
-    FAuditFixture(UWorld* InWorld, const void* InSensor, const FVector& InSensorPos, double InT)
-        : World(InWorld), SM(FRGLSceneManager::GetInstance(InWorld)), Sensor(InSensor), SensorPos(InSensorPos), T(InT)
-    {
-        Refresh();
-    }
-    ~FAuditFixture()
-    {
-        for (AActor* A : Spawned) if (IsValid(A)) A->Destroy();
-        SM.UnregisterSensor(Sensor);
-        SM.SyncStaticNow_ForTest(World, T + 0.05);   // drop this test's entities from the shared scene
-    }
-    void Refresh()
-    {
-        SM.RegisterSensor(Sensor, SensorPos, kRegistrationCm, T);
-        SM.SetSensorAuditRange(Sensor, kRangeCm);
-    }
-    void Sync() { T += 0.05; Refresh(); SM.SyncStaticNow_ForTest(World, T); }
-    FRGLSceneAuditResult Audit() const { return SM.AuditScene(World); }
-    template <class TActor> TActor* Keep(TActor* Actor) { if (Actor) Spawned.Add(Actor); return Actor; }
-};
+// kCube, BaseFor, SpawnMeshActor, Diff, FAuditFixture, ...: the shared helpers of the scene tests.
+using namespace RGLSceneTestUtil;
 
 // ============================================================================
 // Task 3: AuditScene
@@ -176,7 +40,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditCleanTest, "CarlaRGL.SceneAudit.Clea
 bool FSceneAuditCleanTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(0);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0001), Base, 5000.0);
     F.Sync();
@@ -200,7 +64,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditGhostAfterUnregisterTest, "CarlaRGL.
 bool FSceneAuditGhostAfterUnregisterTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(1);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0002), Base, 5100.0);
     AStaticMeshActor* A = F.Keep(SpawnMeshActor(World, Cube, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Static));
@@ -223,7 +87,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditMissingBeforeSyncTest, "CarlaRGL.Sce
 bool FSceneAuditMissingBeforeSyncTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(2);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0003), Base, 5200.0);
     F.Keep(SpawnMeshActor(World, Cube, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Static));
@@ -252,7 +116,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditRangeEdgeGapTest, "CarlaRGL.SceneAud
 bool FSceneAuditRangeEdgeGapTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(3);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0004), Base, 5300.0);
     F.Sync();
@@ -289,8 +153,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditMeshMismatchTest, "CarlaRGL.SceneAud
 bool FSceneAuditMeshMismatchTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
-    UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, kSphere); if (!TestNotNull(TEXT("sphere"), Sphere)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Sphere = LoadMeshReady(kSphere); if (!TestNotNull(TEXT("sphere"), Sphere)) return false;
     const FVector Base = BaseFor(4);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0005), Base, 5400.0);
     AStaticMeshActor* A = F.Keep(SpawnMeshActor(World, Cube, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Movable));
@@ -313,7 +177,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditIsmNotReevaluatedTest, "CarlaRGL.Sce
 bool FSceneAuditIsmNotReevaluatedTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(16);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0011), Base, 8000.0);
     F.Sync();
@@ -346,7 +210,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditStaleInstanceTest, "CarlaRGL.SceneAu
 bool FSceneAuditStaleInstanceTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(5);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0006), Base, 5500.0);
     F.Sync();
@@ -378,7 +242,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditExcludedByNameTest, "CarlaRGL.SceneA
 bool FSceneAuditExcludedByNameTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(6);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0007), Base, 5600.0);
     F.Sync();
@@ -402,7 +266,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditNullMeshAndEmptyIsmcTest, "CarlaRGL.
 bool FSceneAuditNullMeshAndEmptyIsmcTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(7);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0008), Base, 5700.0);
     F.Sync();
@@ -428,8 +292,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditDoesNotChangeSceneTest, "CarlaRGL.Sc
 bool FSceneAuditDoesNotChangeSceneTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
-    UStaticMesh* Sphere = LoadObject<UStaticMesh>(nullptr, kSphere); if (!TestNotNull(TEXT("sphere"), Sphere)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Sphere = LoadMeshReady(kSphere); if (!TestNotNull(TEXT("sphere"), Sphere)) return false;
     const FVector Base = BaseFor(8);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0009), Base, 5800.0);
     // Declared after the fixture: restored first, so the fixture's last sync trims the idle mesh again.
@@ -482,7 +346,8 @@ bool FSceneAuditFormatLineTest::RunTest(const FString& Parameters)
         "rgl_scene_audit frame=42 sim_t=1.500 ghost=1 ghost_in_range=0 missing_sync=0 missing_in_range=0 "
         "mesh_mismatch=0 stale_instance=0 excluded_by_name=0 unextractable=0 non_sm_collision=0 hlod_registered=0 "
         "registered=0 pending=0 movable_registered=0 levels_added=0 since_sync_s=0.00 stream_covered=-1 "
-        "parent_stream_radius_m=-1.0 frame_ms=0.00 audit_ms=0.000 missing_ism_sync=0 missing_ism_in_range=0");
+        "parent_stream_radius_m=-1.0 frame_ms=0.00 audit_ms=0.000 missing_ism_sync=0 missing_ism_in_range=0 "
+        "ghost_ism=0 ghost_ism_in_range=0 missing_steady=0 spline_registered=0 cache_stale=0");
     // Exact (string TestEqual ignores case).
     if (!TestTrue(TEXT("rgl_scene_audit line, exactly"), Line.Equals(Expected, ESearchCase::CaseSensitive)))
     {
@@ -498,7 +363,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditCostTest, "CarlaRGL.SceneAudit.Audit
 bool FSceneAuditCostTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(9);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A000A), Base, 5900.0);
     F.Sync();
@@ -641,7 +506,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditHitDumpRoundTripTest, "CarlaRGL.Scen
 bool FSceneAuditHitDumpRoundTripTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
 
     const FString Dir = FPaths::ConvertRelativePathToFull(
         FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"), TEXT("RGLHitDumpRoundTrip")));

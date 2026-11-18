@@ -64,6 +64,13 @@ struct FRGLSceneAuditResult
     float ParentStreamRadiusM = -1.0f; // smallest streaming-source radius on the root actor a sensor is attached to; -1 = none
     int32 MissingIsmSync = 0;    // the ISM-instance part of MissingSync (the rest are plain static mesh components)
     int32 MissingIsmInRange = 0; // the ISM-instance part of MissingInRange
+    int32 GhostIsm = 0;          // the ISM-instance part of Ghost
+    int32 GhostIsmInRange = 0;   // the ISM-instance part of GhostInRange
+    int32 MissingSteady = 0;     // eligible, not registered, inside R around a sensor's position at the last sync AND inside
+                                 // R around a sensor's current position (ISM: per instance): what the last sync should
+                                 // have registered and is still needed, so not explained by sync timing or movement
+    int32 SplineRegistered = 0;  // registered entities whose component is a USplineMeshComponent (uploaded undeformed)
+    int32 CacheStale = 0;        // MeshCache entries whose asset is gone (the weak asset no longer resolves to the key)
 };
 
 /// Manages synchronization between the UE5 scene and the RGL scene.

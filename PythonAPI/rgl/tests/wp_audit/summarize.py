@@ -4,8 +4,9 @@
 Usage: summarize.py <out_dir>...
 
 Each <out_dir> is a run_scenario.py output directory holding server.stderr,
-run.txt (key=value: scenario=, map=, radius_expected_m=) and optionally
-tick_ms.txt (one client world.tick() wall time [ms] per line).
+run.txt (key=value: scenario=, map=, radius_expected_m=, no_audit=) and optionally
+tick_ms.txt (one client world.tick() wall time [ms] per line). A no_audit=1 run
+has no audit line: its radius check is na (not a mismatch).
 Prints one key=value line per directory. Does not import carla.
 """
 import math
@@ -14,12 +15,20 @@ import sys
 
 AUDIT_TAG = "rgl_scene_audit "
 SYNC_TAG = "rgl_scene_sync "
+STREAM_WARNING_TAG = "rgl_scene_stream_warning"
+SYNC_TRIGGERS = ("init", "time", "distance", "level")
 
-# Definition of "steady" for missing_sync_steady_max: lines where no level was
-# added since the previous line, nothing is pending creation and the streaming
-# is reported complete (stream_covered != 0). Right after a sync the live
-# registration should match the world; a non-zero value there is not explained
-# by in-flight streaming.
+# Stage-0 definition of "steady" for missing_sync_steady_max (kept unchanged): lines
+# where no level was added since the previous line, nothing is pending creation and
+# the streaming is reported complete (stream_covered != 0).
+#
+# Stage-1 definition (D13) for missing_steady_max / steady_rows / steady_valid, decided
+# line by line in order: t_add = sim_t of the last line so far with levels_added > 0;
+# a line is steady when pending == 0 and pending_ism == 0 and (t_add is None or
+# sim_t - since_sync_s >= t_add - 0.01), i.e. a sync ran after the last level came in.
+# stream_covered is not used: the audit counts only components of loaded levels, and a
+# map that never reports full coverage (S3) would otherwise have no steady line at all.
+# steady_valid = steady_rows >= 0.2 * frames. Keys missing from a line count as 0.
 
 
 def parse_kv(text):
@@ -80,13 +89,37 @@ def _radius_mismatch(radii, expected):
     return int(any(abs(r - expected) >= 1.0 for r in started))
 
 
-def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None):
+def steady_lines(audits):
+    """The audit lines that are steady by the stage-1 definition (D13, see the top of this file)."""
+    t_add = None
+    out = []
+    for a in audits:
+        sim_t = _num(a, "sim_t")
+        if _num(a, "levels_added") > 0:
+            t_add = sim_t
+        if _num(a, "pending") != 0 or _num(a, "pending_ism") != 0:
+            continue
+        if t_add is None or sim_t - _num(a, "since_sync_s") >= t_add - 0.01:
+            out.append(a)
+    return out
+
+
+def longest_run(flags):
+    best = run = 0
+    for f in flags:
+        run = run + 1 if f else 0
+        best = max(best, run)
+    return best
+
+
+def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None, audit=True):
+    """audit=False: a --no-audit run; there is no audit line to check the radius with, so radius_mismatch is None (na)."""
     audits, syncs = parse_lines(lines)
     g = lambda key: [_num(a, key) for a in audits]  # noqa: E731
 
     radii = g("parent_stream_radius_m")
-    mismatch = _radius_mismatch(radii, radius_expected_m)
-    # no audit line at all is itself invalid
+    # with the audit on, no audit line at all is itself invalid
+    mismatch = _radius_mismatch(radii, radius_expected_m) if audit else None
     steady = [_num(a, "missing_sync") for a in audits
               if _num(a, "levels_added") == 0 and _num(a, "pending") == 0
               and _num(a, "stream_covered", -1) != 0]
@@ -96,6 +129,12 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None):
         shown_radius = max(set(radii), key=radii.count)  # most common value
     else:
         shown_radius = -1.0
+
+    st = steady_lines(audits)
+    no_pending = [a for a in audits if _num(a, "pending") == 0 and _num(a, "pending_ism") == 0]
+    missing_no_pending = [_num(a, "missing_in_range") for a in no_pending if _num(a, "missing_in_range") > 0]
+    triggers = [s.get("trigger") for s in syncs]
+    warnings = sum(1 for ln in lines if STREAM_WARNING_TAG in ln)
 
     return {
         "scenario": scenario,
@@ -128,6 +167,22 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None):
         "tick_over_100ms": sum(1 for v in tick_ms if v > 100.0) if tick_ms else None,
         "tick_ms_p99": percentile(list(tick_ms), 99) if tick_ms else None,
         "tick_ms_max": max(tick_ms) if tick_ms else None,
+        # stage 1 (D13 steady state, pending split, breakdowns; keys missing from a line count as 0)
+        "missing_steady_max": int(max((_num(a, "missing_steady") for a in st), default=0)),
+        "steady_rows": len(st),
+        "steady_valid": int(len(st) >= 0.2 * len(audits)),
+        "missing_rows_no_pending": len(missing_no_pending),
+        "missing_max_no_pending": int(max(missing_no_pending, default=0)),
+        "missing_ism_p95_no_pending_ism": int(percentile(
+            [_num(a, "missing_ism_in_range") for a in audits if _num(a, "pending_ism") == 0], 95)),
+        "ghost_ism_max": int(max(g("ghost_ism"), default=0)),
+        "ghost_nonism_max": int(max((_num(a, "ghost") - _num(a, "ghost_ism") for a in audits), default=0)),
+        "cache_stale_max": int(max(g("cache_stale"), default=0)),
+        "pending_ism_max": int(max(g("pending_ism"), default=0)),
+        "pending_ism_run_max": longest_run(v > 0 for v in g("pending_ism")),
+        "spline_registered_max": int(max(g("spline_registered"), default=0)),
+        "sync_triggers": ",".join("%s:%d" % (t, triggers.count(t)) for t in SYNC_TRIGGERS),
+        "stream_warnings": warnings,
     }
 
 
@@ -144,6 +199,11 @@ _ORDER = [
     ("tick_ms_p95", "%.2f"), ("missing_ism_in_range_p95", "%d"), ("missing_ism_sync_max", "%d"),
     ("sync_elapsed_ms_p50", "%.2f"), ("sync_elapsed_ms_p95", "%.2f"), ("tick_over_100ms", "%d"),
     ("tick_ms_p99", "%.2f"), ("tick_ms_max", "%.2f"),
+    ("missing_steady_max", "%d"), ("steady_rows", "%d"), ("steady_valid", "%d"),
+    ("missing_rows_no_pending", "%d"), ("missing_max_no_pending", "%d"), ("missing_ism_p95_no_pending_ism", "%d"),
+    ("ghost_ism_max", "%d"), ("ghost_nonism_max", "%d"), ("cache_stale_max", "%d"),
+    ("pending_ism_max", "%d"), ("pending_ism_run_max", "%d"), ("spline_registered_max", "%d"),
+    ("sync_triggers", "%s"), ("stream_warnings", "%d"),
 ]
 
 
@@ -173,7 +233,8 @@ def summarize_dir(d):
         with open(tp, encoding="utf-8") as f:
             tick = [float(x) for x in f.read().split()]
     r = summarize_lines(lines, run.get("scenario", "?"), run.get("map", "?"),
-                        float(run.get("radius_expected_m", "-1")), tick)
+                        float(run.get("radius_expected_m", "-1")), tick,
+                        audit=run.get("no_audit", "0") != "1")
     return r
 
 
