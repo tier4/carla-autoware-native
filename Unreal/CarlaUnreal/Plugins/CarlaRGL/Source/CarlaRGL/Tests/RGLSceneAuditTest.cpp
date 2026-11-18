@@ -200,6 +200,7 @@ bool FSceneAuditIsmNotReevaluatedTest::RunTest(const FString& Parameters)
     const FRGLSceneAuditResult D = Diff(R1, F.Audit());
     TestEqual(TEXT("instance 1 inside the range but never added: missing_in_range +1"), D.MissingInRange, 1);
     TestEqual(TEXT("... and it is an ISM instance: missing_ism_in_range +1"), D.MissingIsmInRange, 1);
+    TestEqual(TEXT("... inside both R spheres after the sync: missing_steady +1 (the ISM path)"), D.MissingSteady, 1);
     TestEqual(TEXT("not a ghost"), D.Ghost, 0);
     return true;
 }
@@ -436,7 +437,8 @@ bool FSceneAuditEveryNthTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// Off unless asked for: no line and no LevelAddedToWorld binding.
+// Off unless asked for: no line. The LevelAddedToWorld binding does not depend on the audit: the level-triggered
+// sync (P5) needs it for the instance's whole life.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditOffByDefaultTest, "CarlaRGL.SceneAudit.OffByDefault",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneAuditOffByDefaultTest::RunTest(const FString& Parameters)
@@ -453,7 +455,7 @@ bool FSceneAuditOffByDefaultTest::RunTest(const FString& Parameters)
         SM.MaybeEmitAudit(World, 6200.0 + 0.05 * static_cast<double>(f), Frame0 + f);
     }
     TestEqual(TEXT("no line"), SM.AuditLinesEmitted_ForTest - Before, 0);
-    TestFalse(TEXT("no LevelAddedToWorld binding while off"), FWorldDelegates::LevelAddedToWorld.IsBoundToObject(&SM));
+    TestTrue(TEXT("the level binding is always on (P5)"), FWorldDelegates::LevelAddedToWorld.IsBoundToObject(&SM));
     return true;
 }
 

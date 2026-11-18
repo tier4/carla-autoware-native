@@ -224,9 +224,14 @@ FRGLSceneManager::FRGLSceneManager()
 
 FRGLSceneManager::~FRGLSceneManager()
 {
-    // The audit's LevelAddedToWorld binding points at this instance: drop it before anything else
+    // The LevelAddedToWorld binding points at this instance: drop it before anything else
     // (OnWorldCleanup -> DestroyInstance during load_world, stale-world cleanup, module shutdown).
-    SetAuditSubscription(nullptr, false);
+    if (LevelAddedHandle.IsValid())
+    {
+        FWorldDelegates::LevelAddedToWorld.Remove(LevelAddedHandle);
+        LevelAddedHandle.Reset();
+    }
+    PendingAddedLevels.Empty();
 
     TeardownSkeletal();
 
@@ -307,6 +312,7 @@ FRGLSceneManager& FRGLSceneManager::GetInstance(UWorld* World)
     }
 
     FRGLSceneManager* NewInstance = new FRGLSceneManager();
+    NewInstance->BindWorld(World);
     Instances.Add(World, NewInstance);
     return *NewInstance;
 }
@@ -345,7 +351,11 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
         return;
     }
     LastUpdateFrame = CurrentFrame;
+    UpdateStep(World, SimulationTime);
+}
 
+void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
+{
     // Wall time between two Updates that ran (frame_ms of the rgl_scene_audit line).
     const double UpdateWallSeconds = FPlatformTime::Seconds();
     LastFrameMs = (LastUpdateWallSeconds > 0.0) ? (UpdateWallSeconds - LastUpdateWallSeconds) * 1000.0 : 0.0;
@@ -365,8 +375,8 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
     // Sync on a time interval OR when any sensor has moved far enough that newly
     // relevant geometry could be missed before the next periodic sync
     // (Phase 1: high-speed safety).
-    // All three conditions are evaluated (the sensor loop is a handful of entries) so the telemetry can
-    // name the trigger; whether a sync happens is unchanged (any of them).
+    // The time, sensor and distance conditions are all evaluated (the sensor loop is a handful of entries) so the
+    // telemetry can name the trigger; a sync happens when any of them, or the level condition below, holds.
     TimeSinceLastSync += World->GetDeltaSeconds();
     const bool bTimeDue = (TimeSinceLastSync >= SyncIntervalSeconds);
     bool bNewSensor = false;   // a sensor without a previous sync (startup, newly spawned or re-registered sensor)
@@ -384,7 +394,12 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
             bMoved = true;
         }
     }
-    const bool bShouldSync = bTimeDue || bNewSensor || bMoved;
+    // P5: a level added since the last sync whose static geometry reaches some sensor's R (World Partition cells
+    // stream in between the periodic syncs). Looked at whenever no sensor is new, so the trigger name follows the
+    // priority init > level > distance > time; the levels' actors only, at most once per 0.3 s (sim) (D5).
+    const bool bLevel = !bNewSensor && ConsumeRelevantLevelAdds();
+    const bool bShouldSync = bTimeDue || bNewSensor || bMoved || bLevel;
+    const TCHAR* Trigger = bNewSensor ? TEXT("init") : (bLevel ? TEXT("level") : (bMoved ? TEXT("distance") : TEXT("time")));
 
     const double StepStartSeconds = FPlatformTime::Seconds();
     FSceneSyncStats SyncStats;
@@ -398,6 +413,10 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
             Pair.Value.LastSyncPosition = Pair.Value.Position;
             Pair.Value.bLastSyncValid = true;
         }
+#if !UE_BUILD_SHIPPING
+        ++SyncCount_ForTest;
+        LastSyncTrigger_ForTest = Trigger;
+#endif
     }
 
     // Time-sliced creation of the meshes queued by this or an earlier sync: a step on every Update, sync
@@ -422,17 +441,17 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
     if (bShouldSync)
     {
         const double ElapsedMs = (FPlatformTime::Seconds() - StepStartSeconds) * 1000.0;
-        const TCHAR* Trigger = bNewSensor ? TEXT("init") : (bMoved ? TEXT("distance") : TEXT("time"));
         EmitSceneLine(FString::Printf(
             TEXT("rgl_scene_sync t=%.3f trigger=%s scanned=%d added_cached=%d queued=%d created=%d removed=%d "
                  "idle_destroyed=%d pending=%d elapsed_ms=%.2f drain_ms=%.2f failed=%d drain_reused=%d dropped=%d "
-                 "range_skipped=%d sensors=%d entities=%d ismc=%d meshes=%d idle=%d"),
+                 "range_skipped=%d sensors=%d entities=%d ismc=%d meshes=%d idle=%d dead_ismc=%d"),
             CurrentSimTime, Trigger, SyncStats.ScannedActors, SyncStats.AddedCached, SyncStats.Queued,
             Drain.Created, SyncStats.Removed, IdleDestroyedSinceLog, PendingCreates.Num(), ElapsedMs, Drain.Ms,
             MeshFailuresSinceLog, Drain.RegisteredCached, Drain.Dropped, SyncStats.RangeSkipped, RegisteredSensors.Num(),
-            EntityMap.Num(), ISMCEntityMap.Num(), MeshCache.Num(), IdleMeshLru.Num()));
+            EntityMap.Num(), ISMCEntityMap.Num(), MeshCache.Num(), IdleMeshLru.Num(), DeadIsmcSinceLog));
         IdleDestroyedSinceLog = 0;
         MeshFailuresSinceLog = 0;
+        DeadIsmcSinceLog = 0;
     }
 
     if (QueueEpisode.bActive && PendingCreates.Num() == 0)
@@ -1372,7 +1391,9 @@ bool FRGLSceneManager::IsInstanceWithinAnySensor(
 
 FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStaticMeshComponent* Component)
 {
-    if (!IsValid(Component) || !Component->GetStaticMesh() || !Component->IsVisible())
+    // An unregistered component is not part of the loaded world (its level is being streamed out, or the owner
+    // unregistered it): registering it would put a ghost into the scene (P1).
+    if (!IsValid(Component) || !Component->IsRegistered() || !Component->GetStaticMesh() || !Component->IsVisible())
     {
         return EStaticGate::Reject;
     }
@@ -1720,6 +1741,24 @@ void FRGLSceneManager::UpdateTransforms()
     {
         UnregisterComponent(Comp);
     }
+
+    // P1: an ISM group whose component is gone or no longer registered (its World Partition cell is being streamed
+    // out, or the owner unregistered it) leaves the RGL scene in this Update too, instead of staying until the next
+    // sync as ghosts. Instance transforms are not touched here.
+    TArray<UInstancedStaticMeshComponent*> DeadIsm;
+    for (const auto& Pair : ISMCEntityMap)
+    {
+        const UInstancedStaticMeshComponent* Comp = Pair.Value.Component.Get();
+        if (!IsValid(Comp) || !Comp->IsRegistered())
+        {
+            DeadIsm.Add(Pair.Key);
+        }
+    }
+    for (UInstancedStaticMeshComponent* Comp : DeadIsm)
+    {
+        UnregisterISMComponent(Comp);
+    }
+    DeadIsmcSinceLog += DeadIsm.Num();
 }
 
 // ============================================================================
@@ -1832,6 +1871,8 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
             Pending.GapCm = NearestSensorGapCm(Comp->Bounds.Origin, Comp->Bounds.SphereRadius);
         }
     }
+    // The scan has seen every level added so far: none of them needs a level-triggered sync any more (P5).
+    PendingAddedLevels.Reset();
 
     // Remove regular entities for components that no longer exist or moved out
     // of the LiDAR-relevant window.
@@ -3125,7 +3166,7 @@ void FRGLSceneManager::MaybeEmitAudit(UWorld* World, double SimTime, uint64 Fram
     const int32 Every = SceneAuditEvery();
     if (Every <= 0)
     {
-        SetAuditSubscription(nullptr, false);
+        LevelsAddedSinceAudit = 0;   // levels_added counts only while the audit is on
         return;
     }
     if (!World)
@@ -3139,7 +3180,6 @@ void FRGLSceneManager::MaybeEmitAudit(UWorld* World, double SimTime, uint64 Fram
     }
     LastAuditFrame = Frame;
     bAuditFrameValid = true;
-    SetAuditSubscription(World, true);
 
     ++AuditUpdateCount;
     if (AuditUpdateCount % static_cast<uint64>(Every) != 0)
@@ -3164,28 +3204,92 @@ void FRGLSceneManager::MaybeEmitAudit(UWorld* World, double SimTime, uint64 Fram
 #endif
 }
 
-void FRGLSceneManager::SetAuditSubscription(UWorld* World, bool bOn)
+// ============================================================================
+// Level-added sync (P5)
+// ============================================================================
+
+void FRGLSceneManager::BindWorld(UWorld* World)
 {
-    if (bOn && !LevelAddedHandle.IsValid())
+    OwnerWorldKey = FObjectKey(World);
+    if (!LevelAddedHandle.IsValid())
     {
-        AuditWorldKey = FObjectKey(World);
-        LevelsAddedSinceAudit = 0;
         LevelAddedHandle = FWorldDelegates::LevelAddedToWorld.AddRaw(this, &FRGLSceneManager::OnLevelAddedToWorld);
-    }
-    else if (!bOn && LevelAddedHandle.IsValid())
-    {
-        FWorldDelegates::LevelAddedToWorld.Remove(LevelAddedHandle);
-        LevelAddedHandle.Reset();
-        LevelsAddedSinceAudit = 0;
     }
 }
 
-void FRGLSceneManager::OnLevelAddedToWorld(ULevel* /*Level*/, UWorld* World)
+void FRGLSceneManager::OnLevelAddedToWorld(ULevel* Level, UWorld* World)
 {
-    if (FObjectKey(World) == AuditWorldKey)
+    if (FObjectKey(World) != OwnerWorldKey)
     {
-        ++LevelsAddedSinceAudit;
+        return;
     }
+    ++LevelsAddedSinceAudit;
+    if (Level)
+    {
+        PendingAddedLevels.AddUnique(TWeakObjectPtr<ULevel>(Level));
+    }
+}
+
+bool FRGLSceneManager::ConsumeRelevantLevelAdds()
+{
+    if (PendingAddedLevels.Num() == 0)
+    {
+        return false;
+    }
+    // D5: a level-triggered sync at most every LevelSyncMinIntervalSeconds (sim); the levels wait meanwhile. A clock
+    // that went back (a new episode in the same world) does not hold them.
+    if (LastSyncSimTime >= 0.0)
+    {
+        const double SinceSyncSeconds = CurrentSimTime - LastSyncSimTime;
+        if (SinceSyncSeconds >= 0.0 && SinceSyncSeconds < LevelSyncMinIntervalSeconds)
+        {
+            return false;
+        }
+    }
+
+    // Relevant = the level brings a registered static mesh component whose bounds reach some sensor's R and that
+    // passes the registration gate: what the next periodic sync would register. The gate matters: a sky dome's bounds
+    // reach every sensor, but the "Sky" name rule leaves it out, so its level alone must not force a sync. The cheap
+    // tests run first, the gate's name checks only for a component already in range. Only the added levels' actors
+    // are looked at, not the whole world.
+    bool bRelevant = false;
+    for (const TWeakObjectPtr<ULevel>& WeakLevel : PendingAddedLevels)
+    {
+        const ULevel* Level = WeakLevel.Get();
+        if (!Level || Level->bIsBeingRemoved)
+        {
+            continue;
+        }
+        for (AActor* Actor : Level->Actors)
+        {
+            if (!IsValid(Actor))
+            {
+                continue;
+            }
+            LevelScanComponents.Reset();
+            Actor->GetComponents<UStaticMeshComponent>(LevelScanComponents);
+            for (UStaticMeshComponent* Comp : LevelScanComponents)
+            {
+                if (IsValid(Comp) && Comp->IsRegistered() && Comp->GetStaticMesh() && IsComponentWithinAnySensor(Comp, 0.0f) &&
+                    GateStaticComponent(Comp) == EStaticGate::Pass)
+                {
+                    bRelevant = true;
+                    break;
+                }
+            }
+            if (bRelevant)
+            {
+                break;
+            }
+        }
+        if (bRelevant)
+        {
+            break;
+        }
+    }
+    LevelScanComponents.Reset();   // keeps the allocation for the next look
+    PendingAddedLevels.Reset();
+    return bRelevant;
 }
 
 // ============================================================================
@@ -3222,6 +3326,17 @@ void FRGLSceneManager::SyncStaticNow_ForTest(UWorld* World, double Now)
     DrainPendingCreates(/*bUnlimited=*/true, Drain);
     QueueEpisode = FQueueEpisode();
     bInitialized = true;   // the static scene is synced; a later Update() must not run InitializeFromWorld on top
+}
+void FRGLSceneManager::Update_ForTest(UWorld* World, double SimTime)
+{
+    if (World)
+    {
+        UpdateStep(World, SimTime);
+    }
+}
+void FRGLSceneManager::OnLevelAddedToWorld_ForTest(ULevel* Level, UWorld* World)
+{
+    OnLevelAddedToWorld(Level, World);
 }
 FRGLSceneManager::FSceneCounts FRGLSceneManager::GetSceneCounts_ForTest() const
 {

@@ -6,8 +6,9 @@
 //   - Singleton per UWorld (accessed via GetInstance)
 //   - Caches UStaticMesh* -> rgl_mesh_t to avoid re-uploading identical meshes
 //   - Creates rgl_entity_t for each UStaticMeshComponent instance
-//   - Updates entity transforms each tick
-//   - Handles actor creation/destruction via periodic world scans
+//   - Updates entity transforms each tick; drops entities whose component left the world (unregistered) at once
+//   - Handles actor creation/destruction via periodic world scans, plus a scan when a level with static
+//     geometry in some sensor's sphere is added (World Partition cells, level streaming)
 //   - Amortizes new-mesh creation across scans (rgl.Scene.* CVars): a budgeted, nearest-first
 //     create queue, an unload radius wider than the load radius, and an LRU of idle meshes
 
@@ -177,6 +178,14 @@ public:
     /// rgl_scene_audit lines printed by this instance.
     int32 AuditLinesEmitted_ForTest = 0;
 
+    /// Update() without its once-per-frame guard (triggers, sync, drain and transform step as in Update()).
+    void Update_ForTest(UWorld* World, double SimTime);
+    /// The FWorldDelegates::LevelAddedToWorld handler, called directly.
+    void OnLevelAddedToWorld_ForTest(ULevel* Level, UWorld* World);
+    /// Static syncs run by Update() / Update_ForTest(), and the trigger name of the last one.
+    int32 SyncCount_ForTest = 0;
+    FString LastSyncTrigger_ForTest;
+
     // Test seams: bypass the per-frame guard and the wall-clock sync timer; set scene time like Update() does.
     void SyncSkeletalNow_ForTest(UWorld* World, double SimTime);
     void UpdateSkeletalPosesNow_ForTest(double SimTime);
@@ -199,6 +208,9 @@ private:
     FRGLSceneManager(const FRGLSceneManager&) = delete;
     FRGLSceneManager& operator=(const FRGLSceneManager&) = delete;
 
+    /// Update() after its once-per-frame guard.
+    void UpdateStep(UWorld* World, double SimulationTime);
+
     /// Initial scan of the world to upload all static meshes.
     void InitializeFromWorld(UWorld* World);
 
@@ -212,8 +224,9 @@ private:
     /// Filter components before uploading them to RGL.
     bool ShouldRegisterComponent(UStaticMeshComponent* Component, bool& bOutOfRange) const;
 
-    /// The distance-independent part of ShouldRegisterComponent (validity, mesh, visibility, scale, the
-    /// "Sky" name rule), shared with AuditScene so the audit judges with the same predicate.
+    /// The distance-independent part of ShouldRegisterComponent (validity, registration, mesh, visibility, scale,
+    /// the "Sky" name rule), shared with AuditScene so the audit judges with the same predicate. A component that
+    /// is not registered (its level is being streamed out, or its owner unregistered it) is no candidate.
     enum class EStaticGate : uint8 { Reject, ExcludedByName, Pass };
     static EStaticGate GateStaticComponent(const UStaticMeshComponent* Component);
 
@@ -244,7 +257,8 @@ private:
     void AddMeshReference(UStaticMesh* StaticMesh, int32 Count = 1);
     void ReleaseMeshReference(UStaticMesh* StaticMesh, int32 Count = 1);
 
-    /// Update all entity transforms to match current UE5 state.
+    /// Update all entity transforms to match current UE5 state. Entities and ISM groups whose component is gone
+    /// or no longer registered leave the RGL scene here, every Update.
     void UpdateTransforms();
 
     /// Per-sync counters for the rgl_scene_sync telemetry line.
@@ -399,6 +413,9 @@ private:
     /// Idle meshes destroyed (LRU overflow or stale identity) since the last rgl_scene_sync line.
     int32 IdleDestroyedSinceLog = 0;
 
+    /// ISM groups dropped by UpdateTransforms (component gone or unregistered) since the last rgl_scene_sync line.
+    int32 DeadIsmcSinceLog = 0;
+
     /// Components in range needing a new mesh or idle reactivation, nearest to any sensor first. Rebuilt by every
     /// sync (so it never holds duplicates or components the last scan no longer saw), drained by Update().
     struct FPendingCreate
@@ -505,17 +522,32 @@ private:
     double LastSyncSimTime = -1.0;        // CurrentSimTime of the last static sync; -1 = none yet
     double LastUpdateWallSeconds = 0.0;   // FPlatformTime::Seconds() of the last Update that ran
     double LastFrameMs = 0.0;             // wall time between the last two Updates that ran
-    int32  LevelsAddedSinceAudit = 0;     // LevelAddedToWorld events for AuditWorldKey since the last audit line
+    int32  LevelsAddedSinceAudit = 0;     // LevelAddedToWorld events of this world since the last audit line (0 while off)
 
     // rgl.Scene.Audit line emission (MaybeEmitAudit)
     uint64 LastAuditFrame = 0;
     bool   bAuditFrameValid = false;
     bool   bExcludedSampleLogged = false; // the rgl_scene_audit_excluded line was printed once for this world
     uint64 AuditUpdateCount = 0;          // distinct frames seen while the audit is on
-    FDelegateHandle LevelAddedHandle;     // FWorldDelegates::LevelAddedToWorld, bound only while the audit is on
-    FObjectKey AuditWorldKey;             // the world whose LevelAddedToWorld events are counted
-    void SetAuditSubscription(UWorld* World, bool bOn);
+
+    // ---- Level-added sync (P5) ----
+    /// Remember the instance's world and bind FWorldDelegates::LevelAddedToWorld for the instance's whole life
+    /// (GetInstance calls it once, when it creates the instance; the destructor removes the binding).
+    void BindWorld(UWorld* World);
+    /// LevelAddedToWorld: a level of this world (OwnerWorldKey) waits in PendingAddedLevels for the next Update.
     void OnLevelAddedToWorld(ULevel* Level, UWorld* World);
+    /// True when a level added since the last sync holds a registered static mesh component whose bounds reach some
+    /// sensor's registration sphere (R) and that passes GateStaticComponent (what a sync would register); the list
+    /// is emptied either way. Within LevelSyncMinIntervalSeconds (sim) of the last sync: false, and the list is kept
+    /// for a later Update (D5). Looks at the levels' own actors only.
+    bool ConsumeRelevantLevelAdds();
+    static constexpr double LevelSyncMinIntervalSeconds = 0.3;
+    FDelegateHandle LevelAddedHandle;     // FWorldDelegates::LevelAddedToWorld, bound for the instance's life
+    FObjectKey OwnerWorldKey;             // the world this instance serves; other worlds' events are ignored
+    /// Levels added since the last sync. Emptied by every sync (the full scan sees them) and by
+    /// ConsumeRelevantLevelAdds once the interval allows a look.
+    TArray<TWeakObjectPtr<ULevel>> PendingAddedLevels;
+    TArray<UStaticMeshComponent*> LevelScanComponents;   // ConsumeRelevantLevelAdds' component array, reused
 
     // ---- Static singleton storage ----
     static TMap<UWorld*, FRGLSceneManager*> Instances;
