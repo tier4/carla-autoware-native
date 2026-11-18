@@ -26,6 +26,7 @@
 * Added the **V2X sensor family**: a CAM service sensor (`sensor.other.v2x`), a custom binary-payload sensor (`sensor.other.v2x_custom`), a configurable path-loss propagation model and owner-less infrastructure (V2I) sensors.
 * Added **`World.get_imu_sensor_gravity`/`set_imu_sensor_gravity`** to read and set the gravity the IMU accelerometer uses.
 * Added **`PythonAPI/examples/rig_perf_demo.py`**, a two-pass multi-camera rig benchmark: `measure` records the delivered frame rate of an N-camera rig, `render` replays it into a labelled grid video.
+* Added a **raw sink to `sensor.other.autoware_gnss`** (Linux only): the `raw_sink_library` attribute names a shared library (absolute path, trusted files only) that receives the antenna's ground truth every tick through the C interface in `Carla/Sensor/carla_gnss_raw_sink.h`, for example to emulate a real receiver's wire protocol; `raw_sink_config` is passed to it as is. Both are empty by default, which leaves the sensor as before. The sensor's ROS 2 publish now follows its stream's ROS flag (`enable_for_ros` / `disable_for_ros`; it used to publish whenever ROS 2 was on), independently of the raw sink.
 
 #### Maps and content
 

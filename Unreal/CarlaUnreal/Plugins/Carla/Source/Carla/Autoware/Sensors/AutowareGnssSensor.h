@@ -16,6 +16,8 @@
 #include <carla/geom/GeoProjection.h>
 #include <util/enable-ue4-macros.h>
 
+#include "Carla/Sensor/carla_gnss_raw_sink.h"
+
 #include "AutowareGnssSensor.generated.h"
 
 /// Autoware GNSS sensor ("sensor.other.autoware_gnss"): streams GeoLocation
@@ -70,6 +72,10 @@ protected:
 
   virtual void BeginPlay() override;
 
+  virtual void EndPlay(EEndPlayReason::Type EndPlayReason) override;
+
+  virtual void BeginDestroy() override;
+
   virtual void PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaSeconds) override;
 
   UFUNCTION(BlueprintCallable)
@@ -95,4 +101,43 @@ private:
   double LatitudeValue;
   double LongitudeValue;
   double AltitudeValue;
+
+  // ---- Raw sink (carla_gnss_raw_sink.h), set from blueprint attributes ----
+
+  /// Shared library that receives the antenna's ground truth every tick (e.g.
+  /// to emulate a real receiver's wire protocol). Empty = not used.
+  /// Independent of the ROS 2 publish, which the client enables per sensor
+  /// (enable_for_ros).
+  FString RawSinkLibrary;
+
+  /// Passed to the sink as is; its meaning belongs to the sink.
+  FString RawSinkConfig;
+
+  /// Loading is attempted once (first PostPhysTick), success or not.
+  bool bRawSinkTried = false;
+
+  void *RawSinkDll = nullptr;
+  void *RawSink = nullptr;
+  carla_gnss_raw_sink_push_fn RawSinkPush = nullptr;
+  carla_gnss_raw_sink_destroy_fn RawSinkDestroy = nullptr;
+
+  /// MGRS offset of the map frame, taken with the grid zone the sink was
+  /// created with.
+  FVector RawSinkMgrsOffset = FVector::ZeroVector;
+
+  /// User data of the sink's log callback (the sensor name); freed after the
+  /// sink is destroyed, since the callback may run on a sink thread until then.
+  FString *RawSinkLogName = nullptr;
+
+  void StartRawSinkOnce();
+  void StopRawSink();
+  void PushRawSinkTruth();
+
+  // ---- ROS 2 publish switch ----
+
+  /// The stream's ROS flag (enable_for_ros / disable_for_ros), read once per
+  /// frame: this sensor publishes to ROS 2 itself, past the stream.
+  bool bRos2StreamEnabled = true;
+
+  bool IsStreamEnabledForRos();
 };
