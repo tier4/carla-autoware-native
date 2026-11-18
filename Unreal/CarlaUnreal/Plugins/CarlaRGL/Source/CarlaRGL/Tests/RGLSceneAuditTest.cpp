@@ -170,11 +170,11 @@ bool FSceneAuditMeshMismatchTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// P3: the instances of a registered ISM are chosen once. An instance outside every sensor sphere at registration
-// stays out after the sensor comes close and a sync runs; the audit counts it as an ISM-instance miss.
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditIsmNotReevaluatedTest, "CarlaRGL.SceneAudit.IsmNotReevaluated",
+// An instance added to a registered ISM after the sync is not in the RGL scene until a sync re-evaluates the group;
+// the audit counts it as an ISM-instance miss (50 m from the sensor: inside the range and inside both R spheres).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditIsmInstanceAddedAfterSyncTest, "CarlaRGL.SceneAudit.IsmInstanceAddedAfterSync",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
-bool FSceneAuditIsmNotReevaluatedTest::RunTest(const FString& Parameters)
+bool FSceneAuditIsmInstanceAddedAfterSyncTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
@@ -183,24 +183,21 @@ bool FSceneAuditIsmNotReevaluatedTest::RunTest(const FString& Parameters)
     F.Sync();
     const FRGLSceneAuditResult R0 = F.Audit();
 
-    // instance 0 at 40 m (inside R = 120 m), instance 1 at 200 m (outside R and outside the range)
     AActor* Owner = nullptr;
     UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f),
-                                                  { FVector::ZeroVector, FVector(16000.f, 0.f, 0.f) }, Owner);
+                                                  { FVector::ZeroVector, FVector(0.f, 300.f, 0.f) }, Owner);
     F.Keep(Owner);
     if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
     F.Sync();
     const FRGLSceneAuditResult R1 = F.Audit();
-    TestEqual(TEXT("only instance 0 registered"), Diff(R0, R1).Registered, 1);
-    TestEqual(TEXT("instance 1 is out of every sphere: not missing yet"), Diff(R0, R1).MissingInRange, 0);
+    TestEqual(TEXT("2 instances registered"), Diff(R0, R1).Registered, 2);
 
-    // the sensor moves 150 m toward instance 1 (now 50 m away, instance 0 is 110 m behind) and a sync runs
-    F.SensorPos = Base + FVector(15000.f, 0.f, 0.f);
-    F.Sync();
+    Ism->AddInstance(FTransform(FVector(1000.f, 0.f, 0.f)));   // no sync after this
     const FRGLSceneAuditResult D = Diff(R1, F.Audit());
-    TestEqual(TEXT("instance 1 inside the range but never added: missing_in_range +1"), D.MissingInRange, 1);
+    TestEqual(TEXT("the new instance is not registered yet"), D.Registered, 0);
+    TestEqual(TEXT("missing_in_range +1"), D.MissingInRange, 1);
     TestEqual(TEXT("... and it is an ISM instance: missing_ism_in_range +1"), D.MissingIsmInRange, 1);
-    TestEqual(TEXT("... inside both R spheres after the sync: missing_steady +1 (the ISM path)"), D.MissingSteady, 1);
+    TestEqual(TEXT("... inside both R spheres: missing_steady +1 (the ISM path)"), D.MissingSteady, 1);
     TestEqual(TEXT("not a ghost"), D.Ghost, 0);
     return true;
 }
@@ -348,7 +345,7 @@ bool FSceneAuditFormatLineTest::RunTest(const FString& Parameters)
         "mesh_mismatch=0 stale_instance=0 excluded_by_name=0 unextractable=0 non_sm_collision=0 hlod_registered=0 "
         "registered=0 pending=0 movable_registered=0 levels_added=0 since_sync_s=0.00 stream_covered=-1 "
         "parent_stream_radius_m=-1.0 frame_ms=0.00 audit_ms=0.000 missing_ism_sync=0 missing_ism_in_range=0 "
-        "ghost_ism=0 ghost_ism_in_range=0 missing_steady=0 spline_registered=0 cache_stale=0");
+        "ghost_ism=0 ghost_ism_in_range=0 missing_steady=0 spline_registered=0 cache_stale=0 pending_ism=0");
     // Exact (string TestEqual ignores case).
     if (!TestTrue(TEXT("rgl_scene_audit line, exactly"), Line.Equals(Expected, ESearchCase::CaseSensitive)))
     {

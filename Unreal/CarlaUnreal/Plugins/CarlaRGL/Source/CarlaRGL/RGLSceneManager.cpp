@@ -131,11 +131,16 @@ static TAutoConsoleVariable<float> CVarRGLSceneUnloadDistanceFactor(TEXT("rgl.Sc
 static TAutoConsoleVariable<int32> CVarRGLSceneIdleMeshCacheMax(TEXT("rgl.Scene.IdleMeshCacheMax"), 0,
     TEXT("RGL meshes kept resident after their last entity is removed, for a cheap re-entry; least recently idled "
          "is destroyed first. 0 = destroy at once (original behaviour)."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLSceneMaxIsmInstanceChangesPerUpdate(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"), 512,
+    TEXT("Most Static ISM instances added to or removed from the RGL scene per scene Update when a sync re-evaluates "
+         "the registered ISM groups against the sensor spheres (on the Updates without a sync); the rest wait for the "
+         "next Update. 0 = unlimited."), ECVF_Default);
 
 static int32 SceneMaxMeshCreatesPerUpdate() { return FMath::Max(0, CVarRGLSceneMaxMeshCreatesPerUpdate.GetValueOnGameThread()); }
 static float SceneCreateBudgetMs()          { const float V = CVarRGLSceneCreateBudgetMs.GetValueOnGameThread(); return (V > 0.0f) ? V : 0.0f; }
 static float SceneUnloadDistanceFactor()    { const float V = CVarRGLSceneUnloadDistanceFactor.GetValueOnGameThread(); return (V >= 1.0f) ? V : 1.0f; }
 static int32 SceneIdleMeshCacheMax()        { return FMath::Max(0, CVarRGLSceneIdleMeshCacheMax.GetValueOnGameThread()); }
+static int32 SceneMaxIsmInstanceChangesPerUpdate() { return FMath::Max(0, CVarRGLSceneMaxIsmInstanceChangesPerUpdate.GetValueOnGameThread()); }
 
 // ---- Read-only scene audit (rgl_scene_audit line) ----
 static TAutoConsoleVariable<int32> CVarRGLSceneAudit(TEXT("rgl.Scene.Audit"), 0,
@@ -165,8 +170,8 @@ static void EmitSceneLine(const FString& Line)
 }
 
 // Shipping-safe command-line switches for the rgl.Scene.* CVars (same reasoning as the skeletal ones above).
-// Omitted switches keep the CVar defaults: 8 creates, 4 ms, unload factor 1.0, idle cache 0, audit off,
-// hit dump off (every 10th scan once a directory is given).
+// Omitted switches keep the CVar defaults: 8 creates, 4 ms, unload factor 1.0, idle cache 0, 512 ISM instance changes,
+// audit off, hit dump off (every 10th scan once a directory is given).
 static void ApplySceneCommandLineOverrides()
 {
     static bool bApplied = false; if (bApplied) return; bApplied = true;
@@ -187,6 +192,10 @@ static void ApplySceneCommandLineOverrides()
     if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-idle-mesh-cache-max="), I))
     {
         CVarRGLSceneIdleMeshCacheMax->Set(I, ECVF_SetByCommandline);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-max-ism-instance-changes-per-update="), I))
+    {
+        CVarRGLSceneMaxIsmInstanceChangesPerUpdate->Set(I, ECVF_SetByCommandline);
     }
     if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-audit="), I))
     {
@@ -284,6 +293,7 @@ FRGLSceneManager::~FRGLSceneManager()
     MeshRefCounts.Empty();
     IdleMeshLru.Empty();
     PendingCreates.Empty();
+    PendingIsmReevals.Empty();
     FailedMeshRetrySync.Empty();
 }
 
@@ -438,20 +448,41 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         QueueEpisode.Dropped += Drain.Dropped;
     }
 
+    // P3 (D7): the Static ISM groups a sync queued are compared with the sensor spheres on the Updates without a sync,
+    // so the frame of a sync does not also carry the instance changes; at most rgl.Scene.MaxIsmInstanceChangesPerUpdate
+    // changes per Update. Its time is reported as ism_ms / ism_max_ms, not in the next sync's elapsed_ms.
+    if (!bShouldSync)
+    {
+        FIsmReevalStats Ism;
+        DrainIsmReevaluations(SceneMaxIsmInstanceChangesPerUpdate(), Ism);
+        IsmAddedSinceLog += Ism.Added;
+        IsmRemovedSinceLog += Ism.Removed;
+        IsmMsSinceLog += Ism.Ms;
+        IsmMaxMsSinceLog = FMath::Max(IsmMaxMsSinceLog, Ism.Ms);
+    }
+
     if (bShouldSync)
     {
+        // The sync and this Update's create step (the ISM re-evaluation never runs in a sync's Update).
         const double ElapsedMs = (FPlatformTime::Seconds() - StepStartSeconds) * 1000.0;
         EmitSceneLine(FString::Printf(
             TEXT("rgl_scene_sync t=%.3f trigger=%s scanned=%d added_cached=%d queued=%d created=%d removed=%d "
                  "idle_destroyed=%d pending=%d elapsed_ms=%.2f drain_ms=%.2f failed=%d drain_reused=%d dropped=%d "
-                 "range_skipped=%d sensors=%d entities=%d ismc=%d meshes=%d idle=%d dead_ismc=%d"),
+                 "range_skipped=%d sensors=%d entities=%d ismc=%d meshes=%d idle=%d dead_ismc=%d "
+                 "ism_added=%d ism_removed=%d ism_pending=%d ism_empty_skipped=%d ism_ms=%.2f ism_max_ms=%.2f"),
             CurrentSimTime, Trigger, SyncStats.ScannedActors, SyncStats.AddedCached, SyncStats.Queued,
             Drain.Created, SyncStats.Removed, IdleDestroyedSinceLog, PendingCreates.Num(), ElapsedMs, Drain.Ms,
             MeshFailuresSinceLog, Drain.RegisteredCached, Drain.Dropped, SyncStats.RangeSkipped, RegisteredSensors.Num(),
-            EntityMap.Num(), ISMCEntityMap.Num(), MeshCache.Num(), IdleMeshLru.Num(), DeadIsmcSinceLog));
+            EntityMap.Num(), ISMCEntityMap.Num(), MeshCache.Num(), IdleMeshLru.Num(), DeadIsmcSinceLog,
+            IsmAddedSinceLog, IsmRemovedSinceLog, IsmPendingAtSync, IsmEmptySkippedSinceLog, IsmMsSinceLog, IsmMaxMsSinceLog));
         IdleDestroyedSinceLog = 0;
         MeshFailuresSinceLog = 0;
         DeadIsmcSinceLog = 0;
+        IsmAddedSinceLog = 0;
+        IsmRemovedSinceLog = 0;
+        IsmEmptySkippedSinceLog = 0;
+        IsmMsSinceLog = 0.0;
+        IsmMaxMsSinceLog = 0.0;
     }
 
     if (QueueEpisode.bActive && PendingCreates.Num() == 0)
@@ -1189,6 +1220,9 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
     Cached.Mesh = RGLMesh;
     Cached.Asset = StaticMesh;
     FailedMeshRetrySync.Remove(FObjectKey(StaticMesh));
+#if !UE_BUILD_SHIPPING
+    ++MeshUploads_ForTest;
+#endif
 
     return RGLMesh;
 }
@@ -1373,20 +1407,61 @@ float FRGLSceneManager::NearestSensorGapCm(const FVector& CenterCm, float Bounds
     return Best;
 }
 
+// An ISM instance that never gets an entity (the registration rule): a near-zero scale on any axis.
+static bool IsZeroScaleInstance(const FTransform& InstanceTransform)
+{
+    const FVector Scale = InstanceTransform.GetScale3D();
+    return FMath::IsNearlyZero(Scale.X) || FMath::IsNearlyZero(Scale.Y) || FMath::IsNearlyZero(Scale.Z);
+}
+
+// The radius of an ISM instance's culling sphere: the mesh's bounds radius times the instance's largest absolute scale.
+static float InstanceRadiusCm(const UStaticMesh* StaticMesh, const FTransform& InstanceTransform)
+{
+    const FVector Scale = InstanceTransform.GetScale3D();
+    const float MaxScale = FMath::Max(FMath::Max(FMath::Abs(Scale.X), FMath::Abs(Scale.Y)), FMath::Abs(Scale.Z));
+    return static_cast<float>(StaticMesh->GetBounds().SphereRadius * MaxScale);
+}
+
 bool FRGLSceneManager::IsInstanceWithinAnySensor(
-    UInstancedStaticMeshComponent* Component,
-    UStaticMesh* StaticMesh,
+    const UInstancedStaticMeshComponent* Component,
+    const UStaticMesh* StaticMesh,
     const FTransform& InstanceTransform,
-    float ExtraCm) const
+    float ExtraCm,
+    float RadiusScale) const
 {
     if (!IsValid(Component) || !StaticMesh)
     {
         return false;
     }
-    const FVector Scale = InstanceTransform.GetScale3D();
-    const float MaxScale = FMath::Max(FMath::Max(FMath::Abs(Scale.X), FMath::Abs(Scale.Y)), FMath::Abs(Scale.Z));
-    const float BoundsRadiusCm = StaticMesh->GetBounds().SphereRadius * MaxScale;
-    return IsWithinAnySensor(InstanceTransform.GetLocation(), BoundsRadiusCm, ExtraCm);
+    return IsWithinAnySensor(InstanceTransform.GetLocation(), InstanceRadiusCm(StaticMesh, InstanceTransform), ExtraCm, RadiusScale);
+}
+
+bool FRGLSceneManager::CollectInRangeInstances(const UInstancedStaticMeshComponent* Component, const UStaticMesh* StaticMesh,
+                                               TArray<int32>& OutIndices, bool bStopAtFirst) const
+{
+    OutIndices.Reset();
+    if (!IsValid(Component) || !StaticMesh)
+    {
+        return false;
+    }
+    const int32 NumInstances = Component->GetInstanceCount();
+    for (int32 i = 0; i < NumInstances; ++i)
+    {
+        FTransform InstanceTransform;
+        if (!Component->GetInstanceTransform(i, InstanceTransform, /*bWorldSpace=*/true) || IsZeroScaleInstance(InstanceTransform))
+        {
+            continue;
+        }
+        if (IsInstanceWithinAnySensor(Component, StaticMesh, InstanceTransform, 0.0f))
+        {
+            OutIndices.Add(i);
+            if (bStopAtFirst)
+            {
+                break;
+            }
+        }
+    }
+    return OutIndices.Num() > 0;
 }
 
 FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStaticMeshComponent* Component)
@@ -1582,6 +1657,51 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
         return false;
     }
 
+    // Choose the instances before touching the mesh. A Static ISM gets entities for its instances inside R and keeps
+    // the sphere of every instance for the re-evaluation (P3); a Movable ISM gets all of its instances, as before.
+    const int32 NumInstances = Component->GetInstanceCount();
+    const bool bStatic = (Component->Mobility == EComponentMobility::Static);
+    TArray<FSphere3f> Spheres;
+    TArray<int32> Chosen;
+    TArray<FTransform> ChosenTransforms;
+    if (bStatic)
+    {
+        Spheres.SetNumUninitialized(FMath::Max(0, NumInstances));
+    }
+    int32 RangeSkippedCount = 0;
+    for (int32 i = 0; i < NumInstances; ++i)
+    {
+        FTransform InstanceTransform;
+        // Skip instances with zero/near-zero scale (and those without a transform)
+        const bool bUsable = Component->GetInstanceTransform(i, InstanceTransform, /*bWorldSpace=*/true) &&
+                             !IsZeroScaleInstance(InstanceTransform);
+        if (bStatic)
+        {
+            if (!bUsable)
+            {
+                Spheres[i] = FSphere3f(FVector3f::ZeroVector, -1.0f);
+                continue;
+            }
+            Spheres[i] = FSphere3f(FVector3f(InstanceTransform.GetLocation()), InstanceRadiusCm(StaticMesh, InstanceTransform));
+            if (!IsInstanceWithinAnySensor(Component, StaticMesh, InstanceTransform, 0.0f))
+            {
+                ++RangeSkippedCount;
+                continue;
+            }
+        }
+        else if (!bUsable)
+        {
+            continue;
+        }
+        Chosen.Add(i);
+        ChosenTransforms.Add(InstanceTransform);
+    }
+    if (Chosen.Num() == 0)
+    {
+        ++IsmEmptySkippedSinceLog;   // nothing to register: no mesh upload for it
+        return false;
+    }
+
     rgl_mesh_t RGLMesh = UploadMesh(StaticMesh);
     if (!RGLMesh)
     {
@@ -1589,44 +1709,18 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
     }
     AddMeshReference(StaticMesh); // Temporary reference until at least one entity owns the mesh.
 
-    const int32 NumInstances = Component->GetInstanceCount();
-    if (NumInstances <= 0)
-    {
-        ReleaseMeshReference(StaticMesh);
-        return false;
-    }
-
     FISMCEntityGroup Group;
     Group.Component = Component;
     Group.StaticMesh = StaticMesh;
     Group.MeshKey = FObjectKey(StaticMesh);
     Group.OriginalInstanceCount = NumInstances;
-    Group.Entities.Reserve(NumInstances);
+    Group.Entities.Reserve(Chosen.Num());
+    Group.InstanceSpheres = MoveTemp(Spheres);
+    Group.RegisteredMask.Init(false, NumInstances);
 
     int32 SuccessCount = 0;
-    int32 RangeSkippedCount = 0;
-    for (int32 i = 0; i < NumInstances; ++i)
+    for (int32 k = 0; k < Chosen.Num(); ++k)
     {
-        FTransform InstanceTransform;
-        if (!Component->GetInstanceTransform(i, InstanceTransform, /*bWorldSpace=*/true))
-        {
-            continue;
-        }
-
-        // Skip instances with zero/near-zero scale
-        const FVector Scale = InstanceTransform.GetScale3D();
-        if (FMath::IsNearlyZero(Scale.X) || FMath::IsNearlyZero(Scale.Y) || FMath::IsNearlyZero(Scale.Z))
-        {
-            continue;
-        }
-
-        if (Component->Mobility == EComponentMobility::Static &&
-            !IsInstanceWithinAnySensor(Component, StaticMesh, InstanceTransform, 0.0f))
-        {
-            ++RangeSkippedCount;
-            continue;
-        }
-
         rgl_entity_t Entity = nullptr;
         rgl_status_t Status = rgl_entity_create(&Entity, Scene, RGLMesh);
         if (Status != RGL_SUCCESS || !Entity)
@@ -1634,12 +1728,13 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
             continue;
         }
 
-        rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(InstanceTransform);
+        rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(ChosenTransforms[k]);
         RGL_CHECK(rgl_entity_set_transform(Entity, &RGLTransform));
 
         Group.Entities.Add(Entity);
-        Group.InstanceIndices.Add(i);
-        Group.InstanceWorldTransforms.Add(InstanceTransform);
+        Group.InstanceIndices.Add(Chosen[k]);
+        Group.InstanceWorldTransforms.Add(ChosenTransforms[k]);
+        Group.RegisteredMask[Chosen[k]] = true;
         ++SuccessCount;
     }
 
@@ -1834,8 +1929,30 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
             if (UInstancedStaticMeshComponent* ISMComp = Cast<UInstancedStaticMeshComponent>(Comp))
             {
                 CurrentISMComponents.Add(ISMComp, &bAlreadySeen);
-                if (bAlreadySeen || ISMCEntityMap.Contains(ISMComp))
+                if (bAlreadySeen)
                 {
+                    continue;
+                }
+                if (const FISMCEntityGroup* Group = ISMCEntityMap.Find(ISMComp))
+                {
+                    // Registered: a Static group's instances are re-evaluated after the scan (P3). A group whose
+                    // instance count or mesh changed since its registration is rebuilt instead (its instance indices
+                    // may name other instances now, review focus 3): it leaves the scene here and is registered again
+                    // below like a new component.
+                    if (Group->Component.Get() == ISMComp && Group->OriginalInstanceCount == ISMComp->GetInstanceCount() &&
+                        Group->MeshKey == FObjectKey(ISMComp->GetStaticMesh()))
+                    {
+                        continue;
+                    }
+                    UnregisterISMComponent(ISMComp);
+                    ++RemovedISM;
+                }
+                // A Static ISM none of whose instances reaches R is not queued: registering it would upload its mesh
+                // for no entity (P3).
+                if (ISMComp->Mobility == EComponentMobility::Static &&
+                    !CollectInRangeInstances(ISMComp, ISMComp->GetStaticMesh(), IsmScanIndices, /*bStopAtFirst=*/true))
+                {
+                    ++IsmEmptySkippedSinceLog;
                     continue;
                 }
             }
@@ -1928,6 +2045,25 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
     PendingCreates = MoveTemp(NewPending);
     OutStats.Queued = PendingCreates.Num();
 
+    // P3: every registered Static ISM group is compared with the sensor spheres again, nearest first, on the next
+    // Updates without a sync (DrainIsmReevaluations). The queue is rebuilt like PendingCreates: a group the previous
+    // round had not reached yet is queued again with the rest (ism_pending counts them).
+    IsmScanIndices.Reset();
+    IsmPendingAtSync = PendingIsmReevals.Num();
+    PendingIsmReevals.Reset();
+    for (const auto& Pair : ISMCEntityMap)
+    {
+        const UInstancedStaticMeshComponent* Comp = Pair.Value.Component.Get();
+        if (!Comp || Comp->Mobility != EComponentMobility::Static || Pair.Value.InstanceSpheres.Num() == 0)
+        {
+            continue;
+        }
+        FPendingIsmReeval& Reeval = PendingIsmReevals.AddDefaulted_GetRef();
+        Reeval.Component = Pair.Value.Component;
+        Reeval.GapCm = NearestSensorGapCm(Comp->Bounds.Origin, Comp->Bounds.SphereRadius);
+    }
+    PendingIsmReevals.Sort([](const FPendingIsmReeval& A, const FPendingIsmReeval& B) { return A.GapCm < B.GapCm; });
+
     // Skeletal components are tracked in a separate map with their own budget /
     // hysteresis rules; a live kill-switch flip tears the whole skeletal path down.
     if (SkeletalEnabled())
@@ -1995,7 +2131,13 @@ void FRGLSceneManager::DrainPendingCreates(bool bUnlimited, FDrainStats& OutStat
             continue;
         }
 
+        const int32 EmptySkippedBefore = IsmEmptySkippedSinceLog;
         const bool bRegistered = RegisterComponent(Comp);   // dispatches ISMCs to RegisterISMComponent
+        if (!bRegistered && IsmEmptySkippedSinceLog != EmptySkippedBefore)
+        {
+            ++OutStats.Dropped;   // an ISM with no instance in R any more: nothing was uploaded, no budget used
+            continue;
+        }
         if (!bNeedsCreate)
         {
             // An earlier creation/reactivation made the mesh live: additional entities share its GAS.
@@ -2025,14 +2167,139 @@ void FRGLSceneManager::DrainPendingCreates(bool bUnlimited, FDrainStats& OutStat
     OutStats.Ms = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
 }
 
+void FRGLSceneManager::DrainIsmReevaluations(int32 MaxChanges, FIsmReevalStats& OutStats)
+{
+    if (PendingIsmReevals.Num() == 0)
+    {
+        return;
+    }
+
+    const double StartSeconds = FPlatformTime::Seconds();
+    int32 Changes = 0;
+    int32 Done = 0;   // groups finished from the head of the queue
+    for (; Done < PendingIsmReevals.Num(); ++Done)
+    {
+        if (MaxChanges > 0 && Changes >= MaxChanges)
+        {
+            break;   // the cap was reached at a group boundary: the rest waits for the next Update
+        }
+        UInstancedStaticMeshComponent* Comp = PendingIsmReevals[Done].Component.Get();
+        FISMCEntityGroup* Group = Comp ? ISMCEntityMap.Find(Comp) : nullptr;
+        // Gone or unregistered (UpdateTransforms drops the group), or its instance count or mesh changed since the
+        // registration (the next sync rebuilds it; its spheres and indices no longer describe the component).
+        if (!Group || Group->Component.Get() != Comp || !Comp->IsRegistered() ||
+            Group->InstanceSpheres.Num() != Comp->GetInstanceCount() || Group->MeshKey != FObjectKey(Comp->GetStaticMesh()))
+        {
+            continue;
+        }
+        if (!ReevaluateIsmGroup(Comp, *Group, MaxChanges, Changes, OutStats))
+        {
+            break;   // the cap was reached inside this group: it stays at the head
+        }
+        if (Group->Entities.Num() == 0)
+        {
+            UnregisterISMComponent(Comp);   // no instance within the unload radius any more
+        }
+    }
+    if (Done > 0)
+    {
+        PendingIsmReevals.RemoveAt(0, Done, EAllowShrinking::No);
+    }
+    OutStats.Ms += (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+}
+
+bool FRGLSceneManager::ReevaluateIsmGroup(UInstancedStaticMeshComponent* Component, FISMCEntityGroup& Group, int32 MaxChanges,
+                                          int32& InOutChanges, FIsmReevalStats& OutStats)
+{
+    const int32 NumInstances = Group.InstanceSpheres.Num();
+    auto CapReached = [MaxChanges, &InOutChanges]() { return MaxChanges > 0 && InOutChanges >= MaxChanges; };
+
+    // Additions: an instance without an entity whose sphere reaches R (RegisterISMComponent's rule). The group holds
+    // entities, so its mesh is live; the instance's transform is read only now, to place the new entity.
+    rgl_mesh_t Mesh = nullptr;
+    for (int32 i = 0; i < NumInstances; ++i)
+    {
+        const FSphere3f& Sphere = Group.InstanceSpheres[i];
+        if (Sphere.W < 0.0f || Group.RegisteredMask[i] || !IsWithinAnySensor(FVector(Sphere.Center), Sphere.W, 0.0f))
+        {
+            continue;
+        }
+        if (CapReached())
+        {
+            return false;
+        }
+        if (!Mesh)
+        {
+            Mesh = FindCachedMesh(Group.StaticMesh);
+            if (!Mesh)
+            {
+                break;   // defensive: no resident mesh for a group with entities; leave the additions to a rebuild
+            }
+        }
+        FTransform InstanceTransform;
+        if (!Component->GetInstanceTransform(i, InstanceTransform, /*bWorldSpace=*/true) || IsZeroScaleInstance(InstanceTransform))
+        {
+            Group.InstanceSpheres[i].W = -1.0f;   // not registrable any more
+            continue;
+        }
+        rgl_entity_t Entity = nullptr;
+        if (rgl_entity_create(&Entity, Scene, Mesh) != RGL_SUCCESS || !Entity)
+        {
+            continue;   // tried again by the next sync's round
+        }
+        rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(InstanceTransform);
+        RGL_CHECK(rgl_entity_set_transform(Entity, &RGLTransform));
+        Group.Entities.Add(Entity);
+        Group.InstanceIndices.Add(i);
+        Group.InstanceWorldTransforms.Add(InstanceTransform);
+        Group.RegisteredMask[i] = true;
+        ++Group.MeshRefCount;
+        AddMeshReference(Group.StaticMesh);
+        ++InOutChanges;
+        ++OutStats.Added;
+    }
+
+    // Removals: an entity whose instance sphere is beyond R x rgl.Scene.UnloadDistanceFactor + the unload margin (the
+    // rule ShouldKeepRegisteredComponent applies to whole components). Back to front: RemoveAtSwap only moves entries
+    // that were looked at already.
+    const float UnloadScale = SceneUnloadDistanceFactor();
+    for (int32 k = Group.Entities.Num() - 1; k >= 0; --k)
+    {
+        const int32 Index = Group.InstanceIndices[k];
+        const FSphere3f& Sphere = Group.InstanceSpheres[Index];
+        if (Sphere.W >= 0.0f && IsWithinAnySensor(FVector(Sphere.Center), Sphere.W, UnregistrationHysteresisCm, UnloadScale))
+        {
+            continue;
+        }
+        if (CapReached())
+        {
+            return false;
+        }
+        if (Group.Entities[k])
+        {
+            rgl_entity_destroy(Group.Entities[k]);
+        }
+        Group.Entities.RemoveAtSwap(k, EAllowShrinking::No);
+        Group.InstanceIndices.RemoveAtSwap(k, EAllowShrinking::No);
+        Group.InstanceWorldTransforms.RemoveAtSwap(k, EAllowShrinking::No);
+        Group.RegisteredMask[Index] = false;
+        --Group.MeshRefCount;
+        ReleaseMeshReference(Group.StaticMesh);
+        ++InOutChanges;
+        ++OutStats.Removed;
+    }
+    return true;
+}
+
 void FRGLSceneManager::LogSceneConfigIfChanged()
 {
     const int32 MaxCreates = SceneMaxMeshCreatesPerUpdate();
     const float BudgetMs = SceneCreateBudgetMs();
     const float UnloadFactor = SceneUnloadDistanceFactor();
     const int32 IdleMax = SceneIdleMeshCacheMax();
+    const int32 MaxIsmChanges = SceneMaxIsmInstanceChangesPerUpdate();
     if (MaxCreates == LoggedMaxCreates && BudgetMs == LoggedCreateBudgetMs &&
-        UnloadFactor == LoggedUnloadFactor && IdleMax == LoggedIdleMeshCacheMax)
+        UnloadFactor == LoggedUnloadFactor && IdleMax == LoggedIdleMeshCacheMax && MaxIsmChanges == LoggedMaxIsmChanges)
     {
         return;
     }
@@ -2040,10 +2307,12 @@ void FRGLSceneManager::LogSceneConfigIfChanged()
     LoggedCreateBudgetMs = BudgetMs;
     LoggedUnloadFactor = UnloadFactor;
     LoggedIdleMeshCacheMax = IdleMax;
+    LoggedMaxIsmChanges = MaxIsmChanges;
     EmitSceneLine(FString::Printf(
         TEXT("rgl_scene_config t=%.3f max_mesh_creates_per_update=%d create_budget_ms=%.2f unload_distance_factor=%.2f "
-             "idle_mesh_cache_max=%d unload_margin_cm=%.0f sync_interval_s=%.2f"),
-        CurrentSimTime, MaxCreates, BudgetMs, UnloadFactor, IdleMax, UnregistrationHysteresisCm, SyncIntervalSeconds));
+             "idle_mesh_cache_max=%d max_ism_instance_changes_per_update=%d unload_margin_cm=%.0f sync_interval_s=%.2f"),
+        CurrentSimTime, MaxCreates, BudgetMs, UnloadFactor, IdleMax, MaxIsmChanges, UnregistrationHysteresisCm,
+        SyncIntervalSeconds));
 }
 
 // ============================================================================
@@ -2792,6 +3061,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
         return R;
     }
     R.Pending = PendingCreates.Num();
+    R.PendingIsm = PendingIsmReevals.Num();
     R.LevelsAdded = LevelsAddedSinceAudit;
     R.SecondsSinceSync = (LastSyncSimTime >= 0.0) ? FMath::Max(0.0, CurrentSimTime - LastSyncSimTime) : -1.0;
     R.FrameMs = LastFrameMs;
@@ -3148,13 +3418,13 @@ FString FRGLSceneManager::FormatAuditLine(uint64 Frame, double SimTime, const FR
              "hlod_registered=%d registered=%d pending=%d movable_registered=%d levels_added=%d since_sync_s=%.2f "
              "stream_covered=%d parent_stream_radius_m=%.1f frame_ms=%.2f audit_ms=%.3f "
              "missing_ism_sync=%d missing_ism_in_range=%d ghost_ism=%d ghost_ism_in_range=%d missing_steady=%d "
-             "spline_registered=%d cache_stale=%d"),
+             "spline_registered=%d cache_stale=%d pending_ism=%d"),
         static_cast<unsigned long long>(Frame), SimTime, R.Ghost, R.GhostInRange, R.MissingSync, R.MissingInRange,
         R.MeshMismatch, R.StaleInstance, R.ExcludedByName, R.Unextractable, R.NonSmCollision,
         R.HlodRegistered, R.Registered, R.Pending, R.MovableRegistered, R.LevelsAdded, R.SecondsSinceSync,
         R.StreamCovered, static_cast<double>(R.ParentStreamRadiusM), R.FrameMs, R.AuditMs,
         R.MissingIsmSync, R.MissingIsmInRange, R.GhostIsm, R.GhostIsmInRange, R.MissingSteady,
-        R.SplineRegistered, R.CacheStale);
+        R.SplineRegistered, R.CacheStale, R.PendingIsm);
 }
 
 // ============================================================================
@@ -3324,6 +3594,13 @@ void FRGLSceneManager::SyncStaticNow_ForTest(UWorld* World, double Now)
     }
     FDrainStats Drain;
     DrainPendingCreates(/*bUnlimited=*/true, Drain);
+    // The ISM re-evaluation the sync queued, in full (Update() runs it on the following Updates, capped).
+    FIsmReevalStats Ism;
+    DrainIsmReevaluations(/*MaxChanges=*/0, Ism);
+    IsmAddedSinceLog += Ism.Added;
+    IsmRemovedSinceLog += Ism.Removed;
+    IsmMsSinceLog += Ism.Ms;
+    IsmMaxMsSinceLog = FMath::Max(IsmMaxMsSinceLog, Ism.Ms);
     QueueEpisode = FQueueEpisode();
     bInitialized = true;   // the static scene is synced; a later Update() must not run InitializeFromWorld on top
 }
@@ -3337,6 +3614,11 @@ void FRGLSceneManager::Update_ForTest(UWorld* World, double SimTime)
 void FRGLSceneManager::OnLevelAddedToWorld_ForTest(ULevel* Level, UWorld* World)
 {
     OnLevelAddedToWorld(Level, World);
+}
+int32 FRGLSceneManager::GetIsmEntityCount_ForTest(const UInstancedStaticMeshComponent* Comp) const
+{
+    const FISMCEntityGroup* Group = ISMCEntityMap.Find(const_cast<UInstancedStaticMeshComponent*>(Comp));
+    return Group ? Group->Entities.Num() : 0;
 }
 FRGLSceneManager::FSceneCounts FRGLSceneManager::GetSceneCounts_ForTest() const
 {

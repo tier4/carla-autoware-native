@@ -11,6 +11,8 @@
 //     geometry in some sensor's sphere is added (World Partition cells, level streaming)
 //   - Amortizes new-mesh creation across scans (rgl.Scene.* CVars): a budgeted, nearest-first
 //     create queue, an unload radius wider than the load radius, and an LRU of idle meshes
+//   - Re-evaluates the instances of Static instanced static meshes against the sensor spheres after each scan
+//     (on the following Updates, capped per Update), instead of choosing them once at registration
 
 #pragma once
 
@@ -28,6 +30,8 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SkinnedMeshComponent.h"   // EVisibilityBasedAnimTickOption
+#include "Containers/BitArray.h"
+#include "Math/Sphere.h"
 #include <util/ue-header-guard-end.h>
 
 #include "RGLSelfCutout.h"
@@ -72,6 +76,7 @@ struct FRGLSceneAuditResult
                                  // have registered and is still needed, so not explained by sync timing or movement
     int32 SplineRegistered = 0;  // registered entities whose component is a USplineMeshComponent (uploaded undeformed)
     int32 CacheStale = 0;        // MeshCache entries whose asset is gone (the weak asset no longer resolves to the key)
+    int32 PendingIsm = 0;        // Static ISM groups waiting for their instances to be re-evaluated against the sensor spheres
 };
 
 /// Manages synchronization between the UE5 scene and the RGL scene.
@@ -185,6 +190,12 @@ public:
     /// Static syncs run by Update() / Update_ForTest(), and the trigger name of the last one.
     int32 SyncCount_ForTest = 0;
     FString LastSyncTrigger_ForTest;
+    /// Static meshes uploaded to RGL (rgl_mesh_create) by this instance.
+    int32 MeshUploads_ForTest = 0;
+    /// RGL entities of Comp's ISM group (0 = no group).
+    int32 GetIsmEntityCount_ForTest(const UInstancedStaticMeshComponent* Comp) const;
+    /// Levels waiting in the level-added list (P5).
+    int32 GetPendingAddedLevelCount_ForTest() const { return PendingAddedLevels.Num(); }
 
     // Test seams: bypass the per-frame guard and the wall-clock sync timer; set scene time like Update() does.
     void SyncSkeletalNow_ForTest(UWorld* World, double SimTime);
@@ -238,16 +249,26 @@ private:
     /// RadiusScale > 1 is the unload hysteresis (rgl.Scene.UnloadDistanceFactor).
     bool IsWithinAnySensor(const FVector& CenterCm, float BoundsRadiusCm, float ExtraCm, float RadiusScale = 1.0f) const;
     bool IsComponentWithinAnySensor(UStaticMeshComponent* Component, float ExtraCm, float RadiusScale = 1.0f) const;
+    /// An ISM instance's sphere: its location, and the mesh's bounds radius times its largest absolute scale.
     bool IsInstanceWithinAnySensor(
-        UInstancedStaticMeshComponent* Component,
-        UStaticMesh* StaticMesh,
+        const UInstancedStaticMeshComponent* Component,
+        const UStaticMesh* StaticMesh,
         const FTransform& InstanceTransform,
-        float ExtraCm) const;
+        float ExtraCm,
+        float RadiusScale = 1.0f) const;
+
+    /// The instances of Component (not of zero scale) whose sphere reaches some sensor's registration sphere (R),
+    /// in index order; reads the instance transforms. bStopAtFirst: stop at the first one (a yes/no question).
+    /// Returns true when there is at least one.
+    bool CollectInRangeInstances(const UInstancedStaticMeshComponent* Component, const UStaticMesh* StaticMesh,
+                                 TArray<int32>& OutIndices, bool bStopAtFirst = false) const;
 
     /// Remove an RGL entity for a destroyed component.
     void UnregisterComponent(UStaticMeshComponent* Component);
 
-    /// Register all instances of an ISMC as separate RGL entities.
+    /// Register the instances of an ISMC as separate RGL entities: a Static ISM's instances inside R (and the sphere of
+    /// every instance, for the re-evaluation), a Movable ISM's all. With no instance to register: false before any mesh
+    /// upload (counted as ism_empty_skipped).
     bool RegisterISMComponent(UInstancedStaticMeshComponent* Component);
 
     /// Remove all RGL entities for an ISMC.
@@ -288,6 +309,21 @@ private:
     /// Create queued meshes under the rgl.Scene.MaxMeshCreatesPerUpdate / rgl.Scene.CreateBudgetMs budget
     /// (bUnlimited ignores both). Removal is never deferred; only creation is.
     void DrainPendingCreates(bool bUnlimited, FDrainStats& OutStats);
+
+    /// Per-Update counters of one step of the ISM re-evaluation (P3).
+    struct FIsmReevalStats
+    {
+        int32 Added = 0;     // instance entities created
+        int32 Removed = 0;   // instance entities destroyed
+        double Ms = 0.0;     // wall time of the step
+    };
+
+    /// P3: work through PendingIsmReevals (nearest group first). Per group: add the entities of instances that reach R
+    /// and have none, then remove those of instances beyond R x rgl.Scene.UnloadDistanceFactor + the unload margin; the
+    /// group's InstanceSpheres decide, an instance's transform is read only to create its entity. At most MaxChanges
+    /// additions plus removals (0 = unlimited); a group the cap stops inside stays at the head for the next call. A group
+    /// left without entities leaves the scene. Update() calls it on the Updates without a sync (D7).
+    void DrainIsmReevaluations(int32 MaxChanges, FIsmReevalStats& OutStats);
 
     /// Distance from the nearest registered sensor to a bounding sphere's surface (cm). Sort key of the queue.
     float NearestSensorGapCm(const FVector& CenterCm, float BoundsRadiusCm) const;
@@ -442,6 +478,7 @@ private:
     float LoggedCreateBudgetMs = -1.0f;
     float LoggedUnloadFactor = -1.0f;
     int32 LoggedIdleMeshCacheMax = -1;
+    int32 LoggedMaxIsmChanges = -1;
 
     /// Mapping: UStaticMeshComponent* -> RGL entity + weak reference.
     struct FEntityInfo
@@ -467,9 +504,37 @@ private:
         int32 OriginalInstanceCount = 0;  // Instance count at registration time (may differ from Entities.Num() due to skipped instances)
         int32 MeshRefCount = 0;           // Number of live RGL entities referencing StaticMesh.
         TArray<int32> InstanceIndices;            // Per entity (same order as Entities): the ISM instance index
-        TArray<FTransform> InstanceWorldTransforms; // Per entity: the instance's world transform at registration
+        TArray<FTransform> InstanceWorldTransforms; // Per entity: the instance's world transform when its entity was made
+        /// Static groups only: one sphere per instance of the component (index = instance index), taken at registration:
+        /// the instance's location and the mesh's bounds radius times its largest absolute scale. W < 0 = never gets an
+        /// entity (zero scale, or no transform). The re-evaluation (P3) decides with these.
+        TArray<FSphere3f> InstanceSpheres;
+        /// Per instance of the component: true while the instance has an entity in Entities.
+        TBitArray<> RegisteredMask;
     };
     TMap<UInstancedStaticMeshComponent*, FISMCEntityGroup> ISMCEntityMap;
+
+    /// One group's pass of DrainIsmReevaluations. False = the cap was reached with a change left in this group.
+    bool ReevaluateIsmGroup(UInstancedStaticMeshComponent* Component, FISMCEntityGroup& Group, int32 MaxChanges,
+                            int32& InOutChanges, FIsmReevalStats& OutStats);
+
+    /// P3: Static ISM groups waiting to be re-evaluated against the sensor spheres, nearest to any sensor first. Every
+    /// sync queues all registered Static groups again (rebuilt, like PendingCreates); DrainIsmReevaluations empties it.
+    struct FPendingIsmReeval
+    {
+        TWeakObjectPtr<UInstancedStaticMeshComponent> Component;
+        float GapCm = 0.0f;
+    };
+    TArray<FPendingIsmReeval> PendingIsmReevals;
+    TArray<int32> IsmScanIndices;   // CollectInRangeInstances' output in the sync's scan, reused
+
+    /// ISM re-evaluation telemetry since the last rgl_scene_sync line (ism_* keys).
+    int32  IsmAddedSinceLog = 0;
+    int32  IsmRemovedSinceLog = 0;
+    int32  IsmEmptySkippedSinceLog = 0;   // Static ISMs reaching R with no instance inside: not queued, not uploaded
+    double IsmMsSinceLog = 0.0;           // wall time of the re-evaluation steps, summed
+    double IsmMaxMsSinceLog = 0.0;        // the longest single step
+    int32  IsmPendingAtSync = 0;          // groups whose re-evaluation had not finished when the sync started
 
     bool bInitialized = false;
 

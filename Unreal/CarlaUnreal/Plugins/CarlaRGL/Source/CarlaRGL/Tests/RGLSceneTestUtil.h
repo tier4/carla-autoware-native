@@ -2,7 +2,8 @@
 // Shared fixture and helpers of the scene tests (CarlaRGL.SceneAudit.*, CarlaRGL.SceneSync.*) on the game world of
 // EmptyMap. The scene manager of a world is shared by every test, so counts are compared as differences around each
 // step (Diff), and every test works around its own base point (BaseFor), 1 km from the others.
-// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-13, 15, 31-33, 40 (SceneSync; 12 by the two level-sync tests).
+// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-15, 17-19, 31-33, 40, 46, 47 (SceneSync; 12 by the two level-sync
+// tests).
 // Give each new test a slot nobody else uses.
 
 #pragma once
@@ -29,6 +30,7 @@ namespace RGLSceneTestUtil
 {
 inline const TCHAR* const kCube   = TEXT("/Engine/BasicShapes/Cube.Cube");
 inline const TCHAR* const kSphere = TEXT("/Engine/BasicShapes/Sphere.Sphere");
+inline const TCHAR* const kCylinder = TEXT("/Engine/BasicShapes/Cylinder.Cylinder");   // used by one test only (no live mesh)
 inline constexpr float kZ = 30000.f;               // 300 m up: clear of the map
 inline constexpr float kRegistrationCm = 12000.f;  // RegisterSensor's distance: R = 120 m
 inline constexpr float kRangeCm = 10000.f;         // SetSensorAuditRange: 100 m (R - 20 m, as for a 100 m lidar)
@@ -150,6 +152,7 @@ inline FRGLSceneAuditResult Diff(const FRGLSceneAuditResult& Before, const FRGLS
     D.MissingSteady     -= Before.MissingSteady;
     D.SplineRegistered  -= Before.SplineRegistered;
     D.CacheStale        -= Before.CacheStale;
+    D.PendingIsm        -= Before.PendingIsm;
     return D;
 }
 

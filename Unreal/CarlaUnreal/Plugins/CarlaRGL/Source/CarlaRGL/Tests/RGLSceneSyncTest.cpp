@@ -3,8 +3,8 @@
 // Shared fixture and helpers: RGLSceneTestUtil.h (each test works around its own BaseFor slot).
 // First the audit counts the World Partition fixes are judged by: missing_steady (the miss that the last sync
 // should already have registered), the ISM part of the ghosts, and spline mesh components in the scene.
-// Then the fixes: unregistered ISM components leave the scene at once (P1), and adding a level with geometry in some
-// sensor's R syncs (P5).
+// Then the fixes: unregistered ISM components leave the scene at once (P1), adding a level with geometry in some
+// sensor's R syncs (P5), and the instances of Static ISMs are re-evaluated against the sensor spheres (P3).
 
 #include <util/ue-header-guard-begin.h>
 #include "CoreMinimal.h"
@@ -14,6 +14,8 @@
 #include "Engine/StaticMesh.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SplineMeshComponent.h"
+#include "UObject/Package.h"
+#include "UObject/StrongObjectPtr.h"
 #include <util/ue-header-guard-end.h>
 
 #if WITH_DEV_AUTOMATION_TESTS && defined(WITH_RGL)
@@ -329,8 +331,9 @@ bool FSceneSyncLevelSyncMinIntervalTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// Review focus 1 (a teleport or respawn makes WP add many cells in one frame): ten level events before one Update
-// give one sync, and the next Update (past the 0.3 s interval) has nothing left to sync for.
+// Review focus 1 (a teleport or respawn makes WP add many cells in one frame): ten distinct levels added before one
+// Update give one sync, and the next Update (past the 0.3 s interval) has nothing left to sync for. Nine of them are
+// empty transient levels and come first; the last is the persistent level, which holds the cube.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncManyLevelAddsOneSyncTest, "CarlaRGL.SceneSync.ManyLevelAddsOneSync",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncManyLevelAddsOneSyncTest::RunTest(const FString& Parameters)
@@ -342,17 +345,25 @@ bool FSceneSyncManyLevelAddsOneSyncTest::RunTest(const FString& Parameters)
     F.Sync();
     const FRGLSceneAuditResult R0 = F.Audit();
 
+    TArray<TStrongObjectPtr<ULevel>> EmptyLevels;   // kept alive until the test ends (the list holds weak pointers)
+    for (int32 i = 0; i < 9; ++i)
+    {
+        EmptyLevels.Emplace(NewObject<ULevel>(GetTransientPackage(), NAME_None, RF_Transient));
+    }
     TestNotNull(TEXT("cube"), F.Keep(SpawnMeshActor(World, Cube, Base + FVector(6000.f, 0.f, 0.f), EComponentMobility::Static)));
     F.SM.SetSyncInterval(3600.f);
     F.T += 0.5;
     F.Refresh();
     const int32 Syncs0 = F.SM.SyncCount_ForTest;
-    for (int32 i = 0; i < 10; ++i)
+    for (const TStrongObjectPtr<ULevel>& Level : EmptyLevels)
     {
-        F.SM.OnLevelAddedToWorld_ForTest(World->PersistentLevel, World);
+        F.SM.OnLevelAddedToWorld_ForTest(Level.Get(), World);
     }
+    F.SM.OnLevelAddedToWorld_ForTest(World->PersistentLevel, World);
+    TestEqual(TEXT("ten distinct levels wait"), F.SM.GetPendingAddedLevelCount_ForTest(), 10);
     F.SM.Update_ForTest(World, F.T);
     TestEqual(TEXT("ten level events: one sync"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("the list is empty after the sync"), F.SM.GetPendingAddedLevelCount_ForTest(), 0);
     TestEqual(TEXT("the cube is registered"), Diff(R0, F.Audit()).Registered, 1);
     F.T += 0.5;
     F.Refresh();
@@ -381,6 +392,253 @@ bool FSceneSyncIrrelevantLevelAddDoesNotSyncTest::RunTest(const FString& Paramet
     F.Refresh();
     F.SM.Update_ForTest(World, F.T);
     TestEqual(TEXT("no sync"), F.SM.SyncCount_ForTest - Syncs0, 0);
+    return true;
+}
+
+// ============================================================================
+// P3: the instances of a Static ISM are re-evaluated against the sensor spheres
+// ============================================================================
+
+// The instances of a registered Static ISM are not chosen once: instance 0 at 40 m is registered, instance 1 at 200 m
+// is out of R; the sensor moves 150 m (instance 1 is now 50 m away, instance 0 110 m behind, both inside R) and a
+// sync runs: both are registered and no ISM instance is missing.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmReevaluatedTest, "CarlaRGL.SceneSync.IsmReevaluated",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncIsmReevaluatedTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(46);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0040), Base, 9100.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AActor* Owner = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f),
+                                                  { FVector::ZeroVector, FVector(16000.f, 0.f, 0.f) }, Owner);
+    F.Keep(Owner);
+    if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
+    F.Sync();
+    TestEqual(TEXT("only instance 0 registered: +1"), Diff(R0, F.Audit()).Registered, 1);
+
+    F.SensorPos = Base + FVector(15000.f, 0.f, 0.f);
+    F.Sync();
+    const FRGLSceneAuditResult R2 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(46, F.T, R2));
+    const FRGLSceneAuditResult D = Diff(R0, R2);
+    TestEqual(TEXT("both instances registered: +2"), D.Registered, 2);
+    TestEqual(TEXT("the group has 2 entities"), F.SM.GetIsmEntityCount_ForTest(Ism), 2);
+    TestEqual(TEXT("nothing missing in range"), D.MissingInRange, 0);
+    TestEqual(TEXT("no ISM instance missing in range"), D.MissingIsmInRange, 0);
+    TestEqual(TEXT("no ghost"), D.Ghost, 0);
+    return true;
+}
+
+// An instance that the sensor left behind leaves the RGL scene beyond R x rgl.Scene.UnloadDistanceFactor + 20 m:
+// instances at 40 m and 300 m; the sensor moves 250 m, so instance 0 is 210 m away (beyond 140 m) and instance 1 is
+// 50 m away. One entity is left, instance 1's (nothing missing, no ghost).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmInstanceDroppedBeyondUnloadRadiusTest, "CarlaRGL.SceneSync.IsmInstanceDroppedBeyondUnloadRadius",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncIsmInstanceDroppedBeyondUnloadRadiusTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(14);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0041), Base, 9200.0);
+    FFloatCVarGuard UnloadGuard(TEXT("rgl.Scene.UnloadDistanceFactor"));
+    SetFloatCVar(TEXT("rgl.Scene.UnloadDistanceFactor"), 1.0f);   // unload radius = 120 m + 20 m
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AActor* Owner = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f),
+                                                  { FVector::ZeroVector, FVector(26000.f, 0.f, 0.f) }, Owner);
+    F.Keep(Owner);
+    if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
+    F.Sync();
+    TestEqual(TEXT("instance 0 registered"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+
+    F.SensorPos = Base + FVector(25000.f, 0.f, 0.f);
+    F.Sync();
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(14, F.T, R1));
+    const FRGLSceneAuditResult D = Diff(R0, R1);
+    TestEqual(TEXT("one entity left"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+    TestEqual(TEXT("registered +1"), D.Registered, 1);
+    TestEqual(TEXT("instance 1 (50 m) is not missing"), D.MissingInRange, 0);
+    TestEqual(TEXT("no ghost"), D.Ghost, 0);
+    TestEqual(TEXT("no ISM ghost"), D.GhostIsm, 0);
+    return true;
+}
+
+// M5 / D7: an Update that syncs only queues the ISM groups; the instance changes run on the next Update without a
+// sync (cap 0 = unlimited). Instance 0 at 40 m, instance 1 at 200 m; the sensor moves 160 m (a distance sync).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmChangesDeferredOnSyncUpdateTest, "CarlaRGL.SceneSync.IsmChangesDeferredOnSyncUpdate",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncIsmChangesDeferredOnSyncUpdateTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(47);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0042), Base, 9300.0);
+    FCVarGuard CapGuard(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"));
+    SetCVar(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"), 0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AActor* Owner = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f),
+                                                  { FVector::ZeroVector, FVector(16000.f, 0.f, 0.f) }, Owner);
+    F.Keep(Owner);
+    if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
+    F.Sync();
+    TestEqual(TEXT("instance 0 registered"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+
+    F.SensorPos = Base + FVector(16000.f, 0.f, 0.f);
+    F.T += 0.1;
+    F.Refresh();
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    F.SM.Update_ForTest(World, F.T);
+    TestEqual(TEXT("a sync ran"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("trigger=distance"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("distance")));
+    TestEqual(TEXT("the sync Update changes no instance"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+    TestEqual(TEXT("the group waits: pending_ism 1"), Diff(R0, F.Audit()).PendingIsm, 1);
+
+    F.SM.SetSyncInterval(3600.f);   // the next Update does not sync (the fixture puts 1 s back)
+    F.T += 0.1;
+    F.Refresh();
+    F.SM.Update_ForTest(World, F.T);
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(47, F.T, R1));
+    TestEqual(TEXT("no sync"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("the next Update adds instance 1"), F.SM.GetIsmEntityCount_ForTest(Ism), 2);
+    TestEqual(TEXT("pending_ism 0"), Diff(R0, R1).PendingIsm, 0);
+    TestEqual(TEXT("nothing missing in range"), Diff(R0, R1).MissingInRange, 0);
+    return true;
+}
+
+// rgl.Scene.MaxIsmInstanceChangesPerUpdate = 1: three instances come into R (at 200, 205 and 210 m; the sensor moves
+// 160 m) and are added one per Update without a sync; the group waits at the head of the queue until it has nothing
+// left to change, then leaves it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmChangesCappedPerUpdateTest, "CarlaRGL.SceneSync.IsmChangesCappedPerUpdate",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncIsmChangesCappedPerUpdateTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(17);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0043), Base, 9400.0);
+    FCVarGuard CapGuard(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"));
+    SetCVar(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"), 1);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AActor* Owner = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f),
+        { FVector::ZeroVector, FVector(16000.f, 0.f, 0.f), FVector(16500.f, 0.f, 0.f), FVector(17000.f, 0.f, 0.f) }, Owner);
+    F.Keep(Owner);
+    if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
+    F.Sync();
+    TestEqual(TEXT("instance 0 registered"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+
+    F.SensorPos = Base + FVector(16000.f, 0.f, 0.f);
+    auto Step = [&F, World]() { F.T += 0.1; F.Refresh(); F.SM.Update_ForTest(World, F.T); };
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    Step();
+    TestEqual(TEXT("a distance sync ran"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("the sync Update changes no instance"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+
+    F.SM.SetSyncInterval(3600.f);
+    Step();
+    TestEqual(TEXT("1st Update without a sync: one instance added"), F.SM.GetIsmEntityCount_ForTest(Ism), 2);
+    TestEqual(TEXT("1st Update without a sync: the group still waits"), Diff(R0, F.Audit()).PendingIsm, 1);
+    Step();
+    Step();
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(17, F.T, R1));
+    TestEqual(TEXT("3rd Update without a sync: all four registered"), F.SM.GetIsmEntityCount_ForTest(Ism), 4);
+    TestEqual(TEXT("3rd Update without a sync: nothing waits"), Diff(R0, R1).PendingIsm, 0);
+    TestEqual(TEXT("no other sync"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("nothing missing in range"), Diff(R0, R1).MissingInRange, 0);
+    return true;
+}
+
+// A Static ISM whose bounds reach R but none of whose instances do is neither queued nor uploaded: a cylinder ISMC
+// 60 m from the sensor with its two instances 150 m to either side of it (162 m from the sensor). The cylinder is used
+// by no other test, so an upload would show in the counter.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmWithoutInstanceInRangeDoesNotUploadTest, "CarlaRGL.SceneSync.IsmWithoutInstanceInRangeDoesNotUpload",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncIsmWithoutInstanceInRangeDoesNotUploadTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cylinder = LoadMeshReady(kCylinder); if (!TestNotNull(TEXT("cylinder"), Cylinder)) return false;
+    const FVector Base = BaseFor(18);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0044), Base, 9500.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AActor* Owner = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cylinder, Base + FVector(6000.f, 0.f, 0.f),
+                                                  { FVector(0.f, -15000.f, 0.f), FVector(0.f, 15000.f, 0.f) }, Owner);
+    F.Keep(Owner);
+    if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
+    TestTrue(TEXT("the ISMC's bounds reach R"),
+             FVector::Dist(Ism->Bounds.Origin, Base) - Ism->Bounds.SphereRadius < kRegistrationCm);
+    const int32 Uploads0 = F.SM.MeshUploads_ForTest;
+    F.Sync();
+    F.Sync();
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(18, F.T, R1));
+    const FRGLSceneAuditResult D = Diff(R0, R1);
+    TestEqual(TEXT("no mesh uploaded"), F.SM.MeshUploads_ForTest - Uploads0, 0);
+    TestEqual(TEXT("not registered"), D.Registered, 0);
+    TestEqual(TEXT("not queued"), D.Pending, 0);
+    TestEqual(TEXT("no group"), F.SM.GetIsmEntityCount_ForTest(Ism), 0);
+    TestEqual(TEXT("nothing missing in range"), D.MissingInRange, 0);
+    return true;
+}
+
+// Review focus 3: the instance count of a registered ISM changes at run time. The group is rebuilt at the next sync
+// and no old instance index stays in use: 2 instances, then one added 10 m further (3), then instance 0 removed (2).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmInstanceCountChangeReRegistersTest, "CarlaRGL.SceneSync.IsmInstanceCountChangeReRegisters",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncIsmInstanceCountChangeReRegistersTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(19);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0045), Base, 9600.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AActor* Owner = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f),
+                                                  { FVector::ZeroVector, FVector(0.f, 300.f, 0.f) }, Owner);
+    F.Keep(Owner);
+    if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
+    F.Sync();
+    TestEqual(TEXT("2 instances registered"), F.SM.GetIsmEntityCount_ForTest(Ism), 2);
+
+    Ism->AddInstance(FTransform(FVector(1000.f, 0.f, 0.f)));   // 50 m from the sensor
+    F.Sync();
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(191, F.T, R1));
+    const FRGLSceneAuditResult D1 = Diff(R0, R1);
+    TestEqual(TEXT("added: 3 entities"), F.SM.GetIsmEntityCount_ForTest(Ism), 3);
+    TestEqual(TEXT("added: registered +3"), D1.Registered, 3);
+    TestEqual(TEXT("added: no ghost"), D1.Ghost, 0);
+    TestEqual(TEXT("added: nothing missing"), D1.MissingInRange, 0);
+
+    TestTrue(TEXT("instance 0 removed"), Ism->RemoveInstance(0));
+    F.Sync();
+    const FRGLSceneAuditResult R2 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(192, F.T, R2));
+    const FRGLSceneAuditResult D2 = Diff(R0, R2);
+    TestEqual(TEXT("removed: 2 entities"), F.SM.GetIsmEntityCount_ForTest(Ism), 2);
+    TestEqual(TEXT("removed: registered +2"), D2.Registered, 2);
+    TestEqual(TEXT("removed: no ghost"), D2.Ghost, 0);
+    TestEqual(TEXT("removed: no stale instance"), D2.StaleInstance, 0);
+    TestEqual(TEXT("removed: nothing missing"), D2.MissingInRange, 0);
     return true;
 }
 }
