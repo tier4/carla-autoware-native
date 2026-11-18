@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Helper to decide the polylines in scenarios.py (prints coordinates, writes nothing).
+
+  town mode (needs a running server and the carla module):
+    pick_route.py --mode town15 --port 4000 [--load] [--length 6000] [--step 10]
+    pick_route.py --mode town10 ...
+  Walks world.get_map() waypoints forward and keeps stretches where a downward
+  cast_ray at every waypoint has no Terrain hit (no Landscape under the road).
+  Prints the longest such stretch as `route_point x= y= z=` lines plus a Python
+  tuple literal to paste into scenarios.py.
+
+  odaiba mode (no carla needed; the Odaiba map has no OpenDRIVE):
+    pick_route.py --mode odaiba --lanelets 2314486,1501,164
+                  [--osm /mnt/dsk0/wk0/CARLA/autoware_map/Odaiba/lanelet2_map.osm]
+  Prints the lanelet2 centerline (midpoint of the left/right bound) of each
+  lanelet id in the osm's local_x/local_y/ele. These are NOT CARLA coordinates;
+  the controller decides the conversion before pasting into scenarios.py.
+  Source of the ids: the CS Odaiba V2I scenario ego start (lanelet 2314486,
+  s=25.0127) and route waypoints (lanelet 1501 s=30, lanelet 164 s=25) in
+  .../carla_support.x2/scenario/ndt_scenarios/ndt_awsimpcd_teleport_1b_v2i.yml.
+"""
+import argparse
+import sys
+import xml.etree.ElementTree as ET
+
+DEFAULT_OSM = "/mnt/dsk0/wk0/CARLA/autoware_map/Odaiba/lanelet2_map.osm"
+
+
+def odaiba_centerlines(osm_path, lanelet_ids):
+    tree = ET.parse(osm_path)
+    root = tree.getroot()
+    nodes = {}
+    for n in root.findall("node"):
+        tags = {t.get("k"): t.get("v") for t in n.findall("tag")}
+        if "local_x" in tags:
+            nodes[n.get("id")] = (float(tags["local_x"]), float(tags["local_y"]),
+                                  float(tags.get("ele", "0")))
+    ways = {w.get("id"): [nd.get("ref") for nd in w.findall("nd")] for w in root.findall("way")}
+    out = {}
+    wanted = set(lanelet_ids)
+    for r in root.findall("relation"):
+        if r.get("id") not in wanted:
+            continue
+        mem = {m.get("role"): m.get("ref") for m in r.findall("member") if m.get("type") == "way"}
+        left, right = ways.get(mem.get("left"), []), ways.get(mem.get("right"), [])
+        n = min(len(left), len(right))
+        pts = []
+        for i in range(n):
+            a, b = nodes[left[i]], nodes[right[i]]
+            pts.append(tuple((a[k] + b[k]) / 2.0 for k in range(3)))
+        out[r.get("id")] = pts
+    return out
+
+
+def town_mode(args):
+    import carla
+    client = carla.Client("127.0.0.1", args.port)
+    client.set_timeout(120.0)
+    world = client.load_world("Town15" if args.mode == "town15" else "Town10HD_Opt") if args.load \
+        else client.get_world()
+    amap = world.get_map()
+    wps = amap.generate_waypoints(args.step)
+    terrain = carla.CityObjectLabel.Terrain
+
+    def has_terrain(loc):
+        hits = world.cast_ray(carla.Location(loc.x, loc.y, loc.z + 5.0),
+                              carla.Location(loc.x, loc.y, loc.z - 10.0))
+        return any(h.label == terrain for h in hits)
+
+    best = []
+    for start in wps[::max(1, len(wps) // 400)]:
+        cur, run = start, []
+        length = 0.0
+        while length < args.length:
+            if has_terrain(cur.transform.location):
+                break
+            run.append(cur.transform.location)
+            nxt = cur.next(args.step)
+            if not nxt:
+                break
+            cur = nxt[0]
+            length += args.step
+        if len(run) > len(best):
+            best = run
+        if len(best) * args.step >= args.length:
+            break
+    print("pick_route mode=%s points=%d approx_length_m=%.0f" % (args.mode, len(best),
+                                                                  len(best) * args.step))
+    for p in best:
+        print("route_point x=%.2f y=%.2f z=%.2f" % (p.x, p.y, p.z))
+    print("ROUTE = (" + ", ".join("(%.2f, %.2f, %.2f)" % (p.x, p.y, p.z) for p in best) + ")")
+    return 0 if best else 1
+
+
+def main(argv):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", required=True, choices=["town15", "town10", "odaiba"])
+    ap.add_argument("--port", type=int, default=4000)
+    ap.add_argument("--load", action="store_true")
+    ap.add_argument("--length", type=float, default=6000.0)
+    ap.add_argument("--step", type=float, default=10.0)
+    ap.add_argument("--lanelets", default="")
+    ap.add_argument("--osm", default=DEFAULT_OSM)
+    args = ap.parse_args(argv)
+    if args.mode == "odaiba":
+        ids = [s for s in args.lanelets.split(",") if s]
+        cl = odaiba_centerlines(args.osm, ids)
+        for i in ids:
+            pts = cl.get(i, [])
+            print("lanelet id=%s points=%d" % (i, len(pts)))
+            for x, y, z in pts:
+                print("local_point lanelet=%s local_x=%.3f local_y=%.3f ele=%.3f" % (i, x, y, z))
+        return 0 if all(cl.get(i) for i in ids) else 1
+    return town_mode(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
