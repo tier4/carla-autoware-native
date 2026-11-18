@@ -25,6 +25,7 @@
 * Added a **Hybrid Solid-State LiDAR** (`sensor.lidar.hss_lidar`) modelled on the Hesai AT128, with configurable channels, FOV and horizontal resolution.
 * Added the **V2X sensor family**: a CAM service sensor (`sensor.other.v2x`), a custom binary-payload sensor (`sensor.other.v2x_custom`), a configurable path-loss propagation model and owner-less infrastructure (V2I) sensors.
 * Added **`World.get_imu_sensor_gravity`/`set_imu_sensor_gravity`** to read and set the gravity the IMU accelerometer uses.
+* Added the attributes **`raw_sink_library`** and **`raw_sink_config`** to `sensor.other.imu_highprecision`: an external shared library (the C interface in `Sensor/carla_imu_raw_sink.h`, Linux) receives every sample, for example to emit a real IMU's wire protocol, switched independently of the sensor's ROS 2 publish. That publish now also follows `disable_for_ros()`; the sensor used to publish regardless of its stream's ROS flag.
 * Added **`PythonAPI/examples/rig_perf_demo.py`**, a two-pass multi-camera rig benchmark: `measure` records the delivered frame rate of an N-camera rig, `render` replays it into a labelled grid video.
 
 #### Maps and content

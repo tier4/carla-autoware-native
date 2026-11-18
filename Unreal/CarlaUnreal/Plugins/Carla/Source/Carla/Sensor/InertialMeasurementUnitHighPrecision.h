@@ -15,6 +15,8 @@
 #include "carla/geom/Vector3D.h"
 #include <util/enable-ue4-macros.h>
 
+#include "Carla/Sensor/carla_imu_raw_sink.h"
+
 #include "InertialMeasurementUnitHighPrecision.generated.h"
 
 /// Output mode for the high-precision IMU.
@@ -68,6 +70,8 @@ protected:
 
   virtual void EndPlay(EEndPlayReason::Type EndPlayReason) override;
 
+  virtual void BeginDestroy() override;
+
 private:
 
   // ---- Phase 1 frame-rate gyro state (used by the fallback path) ----
@@ -113,4 +117,37 @@ private:
     FVector::OneVector * std::numeric_limits<float>::quiet_NaN()
   };
   float PrevSubDt = std::numeric_limits<float>::quiet_NaN();
+
+  // ---- Raw sink (carla_imu_raw_sink.h), set from blueprint attributes ----
+
+  /// Shared library that receives every sample (e.g. to emit a real IMU's wire
+  /// protocol). Empty = not used. Independent of the ROS 2 publish, which the
+  /// client enables per sensor (enable_for_ros).
+  FString RawSinkLibrary;
+
+  /// Passed to the sink as is; its meaning belongs to the sink.
+  FString RawSinkConfig;
+
+  /// Loading is attempted once (first PostPhysTick), success or not.
+  bool bRawSinkTried = false;
+
+  void *RawSinkDll = nullptr;
+  void *RawSink = nullptr;
+  carla_imu_raw_sink_push_fn RawSinkPush = nullptr;
+  carla_imu_raw_sink_destroy_fn RawSinkDestroy = nullptr;
+
+  /// User data of the sink's log callback (the sensor name); freed after the
+  /// sink is destroyed, since the callback may run on a sink thread until then.
+  FString *RawSinkLogName = nullptr;
+
+  void StartRawSinkOnce();
+  void StopRawSink();
+
+  // ---- ROS 2 publish switch ----
+
+  /// The stream's ROS flag (enable_for_ros / disable_for_ros), read once per
+  /// frame: this sensor publishes per substep itself, past the stream.
+  bool bRos2StreamEnabled = true;
+
+  bool IsStreamEnabledForRos();
 };
