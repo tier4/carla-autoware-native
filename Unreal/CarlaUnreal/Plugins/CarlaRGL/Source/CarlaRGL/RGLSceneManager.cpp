@@ -30,6 +30,13 @@
 #include "EngineUtils.h"
 #include "RHICommandList.h"
 #include "RenderingThread.h"
+#include "Engine/Level.h"
+#include "Components/WorldPartitionStreamingSourceComponent.h"
+#include "WorldPartition/WorldPartition.h"
+#include "WorldPartition/WorldPartitionSubsystem.h"
+#include "WorldPartition/WorldPartitionRuntimeCell.h"
+#include "WorldPartition/WorldPartitionStreamingSource.h"
+#include "WorldPartition/HLOD/HLODActor.h"
 #include <util/ue-header-guard-end.h>
 
 #include <util/disable-ue4-macros.h>
@@ -129,6 +136,21 @@ static float SceneCreateBudgetMs()          { const float V = CVarRGLSceneCreate
 static float SceneUnloadDistanceFactor()    { const float V = CVarRGLSceneUnloadDistanceFactor.GetValueOnGameThread(); return (V >= 1.0f) ? V : 1.0f; }
 static int32 SceneIdleMeshCacheMax()        { return FMath::Max(0, CVarRGLSceneIdleMeshCacheMax.GetValueOnGameThread()); }
 
+// ---- Read-only scene audit (rgl_scene_audit line) ----
+static TAutoConsoleVariable<int32> CVarRGLSceneAudit(TEXT("rgl.Scene.Audit"), 0,
+    TEXT("Read-only scene audit: N >= 1 prints one rgl_scene_audit line every N-th scene Update (once per frame, "
+         "however many RGL sensors tick), comparing the RGL static scene with the loaded world. Each line scans every "
+         "actor, so leave it off (0, the default) when timing frames."), ECVF_Default);
+static int32 SceneAuditEvery() { return FMath::Max(0, CVarRGLSceneAudit.GetValueOnGameThread()); }
+
+// ---- Debug: RGL lidar hits to files (compared offline with ray_cast lidars) ----
+static TAutoConsoleVariable<FString> CVarRGLDebugHitDumpDir(TEXT("rgl.Debug.HitDumpDir"), TEXT(""),
+    TEXT("Debug: directory that receives one <sensor-id>_<frame>.bin per dumped RGL lidar scan (hit points in CARLA "
+         "world coordinates, m). Empty = off. While set, hits are read back from the GPU even when no client listens."),
+    ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLDebugHitDumpEvery(TEXT("rgl.Debug.HitDumpEvery"), 10,
+    TEXT("Debug: with rgl.Debug.HitDumpDir set, dump each sensor's first scan and then every N-th one."), ECVF_Default);
+
 // Scene telemetry: one grep-friendly key=value line. RGLLog::Info is compiled out in Shipping (RGLLog.h),
 // and the packaged Shipping server is what the E2E runs, so Shipping prints the same line to stderr
 // (precedent: the skeletal breadcrumbs below).
@@ -142,7 +164,8 @@ static void EmitSceneLine(const FString& Line)
 }
 
 // Shipping-safe command-line switches for the rgl.Scene.* CVars (same reasoning as the skeletal ones above).
-// Omitted switches keep the CVar defaults: 8 creates, 4 ms, unload factor 1.0, idle cache 0.
+// Omitted switches keep the CVar defaults: 8 creates, 4 ms, unload factor 1.0, idle cache 0, audit off,
+// hit dump off (every 10th scan once a directory is given).
 static void ApplySceneCommandLineOverrides()
 {
     static bool bApplied = false; if (bApplied) return; bApplied = true;
@@ -163,6 +186,19 @@ static void ApplySceneCommandLineOverrides()
     if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-idle-mesh-cache-max="), I))
     {
         CVarRGLSceneIdleMeshCacheMax->Set(I, ECVF_SetByCommandline);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-audit="), I))
+    {
+        CVarRGLSceneAudit->Set(I, ECVF_SetByCommandline);
+    }
+    FString S;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-debug-hit-dump="), S))
+    {
+        CVarRGLDebugHitDumpDir->Set(*S, ECVF_SetByCommandline);
+    }
+    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-debug-hit-dump-every="), I))
+    {
+        CVarRGLDebugHitDumpEvery->Set(I, ECVF_SetByCommandline);
     }
 }
 
@@ -187,6 +223,10 @@ FRGLSceneManager::FRGLSceneManager()
 
 FRGLSceneManager::~FRGLSceneManager()
 {
+    // The audit's LevelAddedToWorld binding points at this instance: drop it before anything else
+    // (OnWorldCleanup -> DestroyInstance during load_world, stale-world cleanup, module shutdown).
+    SetAuditSubscription(nullptr, false);
+
     TeardownSkeletal();
 
     // Destroy ground plane
@@ -305,6 +345,11 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
     }
     LastUpdateFrame = CurrentFrame;
 
+    // Wall time between two Updates that ran (frame_ms of the rgl_scene_audit line).
+    const double UpdateWallSeconds = FPlatformTime::Seconds();
+    LastFrameMs = (LastUpdateWallSeconds > 0.0) ? (UpdateWallSeconds - LastUpdateWallSeconds) * 1000.0 : 0.0;
+    LastUpdateWallSeconds = UpdateWallSeconds;
+
     if (!bInitialized)
     {
         InitializeFromWorld(World);
@@ -346,6 +391,7 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
     {
         SyncWorldComponents(World, SyncStats);
         TimeSinceLastSync = 0.0f;
+        LastSyncSimTime = CurrentSimTime;
         for (auto& Pair : RegisteredSensors)
         {
             Pair.Value.LastSyncPosition = Pair.Value.Position;
@@ -1323,23 +1369,21 @@ bool FRGLSceneManager::IsInstanceWithinAnySensor(
     return IsWithinAnySensor(InstanceTransform.GetLocation(), BoundsRadiusCm, ExtraCm);
 }
 
-bool FRGLSceneManager::ShouldRegisterComponent(UStaticMeshComponent* Component, bool& bOutOfRange) const
+FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStaticMeshComponent* Component)
 {
-    bOutOfRange = false;
-
     if (!IsValid(Component) || !Component->GetStaticMesh() || !Component->IsVisible())
     {
-        return false;
+        return EStaticGate::Reject;
     }
 
     const FTransform WorldTransform = Component->GetComponentTransform();
     const FVector Scale = WorldTransform.GetScale3D();
     if (FMath::IsNearlyZero(Scale.X) || FMath::IsNearlyZero(Scale.Y) || FMath::IsNearlyZero(Scale.Z))
     {
-        return false;
+        return EStaticGate::Reject;
     }
 
-    AActor* Owner = Component->GetOwner();
+    const AActor* Owner = Component->GetOwner();
     const FString OwnerName = Owner ? Owner->GetName() : FString();
     const FString ComponentName = Component->GetName();
     const FString MeshName = Component->GetStaticMesh()->GetName();
@@ -1348,6 +1392,19 @@ bool FRGLSceneManager::ShouldRegisterComponent(UStaticMeshComponent* Component, 
     if (OwnerName.Contains(TEXT("Sky"), ESearchCase::IgnoreCase) ||
         ComponentName.Contains(TEXT("Sky"), ESearchCase::IgnoreCase) ||
         MeshName.Contains(TEXT("Sky"), ESearchCase::IgnoreCase))
+    {
+        return EStaticGate::ExcludedByName;
+    }
+
+    return EStaticGate::Pass;
+}
+
+bool FRGLSceneManager::ShouldRegisterComponent(UStaticMeshComponent* Component, bool& bOutOfRange) const
+{
+    bOutOfRange = false;
+
+    // Validity, mesh, visibility, scale and the "Sky" name rule (shared with AuditScene).
+    if (GateStaticComponent(Component) != EStaticGate::Pass)
     {
         return false;
     }
@@ -1464,6 +1521,7 @@ bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
     Info.Entity = Entity;
     Info.Component = Component;
     Info.StaticMesh = StaticMesh;
+    Info.MeshKey = FObjectKey(StaticMesh);
     Info.bIsStatic = (Component->Mobility == EComponentMobility::Static);
     Info.bTransformInitialized = true;
     Info.LastTransform = WorldTransform;
@@ -1519,6 +1577,7 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
     FISMCEntityGroup Group;
     Group.Component = Component;
     Group.StaticMesh = StaticMesh;
+    Group.MeshKey = FObjectKey(StaticMesh);
     Group.OriginalInstanceCount = NumInstances;
     Group.Entities.Reserve(NumInstances);
 
@@ -1557,6 +1616,8 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
         RGL_CHECK(rgl_entity_set_transform(Entity, &RGLTransform));
 
         Group.Entities.Add(Entity);
+        Group.InstanceIndices.Add(i);
+        Group.InstanceWorldTransforms.Add(InstanceTransform);
         ++SuccessCount;
     }
 
@@ -2561,7 +2622,569 @@ bool FRGLSceneManager::BuildCutoutMesh(USkeletalMeshComponent* Comp, FSkeletalEn
     return true;
 }
 
+// ============================================================================
+// Scene audit (read-only): the RGL static scene against the world UE has loaded
+// ============================================================================
+// Ghost = in RGL but not in the loaded world; missing = in the loaded world, eligible by the registration
+// predicate, but not in RGL. "Loaded world" = registered components of visible levels (bIsVisible &&
+// !bIsBeingRemoved). A level being added (components registered over several frames before bIsVisible) or
+// removed (components unregistered over several frames while bIsVisible stays true) is in transition and its
+// components count neither way. Nothing here changes the scene: no registration, no FindCachedMesh (it destroys
+// idle meshes), no queue edits.
+
+// Helpers are always called qualified (RGLSceneAudit::...): no using-directive, so neither UE's global FSphere
+// nor same-named statics of other files in a unity build can make a name ambiguous.
+namespace RGLSceneAudit
+{
+    struct FAuditSphere
+    {
+        FVector Center = FVector::ZeroVector;
+        double  RadiusCm = 0.0;
+    };
+
+    /// The bounding sphere (center, radius) intersects one of the spheres (same test as IsWithinAnySensor).
+    static bool InAnySphere(const TArray<FAuditSphere>& Spheres, const FVector& CenterCm, double BoundsRadiusCm)
+    {
+        for (const FAuditSphere& S : Spheres)
+        {
+            if (FVector::DistSquared(CenterCm, S.Center) <= FMath::Square(S.RadiusCm + BoundsRadiusCm))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    enum class ELevelState : uint8 { Visible, Hidden, InTransition };
+
+    static ELevelState GetLevelState(const UWorld* World, const ULevel* Level)
+    {
+        if (!Level)
+        {
+            return ELevelState::Visible;   // nothing to judge by: the component's own registration decides
+        }
+        if (Level->bIsBeingRemoved || Level->bIsAssociatingLevel || Level->bIsDisassociatingLevel)
+        {
+            return ELevelState::InTransition;
+        }
+        if (World && (World->GetCurrentLevelPendingVisibility() == Level || World->GetCurrentLevelPendingInvisibility() == Level))
+        {
+            return ELevelState::InTransition;
+        }
+        return Level->bIsVisible ? ELevelState::Visible : ELevelState::Hidden;
+    }
+
+    static double MaxAbsScale(const FTransform& T)
+    {
+        const FVector S = T.GetScale3D();
+        return FMath::Max3(FMath::Abs(S.X), FMath::Abs(S.Y), FMath::Abs(S.Z));
+    }
+
+    static bool IsZeroScale(const FTransform& T)
+    {
+        const FVector S = T.GetScale3D();
+        return FMath::IsNearlyZero(S.X) || FMath::IsNearlyZero(S.Y) || FMath::IsNearlyZero(S.Z);
+    }
+
+    /// Instance moved, turned or rescaled since registration (1 cm / ~0.01 deg / 0.1 % of scale).
+    static bool InstanceChanged(const FTransform& Now, const FTransform& Registered)
+    {
+        return !Now.GetLocation().Equals(Registered.GetLocation(), 1.0) ||
+               !Now.GetRotation().Equals(Registered.GetRotation(), 1.0e-4) ||
+               !Now.GetScale3D().Equals(Registered.GetScale3D(), 1.0e-3);
+    }
+
+    /// Bounding-sphere radius (cm, unscaled) of the asset behind MeshKey; 0 when it is gone.
+    static double MeshRadiusCm(const FObjectKey& MeshKey)
+    {
+        const UStaticMesh* Mesh = Cast<UStaticMesh>(MeshKey.ResolveObjectPtr());
+        return Mesh ? Mesh->GetBounds().SphereRadius : 0.0;
+    }
+
+    static bool IsHlodOwned(const UActorComponent* Component)
+    {
+        const AActor* Owner = Component ? Component->GetOwner() : nullptr;
+        return Owner && Owner->IsA<AWorldPartitionHLOD>();
+    }
+
+    /// Landscape collision/render components, by class name: CarlaRGL does not link the Landscape module.
+    static bool IsLandscapeClass(const UClass* Class)
+    {
+        static const FName HeightfieldCollision(TEXT("LandscapeHeightfieldCollisionComponent"));
+        static const FName LandscapeComponent(TEXT("LandscapeComponent"));
+        for (const UClass* C = Class; C; C = C->GetSuperClass())
+        {
+            if (C->GetFName() == HeightfieldCollision || C->GetFName() == LandscapeComponent)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+void FRGLSceneManager::SetSensorAuditRange(const void* SensorId, float RangeCm)
+{
+    if (FSensorRegistration* S = RegisteredSensors.Find(SensorId))   // RegisterSensor() first
+    {
+        S->AuditRangeCm = RangeCm;
+    }
+}
+
+void FRGLSceneManager::SetSensorAuditParent(const void* SensorId, AActor* RootParent)
+{
+    if (FSensorRegistration* S = RegisteredSensors.Find(SensorId))   // RegisterSensor() first
+    {
+        S->AuditParent = RootParent;
+    }
+}
+
+FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World) const
+{
+    namespace RA = RGLSceneAudit;
+
+    const double StartSeconds = FPlatformTime::Seconds();
+    FRGLSceneAuditResult R;
+    if (!World)
+    {
+        return R;
+    }
+    R.Pending = PendingCreates.Num();
+    R.LevelsAdded = LevelsAddedSinceAudit;
+    R.SecondsSinceSync = (LastSyncSimTime >= 0.0) ? FMath::Max(0.0, CurrentSimTime - LastSyncSimTime) : -1.0;
+    R.FrameMs = LastFrameMs;
+
+    // missing_sync: R around each sensor where the last sync saw it (what the registration rule used).
+    // missing_in_range / ghost_in_range: the range the rays reach, around the current position.
+    TArray<RA::FAuditSphere> SyncSpheres;
+    TArray<RA::FAuditSphere> RangeSpheres;
+    float MinParentRadiusCm = -1.0f;
+    for (const auto& Pair : RegisteredSensors)
+    {
+        const FSensorRegistration& S = Pair.Value;
+        if (S.bLastSyncValid)
+        {
+            SyncSpheres.Add(RA::FAuditSphere{ S.LastSyncPosition, S.RegistrationDistanceCm });
+        }
+        const float RangeCm = (S.AuditRangeCm >= 0.0f)
+            ? S.AuditRangeCm
+            : FMath::Max(0.0f, S.RegistrationDistanceCm - UnregistrationHysteresisCm);
+        RangeSpheres.Add(RA::FAuditSphere{ S.Position, RangeCm });
+
+        // The streaming source CARLA puts on spawned vehicles/walkers (CarlaEpisode.cpp) sits on the root actor.
+        if (const AActor* Parent = S.AuditParent.Get())
+        {
+            if (const UWorldPartitionStreamingSourceComponent* Source =
+                    Parent->FindComponentByClass<UWorldPartitionStreamingSourceComponent>())
+            {
+                float SourceRadiusCm = -1.0f;
+                for (const FStreamingSourceShape& Shape : Source->Shapes)
+                {
+                    if (!Shape.bUseGridLoadingRange)   // a grid-bound shape has no radius of its own
+                    {
+                        SourceRadiusCm = FMath::Max(SourceRadiusCm, Shape.Radius);
+                    }
+                }
+                if (SourceRadiusCm >= 0.0f)
+                {
+                    MinParentRadiusCm = (MinParentRadiusCm < 0.0f) ? SourceRadiusCm : FMath::Min(MinParentRadiusCm, SourceRadiusCm);
+                }
+            }
+        }
+    }
+    R.ParentStreamRadiusM = (MinParentRadiusCm >= 0.0f) ? MinParentRadiusCm * RGLCoord::UE_TO_RGL : -1.0f;
+
+    // World Partition: is every sensor's range sphere streamed in (Activated)? Not covered = not loaded, which
+    // by the definition of "correct" is not a defect, but tells which frames' missing counts can be trusted.
+    if (World && World->GetWorldPartition() != nullptr)
+    {
+        R.StreamCovered = 0;
+        const UWorldPartitionSubsystem* WPSubsystem = World->GetSubsystem<UWorldPartitionSubsystem>();
+        if (WPSubsystem && World->GetWorldPartition()->IsInitialized())
+        {
+            TArray<FWorldPartitionStreamingQuerySource> Queries;
+            for (const RA::FAuditSphere& S : RangeSpheres)
+            {
+                FWorldPartitionStreamingQuerySource& Q = Queries.AddDefaulted_GetRef();
+                Q.Location = S.Center;
+                Q.Radius = static_cast<float>(S.RadiusCm);
+                Q.bUseGridLoadingRange = false;
+                Q.bSpatialQuery = true;
+            }
+            const bool bCovered = (Queries.Num() == 0) ||
+                WPSubsystem->IsStreamingCompleted(EWorldPartitionRuntimeCellState::Activated, Queries, /*bExactState=*/false);
+            R.StreamCovered = bCovered ? 1 : 0;
+        }
+    }
+
+    // ---- RGL side: every registered entity against its component ----
+    for (const auto& Pair : EntityMap)
+    {
+        const FEntityInfo& Info = Pair.Value;
+        ++R.Registered;
+        if (!Info.bIsStatic)
+        {
+            ++R.MovableRegistered;
+        }
+        UStaticMeshComponent* Comp = Info.Component.Get();
+        if (!Comp)
+        {
+            ++R.Ghost;   // destroyed or collected while still in the scene
+            const double RadiusCm = RA::MeshRadiusCm(Info.MeshKey) * RA::MaxAbsScale(Info.LastTransform);
+            R.GhostInRange += RA::InAnySphere(RangeSpheres, Info.LastTransform.GetLocation(), RadiusCm) ? 1 : 0;
+            continue;
+        }
+        const RA::ELevelState LevelState = RA::GetLevelState(World, Comp->GetComponentLevel());
+        if (LevelState == RA::ELevelState::InTransition)
+        {
+            continue;
+        }
+        if (RA::IsHlodOwned(Comp))
+        {
+            ++R.HlodRegistered;
+        }
+        if (!Comp->IsRegistered() || LevelState == RA::ELevelState::Hidden)
+        {
+            ++R.Ghost;
+            R.GhostInRange += RA::InAnySphere(RangeSpheres, Comp->Bounds.Origin, Comp->Bounds.SphereRadius) ? 1 : 0;
+            continue;
+        }
+        if (FObjectKey(Comp->GetStaticMesh()) != Info.MeshKey)
+        {
+            ++R.MeshMismatch;
+        }
+    }
+
+    for (const auto& Pair : ISMCEntityMap)
+    {
+        const FISMCEntityGroup& Group = Pair.Value;
+        const int32 NumEntities = Group.Entities.Num();
+        R.Registered += NumEntities;
+        const double MeshRadius = RA::MeshRadiusCm(Group.MeshKey);
+        auto CountGhostInstance = [&](int32 EntityIndex)
+        {
+            ++R.Ghost;
+            if (Group.InstanceWorldTransforms.IsValidIndex(EntityIndex))
+            {
+                const FTransform& T = Group.InstanceWorldTransforms[EntityIndex];
+                R.GhostInRange += RA::InAnySphere(RangeSpheres, T.GetLocation(), MeshRadius * RA::MaxAbsScale(T)) ? 1 : 0;
+            }
+        };
+
+        UInstancedStaticMeshComponent* Comp = Group.Component.Get();
+        if (!Comp)
+        {
+            for (int32 k = 0; k < NumEntities; ++k)
+            {
+                CountGhostInstance(k);
+            }
+            continue;
+        }
+        if (Comp->Mobility != EComponentMobility::Static)
+        {
+            R.MovableRegistered += NumEntities;
+        }
+        const RA::ELevelState LevelState = RA::GetLevelState(World, Comp->GetComponentLevel());
+        if (LevelState == RA::ELevelState::InTransition)
+        {
+            continue;
+        }
+        if (RA::IsHlodOwned(Comp))
+        {
+            R.HlodRegistered += NumEntities;
+        }
+        if (!Comp->IsRegistered() || LevelState == RA::ELevelState::Hidden)
+        {
+            for (int32 k = 0; k < NumEntities; ++k)
+            {
+                CountGhostInstance(k);
+            }
+            continue;
+        }
+        if (FObjectKey(Comp->GetStaticMesh()) != Group.MeshKey)
+        {
+            R.MeshMismatch += NumEntities;
+        }
+        const int32 NumInstances = Comp->GetInstanceCount();
+        for (int32 k = 0; k < NumEntities; ++k)
+        {
+            const int32 Index = Group.InstanceIndices.IsValidIndex(k) ? Group.InstanceIndices[k] : INDEX_NONE;
+            if (Index < 0 || Index >= NumInstances)
+            {
+                CountGhostInstance(k);   // the instance was removed
+                continue;
+            }
+            FTransform Now;
+            if (Comp->GetInstanceTransform(Index, Now, /*bWorldSpace=*/true) &&
+                Group.InstanceWorldTransforms.IsValidIndex(k) &&
+                RA::InstanceChanged(Now, Group.InstanceWorldTransforms[k]))
+            {
+                ++R.StaleInstance;
+            }
+        }
+    }
+
+    // ---- World side: every registered primitive of a visible level ----
+    // A static mesh component is judged with the registration predicate's distance-independent part
+    // (GateStaticComponent) and the two spheres above; ISMs per instance, like RegisterISMComponent.
+    auto AuditStaticComponent = [&](UStaticMeshComponent* SMC)
+    {
+        const EStaticGate Gate = GateStaticComponent(SMC);
+        if (Gate == EStaticGate::Reject)
+        {
+            return;   // no mesh, hidden, zero scale: not a candidate (and not a defect)
+        }
+        const FBoxSphereBounds& Bounds = SMC->Bounds;
+        const bool bCompInSync = RA::InAnySphere(SyncSpheres, Bounds.Origin, Bounds.SphereRadius);
+        const bool bCompInRange = RA::InAnySphere(RangeSpheres, Bounds.Origin, Bounds.SphereRadius);
+        if (!bCompInSync && !bCompInRange)
+        {
+            return;
+        }
+        UStaticMesh* Mesh = SMC->GetStaticMesh();
+
+        UInstancedStaticMeshComponent* ISM = Cast<UInstancedStaticMeshComponent>(SMC);
+        if (!ISM)
+        {
+            if (Gate == EStaticGate::ExcludedByName)
+            {
+                ++R.ExcludedByName;
+                return;
+            }
+            const FEntityInfo* Info = EntityMap.Find(SMC);
+            if (Info && Info->Component.Get() == SMC)
+            {
+                return;   // registered (a changed mesh is counted on the RGL side)
+            }
+            if (IsMeshRetryDeferred(Mesh))
+            {
+                ++R.Unextractable;
+                return;
+            }
+            R.MissingSync += bCompInSync ? 1 : 0;
+            R.MissingInRange += bCompInRange ? 1 : 0;
+            return;
+        }
+
+        const int32 NumInstances = ISM->GetInstanceCount();
+        if (NumInstances <= 0)
+        {
+            return;
+        }
+        const FISMCEntityGroup* Group = ISMCEntityMap.Find(ISM);
+        if (Group && Group->Component.Get() != ISM)
+        {
+            Group = nullptr;
+        }
+        TBitArray<> RegisteredInstances(false, NumInstances);
+        if (Group)
+        {
+            for (const int32 Index : Group->InstanceIndices)
+            {
+                if (Index >= 0 && Index < NumInstances)
+                {
+                    RegisteredInstances[Index] = true;
+                }
+            }
+        }
+        const bool bDeferred = !Group && IsMeshRetryDeferred(Mesh);
+        const double MeshRadius = Mesh->GetBounds().SphereRadius;
+        for (int32 i = 0; i < NumInstances; ++i)
+        {
+            FTransform T;
+            if (!ISM->GetInstanceTransform(i, T, /*bWorldSpace=*/true) || RA::IsZeroScale(T))
+            {
+                continue;
+            }
+            const double RadiusCm = MeshRadius * RA::MaxAbsScale(T);
+            const bool bInSync = RA::InAnySphere(SyncSpheres, T.GetLocation(), RadiusCm);
+            const bool bInRange = RA::InAnySphere(RangeSpheres, T.GetLocation(), RadiusCm);
+            if (!bInSync && !bInRange)
+            {
+                continue;
+            }
+            if (Gate == EStaticGate::ExcludedByName)
+            {
+                ++R.ExcludedByName;
+                continue;
+            }
+            if (RegisteredInstances[i])
+            {
+                continue;
+            }
+            if (bDeferred)
+            {
+                ++R.Unextractable;
+                continue;
+            }
+            R.MissingSync += bInSync ? 1 : 0;
+            R.MissingInRange += bInRange ? 1 : 0;
+        }
+    };
+
+    TArray<UPrimitiveComponent*> Primitives;
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* Actor = *It;
+        if (!IsValid(Actor) || RA::GetLevelState(World, Actor->GetLevel()) != RA::ELevelState::Visible)
+        {
+            continue;
+        }
+        Primitives.Reset();
+        Actor->GetComponents(Primitives);
+        for (UPrimitiveComponent* Prim : Primitives)
+        {
+            if (!IsValid(Prim) || !Prim->IsRegistered())
+            {
+                continue;   // not part of the loaded world
+            }
+            if (UStaticMeshComponent* SMC = Cast<UStaticMeshComponent>(Prim))
+            {
+                AuditStaticComponent(SMC);
+                continue;
+            }
+            // Geometry RGL never registers but ray_cast lidars hit (their trace channel, RayCastSemanticLidar.cpp).
+            if (Prim->IsA<USkeletalMeshComponent>() || RA::IsLandscapeClass(Prim->GetClass()))
+            {
+                continue;
+            }
+            if (!Prim->IsQueryCollisionEnabled() || Prim->GetCollisionResponseToChannel(ECC_GameTraceChannel2) != ECR_Block)
+            {
+                continue;
+            }
+            const FBoxSphereBounds& Bounds = Prim->Bounds;
+            if (RA::InAnySphere(SyncSpheres, Bounds.Origin, Bounds.SphereRadius) ||
+                RA::InAnySphere(RangeSpheres, Bounds.Origin, Bounds.SphereRadius))
+            {
+                ++R.NonSmCollision;
+            }
+        }
+    }
+
+    R.AuditMs = (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+    return R;
+}
+
+FString FRGLSceneManager::FormatAuditLine(uint64 Frame, double SimTime, const FRGLSceneAuditResult& R)
+{
+    return FString::Printf(
+        TEXT("rgl_scene_audit frame=%llu sim_t=%.3f ghost=%d ghost_in_range=%d missing_sync=%d missing_in_range=%d "
+             "mesh_mismatch=%d stale_instance=%d excluded_by_name=%d unextractable=%d non_sm_collision=%d "
+             "hlod_registered=%d registered=%d pending=%d movable_registered=%d levels_added=%d since_sync_s=%.2f "
+             "stream_covered=%d parent_stream_radius_m=%.1f frame_ms=%.2f audit_ms=%.3f"),
+        static_cast<unsigned long long>(Frame), SimTime, R.Ghost, R.GhostInRange, R.MissingSync, R.MissingInRange,
+        R.MeshMismatch, R.StaleInstance, R.ExcludedByName, R.Unextractable, R.NonSmCollision,
+        R.HlodRegistered, R.Registered, R.Pending, R.MovableRegistered, R.LevelsAdded, R.SecondsSinceSync,
+        R.StreamCovered, static_cast<double>(R.ParentStreamRadiusM), R.FrameMs, R.AuditMs);
+}
+
+// ============================================================================
+// Scene audit line (rgl.Scene.Audit / -rgl-scene-audit=)
+// ============================================================================
+
+void FRGLSceneManager::MaybeEmitAudit(UWorld* World, double SimTime, uint64 Frame)
+{
+    const int32 Every = SceneAuditEvery();
+    if (Every <= 0)
+    {
+        SetAuditSubscription(nullptr, false);
+        return;
+    }
+    if (!World)
+    {
+        return;
+    }
+    // Every RGL sensor calls this after its Update; Update itself runs once per frame.
+    if (bAuditFrameValid && Frame == LastAuditFrame)
+    {
+        return;
+    }
+    LastAuditFrame = Frame;
+    bAuditFrameValid = true;
+    SetAuditSubscription(World, true);
+
+    ++AuditUpdateCount;
+    if (AuditUpdateCount % static_cast<uint64>(Every) != 0)
+    {
+        return;
+    }
+
+    const FRGLSceneAuditResult Result = AuditScene(World);
+    LevelsAddedSinceAudit = 0;
+    EmitSceneLine(FormatAuditLine(Frame, (SimTime >= 0.0) ? SimTime : CurrentSimTime, Result));
 #if !UE_BUILD_SHIPPING
+    ++AuditLinesEmitted_ForTest;
+#endif
+}
+
+void FRGLSceneManager::SetAuditSubscription(UWorld* World, bool bOn)
+{
+    if (bOn && !LevelAddedHandle.IsValid())
+    {
+        AuditWorldKey = FObjectKey(World);
+        LevelsAddedSinceAudit = 0;
+        LevelAddedHandle = FWorldDelegates::LevelAddedToWorld.AddRaw(this, &FRGLSceneManager::OnLevelAddedToWorld);
+    }
+    else if (!bOn && LevelAddedHandle.IsValid())
+    {
+        FWorldDelegates::LevelAddedToWorld.Remove(LevelAddedHandle);
+        LevelAddedHandle.Reset();
+        LevelsAddedSinceAudit = 0;
+    }
+}
+
+void FRGLSceneManager::OnLevelAddedToWorld(ULevel* /*Level*/, UWorld* World)
+{
+    if (FObjectKey(World) == AuditWorldKey)
+    {
+        ++LevelsAddedSinceAudit;
+    }
+}
+
+// ============================================================================
+// Debug hit dump settings (rgl.Debug.HitDump*; the dump itself is in RGLBackendImpl.cpp)
+// ============================================================================
+
+FString FRGLSceneManager::GetHitDumpDir()
+{
+    ApplySceneCommandLineOverrides();   // idempotent; the switches normally land with the first instance
+    return CVarRGLDebugHitDumpDir.GetValueOnGameThread();
+}
+
+int32 FRGLSceneManager::GetHitDumpEvery()
+{
+    ApplySceneCommandLineOverrides();
+    return FMath::Max(1, CVarRGLDebugHitDumpEvery.GetValueOnGameThread());
+}
+
+#if !UE_BUILD_SHIPPING
+void FRGLSceneManager::SyncStaticNow_ForTest(UWorld* World, double Now)
+{
+    // What Update() does on a sync step, without the per-frame guard, the triggers or the create budget.
+    CurrentSimTime = Now;
+    FSceneSyncStats SyncStats;
+    SyncWorldComponents(World, SyncStats);
+    TimeSinceLastSync = 0.0f;
+    LastSyncSimTime = Now;
+    for (auto& Pair : RegisteredSensors)
+    {
+        Pair.Value.LastSyncPosition = Pair.Value.Position;
+        Pair.Value.bLastSyncValid = true;
+    }
+    FDrainStats Drain;
+    DrainPendingCreates(/*bUnlimited=*/true, Drain);
+    QueueEpisode = FQueueEpisode();
+    bInitialized = true;   // the static scene is synced; a later Update() must not run InitializeFromWorld on top
+}
+FRGLSceneManager::FSceneCounts FRGLSceneManager::GetSceneCounts_ForTest() const
+{
+    FSceneCounts C;
+    C.Entities = EntityMap.Num();
+    C.IsmcGroups = ISMCEntityMap.Num();
+    C.CachedMeshes = MeshCache.Num();
+    C.IdleMeshes = IdleMeshLru.Num();
+    return C;
+}
 void FRGLSceneManager::SyncSkeletalNow_ForTest(UWorld* World, double SimTime)
 {
     CurrentSimTime = SimTime;

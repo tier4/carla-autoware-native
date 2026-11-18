@@ -26,6 +26,20 @@
 
 #include <cmath>
 
+/// Root of Sensor's attach chain (the actor carrying CARLA's World Partition streaming source when the sensor
+/// rides on a spawned vehicle), or nullptr when the sensor is not attached.
+static AActor* RglLidarAttachRootActor(const AActor* Sensor)
+{
+    AActor* Root = nullptr;
+    int32 Depth = 0;
+    for (AActor* Parent = Sensor ? Sensor->GetAttachParentActor() : nullptr; Parent && Depth < 32;
+         Parent = Parent->GetAttachParentActor(), ++Depth)
+    {
+        Root = Parent;
+    }
+    return Root;
+}
+
 // ============================================================================
 // Constructor / Destructor
 // ============================================================================
@@ -257,6 +271,9 @@ void ARGLLidar::SimulateLidar(float DeltaSeconds)
     {
         UpdateRglSelfCutoutVehicle(*Backend);
     }
+
+    // Scene audit (rgl.Scene.Audit): which actor this sensor rides on. Cheap; the attach chain can change any tick.
+    Backend->SetAuditParent(RGLSessionHandle, RglLidarAttachRootActor(this));
 
     FRGLTickResult Result = Backend->Tick(
         RGLSessionHandle,

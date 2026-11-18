@@ -33,9 +33,36 @@
 
 // Forward declarations
 class UWorld;
+class ULevel;
 class AActor;
 class USkeletalMeshComponent;
 class USkeletalMesh;
+
+/// Result of FRGLSceneManager::AuditScene: how the RGL static scene differs from the world UE has loaded.
+/// Counts are RGL entities (an ISM instance is one entity) unless noted. A "visible level" is
+/// bIsVisible && !bIsBeingRemoved; components of a level being added or removed are counted nowhere.
+struct FRGLSceneAuditResult
+{
+    int32 Ghost = 0;             // registered, but the component is gone, unregistered, its level hidden, or the ISM instance removed
+    int32 GhostInRange = 0;      // ghosts inside some sensor's range sphere (current position)
+    int32 MissingSync = 0;       // eligible, inside R around a sensor's position at the last sync, not registered
+    int32 MissingInRange = 0;    // eligible, inside some sensor's range around its current position, not registered
+    int32 MeshMismatch = 0;      // the component's static mesh is not the asset the entity was built from
+    int32 StaleInstance = 0;     // ISM instance whose world transform changed since registration
+    int32 ExcludedByName = 0;    // left out by the "Sky" name rule (inside the spheres above)
+    int32 Unextractable = 0;     // left out while a failed extraction/upload waits for its retry (inside the spheres)
+    int32 NonSmCollision = 0;    // components (not static mesh, skeletal mesh or Landscape) that block ray_cast's channel, inside the spheres
+    int32 HlodRegistered = 0;    // registered entities owned by a World Partition HLOD actor
+    int32 Registered = 0;        // static entities in the RGL scene
+    int32 Pending = 0;           // components waiting in the create queue
+    int32 MovableRegistered = 0; // registered entities whose component is not Static (always registered, any distance)
+    int32 LevelsAdded = 0;       // FWorldDelegates::LevelAddedToWorld events since the previous audit line
+    double SecondsSinceSync = 0.0; // simulation seconds since the last static sync (-1 = none yet)
+    double FrameMs = 0.0;        // wall time between the last two scene Updates
+    double AuditMs = 0.0;        // wall time of this audit
+    int32 StreamCovered = -1;    // -1 = not a World Partition world; 1 = every sensor's range sphere is streamed in (Activated)
+    float ParentStreamRadiusM = -1.0f; // smallest streaming-source radius on the root actor a sensor is attached to; -1 = none
+};
 
 /// Manages synchronization between the UE5 scene and the RGL scene.
 /// Call Update() each tick before running the RGL raytrace graph.
@@ -97,7 +124,49 @@ public:
 
     /// Remove a sensor when its session is destroyed (defined in .cpp; tears skeletal state down when none remain).
     void UnregisterSensor(const void* SensorId);
+
+    // ---- Scene audit (read-only) ----
+
+    /// Compare the RGL static scene with the loaded world (see FRGLSceneAuditResult). Changes nothing: no
+    /// registration, no cache maintenance (FindCachedMesh is not called). Scans every actor of World.
+    FRGLSceneAuditResult AuditScene(UWorld* World) const;
+
+    /// Range (cm) the sensor's rays reach, for missing_in_range / ghost_in_range. Call after RegisterSensor().
+    /// Never set (or negative): RegistrationDistanceCm minus the 20 m unload margin.
+    void SetSensorAuditRange(const void* SensorId, float RangeCm);
+
+    /// Root actor of the sensor's attach chain (nullptr = not attached), for parent_stream_radius_m.
+    /// Call after RegisterSensor().
+    void SetSensorAuditParent(const void* SensorId, AActor* RootParent);
+
+    /// The rgl_scene_audit line (one grep-friendly key=value line).
+    static FString FormatAuditLine(uint64 Frame, double SimTime, const FRGLSceneAuditResult& R);
+
+    /// rgl.Scene.Audit = N >= 1 (Shipping: -rgl-scene-audit=N): print one rgl_scene_audit line every N-th
+    /// call with a new Frame. Call after Update() and before the raytrace; further calls with the same Frame
+    /// (other sensors ticking in that frame) do nothing. 0 = off (default).
+    void MaybeEmitAudit(UWorld* World, double SimTime, uint64 Frame);
+
+    /// Debug hit dump (rgl.Debug.HitDumpDir / -rgl-debug-hit-dump=, rgl.Debug.HitDumpEvery /
+    /// -rgl-debug-hit-dump-every=): the directory (empty = off) and the scan interval (>= 1).
+    static FString GetHitDumpDir();
+    static int32 GetHitDumpEvery();
+
 #if !UE_BUILD_SHIPPING
+    struct FSceneCounts
+    {
+        int32 Entities = 0;
+        int32 IsmcGroups = 0;
+        int32 CachedMeshes = 0;
+        int32 IdleMeshes = 0;
+    };
+    /// One static sync now plus an unlimited drain of the create queue; sensors' LastSyncPosition and
+    /// bLastSyncValid are updated as Update() does after a sync. Sets the scene time like Update().
+    void SyncStaticNow_ForTest(UWorld* World, double Now);
+    FSceneCounts GetSceneCounts_ForTest() const;
+    /// rgl_scene_audit lines printed by this instance.
+    int32 AuditLinesEmitted_ForTest = 0;
+
     // Test seams: bypass the per-frame guard and the wall-clock sync timer; set scene time like Update() does.
     void SyncSkeletalNow_ForTest(UWorld* World, double SimTime);
     void UpdateSkeletalPosesNow_ForTest(double SimTime);
@@ -132,6 +201,11 @@ private:
 
     /// Filter components before uploading them to RGL.
     bool ShouldRegisterComponent(UStaticMeshComponent* Component, bool& bOutOfRange) const;
+
+    /// The distance-independent part of ShouldRegisterComponent (validity, mesh, visibility, scale, the
+    /// "Sky" name rule), shared with AuditScene so the audit judges with the same predicate.
+    enum class EStaticGate : uint8 { Reject, ExcludedByName, Pass };
+    static EStaticGate GateStaticComponent(const UStaticMeshComponent* Component);
 
     /// Check whether an already registered component should stay in the active RGL scene.
     bool ShouldKeepRegisteredComponent(UStaticMeshComponent* Component) const;
@@ -348,6 +422,7 @@ private:
         rgl_entity_t Entity = nullptr;
         TWeakObjectPtr<UStaticMeshComponent> Component;
         UStaticMesh* StaticMesh = nullptr;     // Mesh referenced by Entity; used for cache ref-counting.
+        FObjectKey MeshKey;                    // Identity of the asset Entity was built from (GC-generation aware).
         bool bIsStatic = false;            // True if Mobility == Static (never moves)
         bool bTransformInitialized = false; // True after first transform set
         bool bInRange = true;              // Distance culling state
@@ -361,8 +436,11 @@ private:
         TArray<rgl_entity_t> Entities;
         TWeakObjectPtr<UInstancedStaticMeshComponent> Component;
         UStaticMesh* StaticMesh = nullptr; // Mesh referenced by Entities; used for cache ref-counting.
+        FObjectKey MeshKey;                // Identity of the asset Entities were built from (GC-generation aware).
         int32 OriginalInstanceCount = 0;  // Instance count at registration time (may differ from Entities.Num() due to skipped instances)
         int32 MeshRefCount = 0;           // Number of live RGL entities referencing StaticMesh.
+        TArray<int32> InstanceIndices;            // Per entity (same order as Entities): the ISM instance index
+        TArray<FTransform> InstanceWorldTransforms; // Per entity: the instance's world transform at registration
     };
     TMap<UInstancedStaticMeshComponent*, FISMCEntityGroup> ISMCEntityMap;
 
@@ -381,6 +459,9 @@ private:
         FVector LastSyncPosition = FVector::ZeroVector;
         bool    bLastSyncValid = false;
         double  LastUpdateTime = 0.0;              // sim time of last RegisterSensor()
+        // Scene audit (SetSensorAuditRange / SetSensorAuditParent).
+        float   AuditRangeCm = -1.0f;              // < 0 = RegistrationDistanceCm - UnregistrationHysteresisCm
+        TWeakObjectPtr<AActor> AuditParent;        // root of the sensor's attach chain; null = not attached
         // Self cutout (SetSensorSelfCutout); CutoutRadiusCm <= 0 = off.
         TWeakObjectPtr<AActor> CutoutVehicle;
         float      CutoutRadiusCm = 0.0f;
@@ -409,6 +490,21 @@ private:
     /// Time-based periodic sync interval (simulation seconds).
     float SyncIntervalSeconds = 1.0f;
     float TimeSinceLastSync = 0.0f;
+
+    // ---- Scene audit bookkeeping ----
+    double LastSyncSimTime = -1.0;        // CurrentSimTime of the last static sync; -1 = none yet
+    double LastUpdateWallSeconds = 0.0;   // FPlatformTime::Seconds() of the last Update that ran
+    double LastFrameMs = 0.0;             // wall time between the last two Updates that ran
+    int32  LevelsAddedSinceAudit = 0;     // LevelAddedToWorld events for AuditWorldKey since the last audit line
+
+    // rgl.Scene.Audit line emission (MaybeEmitAudit)
+    uint64 LastAuditFrame = 0;
+    bool   bAuditFrameValid = false;
+    uint64 AuditUpdateCount = 0;          // distinct frames seen while the audit is on
+    FDelegateHandle LevelAddedHandle;     // FWorldDelegates::LevelAddedToWorld, bound only while the audit is on
+    FObjectKey AuditWorldKey;             // the world whose LevelAddedToWorld events are counted
+    void SetAuditSubscription(UWorld* World, bool bOn);
+    void OnLevelAddedToWorld(ULevel* Level, UWorld* World);
 
     // ---- Static singleton storage ----
     static TMap<UWorld*, FRGLSceneManager*> Instances;

@@ -49,6 +49,10 @@ public:
     /// Vehicle may be nullptr (sensor not attached to a vehicle yet). RadiusCm <= 0 = off.
     /// The sensor calls it again whenever the vehicle it is attached to changes.
     virtual void SetSelfCutout(FRGLSessionHandle /*Handle*/, AActor* /*Vehicle*/, float /*RadiusCm*/) {}
+    /// Scene audit (rgl.Scene.Audit): the actor at the root of this sensor's attach chain (nullptr = not
+    /// attached). Its World Partition streaming source, if any, is reported as parent_stream_radius_m.
+    /// The sensor calls it every tick before Tick().
+    virtual void SetAuditParent(FRGLSessionHandle /*Handle*/, AActor* /*RootParent*/) {}
 };
 
 class CARLA_API FRGLBackendRegistry
