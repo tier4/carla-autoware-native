@@ -234,22 +234,26 @@ bool FSceneAuditStaleInstanceTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// The "Sky" name rule drops a building called Skyscraper_01: counted as excluded, not as missing.
+// The name rule leaves out a sky sphere (the dome words on the mesh name): counted as excluded, not as missing. A
+// transient mesh named SM_SkySphere stands in for the engine's asset, so the test does not depend on what the engine
+// ships; it is cube-sized at most, so the 2 km size guard plays no part.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditExcludedByNameTest, "CarlaRGL.SceneAudit.ExcludedByName",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneAuditExcludedByNameTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
-    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    UStaticMesh* Sky = NewNamedTransientMesh(TEXT("SM_SkySphere")); if (!TestNotNull(TEXT("sky sphere mesh"), Sky)) return false;
+    TestTrue(FString::Printf(TEXT("a dome word in the mesh name (%s)"), *Sky->GetName()),
+             FRGLSceneManager::IsSkyDomeMeshName(Sky->GetName()));
     const FVector Base = BaseFor(6);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0007), Base, 5600.0);
     F.Sync();
     const FRGLSceneAuditResult R0 = F.Audit();
 
-    AStaticMeshActor* A = F.Keep(SpawnMeshActor(World, Cube, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Static,
-                                                FName(TEXT("Skyscraper_01"))));
-    if (!TestNotNull(TEXT("building"), A)) return false;
-    TestTrue(FString::Printf(TEXT("owner name carries Sky (%s)"), *A->GetName()), A->GetName().Contains(TEXT("Sky")));
+    AStaticMeshActor* A = F.Keep(SpawnMeshActor(World, Sky, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Static));
+    if (!TestNotNull(TEXT("sky sphere actor"), A)) return false;
+    TestTrue(TEXT("bounds below the 2 km size guard"),
+             A->GetStaticMeshComponent()->Bounds.SphereRadius < FRGLSceneManager::HugeSkyRadiusCm);
     F.Sync();
     const FRGLSceneAuditResult D = Diff(R0, F.Audit());
     TestEqual(TEXT("excluded_by_name +1"), D.ExcludedByName, 1);

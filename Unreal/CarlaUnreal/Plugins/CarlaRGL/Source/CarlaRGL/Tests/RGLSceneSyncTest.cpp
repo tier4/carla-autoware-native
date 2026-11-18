@@ -4,7 +4,8 @@
 // First the audit counts the World Partition fixes are judged by: missing_steady (the miss that the last sync
 // should already have registered), the ISM part of the ghosts, and spline mesh components in the scene.
 // Then the fixes: unregistered ISM components leave the scene at once (P1), adding a level with geometry in some
-// sensor's R syncs (P5), and the instances of Static ISMs are re-evaluated against the sensor spheres (P3).
+// sensor's R syncs (P5), the instances of Static ISMs are re-evaluated against the sensor spheres (P3), and the name
+// rule leaves out sky domes and spheres only (N1).
 
 #include <util/ue-header-guard-begin.h>
 #include "CoreMinimal.h"
@@ -639,6 +640,131 @@ bool FSceneSyncIsmInstanceCountChangeReRegistersTest::RunTest(const FString& Par
     TestEqual(TEXT("removed: no ghost"), D2.Ghost, 0);
     TestEqual(TEXT("removed: no stale instance"), D2.StaleInstance, 0);
     TestEqual(TEXT("removed: nothing missing"), D2.MissingInRange, 0);
+    return true;
+}
+
+// ============================================================================
+// N1: the name rule leaves out sky domes and spheres, not every name with "sky" in it
+// ============================================================================
+
+// The dome words on the mesh name, case-insensitive; CARLA's skyscraper parts and other "sky" names are no dome.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSkyDomeNamesTest, "CarlaRGL.SceneSync.SkyDomeNames",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSkyDomeNamesTest::RunTest(const FString& Parameters)
+{
+    const TCHAR* const Domes[] = { TEXT("SM_SkySphere"), TEXT("sm_skydome_01"), TEXT("Sky_Sphere_LOD0"), TEXT("SM_Sky_Dome") };
+    const TCHAR* const Others[] = { TEXT("SM_Skysc24_Mid_Wall_A"), TEXT("SM_SkyWheel"), TEXT("Skyscraper_01"), TEXT("SM_Sky"), TEXT("") };
+    for (const TCHAR* Name : Domes)
+    {
+        TestTrue(FString::Printf(TEXT("a sky dome: '%s'"), Name), FRGLSceneManager::IsSkyDomeMeshName(FString(Name)));
+    }
+    for (const TCHAR* Name : Others)
+    {
+        TestFalse(FString::Printf(TEXT("no sky dome: '%s'"), Name), FRGLSceneManager::IsSkyDomeMeshName(FString(Name)));
+    }
+    return true;
+}
+
+// A building whose actor name carries "Sky" (like CARLA's shared skyscraper parts, SM_Skysc*) is registered like any
+// other mesh: the old rule left it out.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSkyscraperRegisteredTest, "CarlaRGL.SceneSync.SkyscraperRegistered",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSkyscraperRegisteredTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(21);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0050), Base, 9700.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AStaticMeshActor* A = F.Keep(SpawnMeshActor(World, Cube, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Static,
+                                                FName(TEXT("Skyscraper_01"))));
+    if (!TestNotNull(TEXT("building"), A)) return false;
+    TestTrue(FString::Printf(TEXT("owner name carries Sky (%s)"), *A->GetName()), A->GetName().Contains(TEXT("Sky")));
+    F.Sync();
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(21, F.T, R1));
+    const FRGLSceneAuditResult D = Diff(R0, R1);
+    TestEqual(TEXT("registered +1"), D.Registered, 1);
+    TestEqual(TEXT("excluded_by_name"), D.ExcludedByName, 0);
+    TestEqual(TEXT("not missing"), D.MissingInRange, 0);
+    return true;
+}
+
+// Review focus 4: a sky mesh on a map nobody checked, under a name the dome words miss, is still left out when the old
+// rule's names match and its bounds are wider than 2 km (the size guard). The same name on a cube of ordinary size is
+// registered.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncHugeLegacySkyStillExcludedTest, "CarlaRGL.SceneSync.HugeLegacySkyStillExcluded",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncHugeLegacySkyStillExcludedTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    TestFalse(TEXT("the mesh name has no dome word"), FRGLSceneManager::IsSkyDomeMeshName(Cube->GetName()));
+    const FVector Base = BaseFor(60);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0051), Base, 9800.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AStaticMeshActor* Huge = F.Keep(SpawnMeshActor(World, Cube, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Static,
+                                                   FName(TEXT("BP_Sky_Test")), FVector(3000.f)));
+    if (!TestNotNull(TEXT("huge sky actor"), Huge)) return false;
+    const double HugeRadiusCm = Huge->GetStaticMeshComponent()->Bounds.SphereRadius;
+    TestTrue(FString::Printf(TEXT("bounds radius above 2 km (%.0f cm)"), HugeRadiusCm), HugeRadiusCm > FRGLSceneManager::HugeSkyRadiusCm);
+    F.Sync();
+    const FRGLSceneAuditResult D1 = Diff(R0, F.Audit());
+    TestEqual(TEXT("huge: excluded_by_name +1"), D1.ExcludedByName, 1);
+    TestEqual(TEXT("huge: not registered"), D1.Registered, 0);
+    TestEqual(TEXT("huge: not missing"), D1.MissingInRange, 0);
+
+    AStaticMeshActor* Small = F.Keep(SpawnMeshActor(World, Cube, Base + FVector(0.f, 5000.f, 0.f), EComponentMobility::Static,
+                                                    FName(TEXT("BP_Sky_Test"))));
+    if (!TestNotNull(TEXT("small actor"), Small)) return false;
+    TestTrue(FString::Printf(TEXT("same owner name (%s)"), *Small->GetName()), Small->GetName().Contains(TEXT("BP_Sky_Test")));
+    F.Sync();
+    const FRGLSceneAuditResult R2 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(60, F.T, R2));
+    const FRGLSceneAuditResult D2 = Diff(R0, R2);
+    TestEqual(TEXT("scale 1: registered +1"), D2.Registered, 1);
+    TestEqual(TEXT("scale 1: the huge one stays excluded"), D2.ExcludedByName, 1);
+    TestEqual(TEXT("scale 1: not missing"), D2.MissingInRange, 0);
+    return true;
+}
+
+// The audit's world-wide view of the name rule (the rgl_scene_audit_excluded line): two buildings named Skyscraper_01,
+// at 50 m and at 5 km (outside every sphere), are what only the old rule left out.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncExcludedWorldCountsTest, "CarlaRGL.SceneSync.ExcludedWorldCounts",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncExcludedWorldCountsTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(22);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0052), Base, 9900.0);
+    F.Sync();
+    FRGLSceneAuditExtras E0;
+    const FRGLSceneAuditResult R0 = F.SM.AuditScene(World, &E0);
+
+    TestNotNull(TEXT("building at 50 m"), F.Keep(SpawnMeshActor(World, Cube, Base + FVector(5000.f, 0.f, 0.f),
+                                                                EComponentMobility::Static, FName(TEXT("Skyscraper_01")))));
+    TestNotNull(TEXT("building at 5 km"), F.Keep(SpawnMeshActor(World, Cube, Base + FVector(500000.f, 0.f, 0.f),
+                                                                EComponentMobility::Static, FName(TEXT("Skyscraper_01")))));
+    F.Sync();
+    FRGLSceneAuditExtras E1;
+    const FRGLSceneAuditResult R1 = F.SM.AuditScene(World, &E1);
+    AddInfo(FString::Printf(TEXT("excluded_world=%d excluded_legacy_world=%d legacy_only_meshes=%s huge_meshes=%s excluded=%s"),
+        E1.ExcludedWorld, E1.ExcludedLegacyWorld, *FString::Join(E1.LegacyOnlyMeshes, TEXT(";")),
+        *FString::Join(E1.HugeMeshes, TEXT(";")), *FString::Join(E1.ExcludedMeshes, TEXT(";"))));
+    const int32 LegacyOnly0 = E0.ExcludedLegacyWorld - E0.ExcludedWorld;
+    const int32 LegacyOnly1 = E1.ExcludedLegacyWorld - E1.ExcludedWorld;
+    TestTrue(FString::Printf(TEXT("the old rule left out at least 2 more (%d)"), LegacyOnly1), LegacyOnly1 >= 2);
+    TestEqual(TEXT("both buildings counted, wherever they are"), LegacyOnly1 - LegacyOnly0, 2);
+    TestEqual(TEXT("the new rule leaves out neither"), E1.ExcludedWorld - E0.ExcludedWorld, 0);
+    TestTrue(TEXT("legacy_only_meshes has Cube"), E1.LegacyOnlyMeshes.Contains(FString(TEXT("Cube"))));
+    const FRGLSceneAuditResult D = Diff(R0, R1);
+    TestEqual(TEXT("the 50 m one registered"), D.Registered, 1);
+    TestEqual(TEXT("excluded_by_name (inside the spheres)"), D.ExcludedByName, 0);
     return true;
 }
 }

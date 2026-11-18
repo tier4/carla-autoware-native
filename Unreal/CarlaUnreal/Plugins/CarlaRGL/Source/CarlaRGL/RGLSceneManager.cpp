@@ -1480,15 +1480,15 @@ FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStati
         return EStaticGate::Reject;
     }
 
-    const AActor* Owner = Component->GetOwner();
-    const FString OwnerName = Owner ? Owner->GetName() : FString();
-    const FString ComponentName = Component->GetName();
-    const FString MeshName = Component->GetStaticMesh()->GetName();
-
-    // Sky domes are valid static meshes but should never participate in LiDAR ray tracing.
-    if (OwnerName.Contains(TEXT("Sky"), ESearchCase::IgnoreCase) ||
-        ComponentName.Contains(TEXT("Sky"), ESearchCase::IgnoreCase) ||
-        MeshName.Contains(TEXT("Sky"), ESearchCase::IgnoreCase))
+    // Sky domes and spheres are valid static meshes but should never take part in LiDAR ray tracing. Only the dome
+    // words count, not "sky" anywhere in a name: that also dropped CARLA's shared skyscraper parts (SM_Skysc*).
+    if (IsSkyDomeMeshName(Component->GetStaticMesh()->GetName()))
+    {
+        return EStaticGate::ExcludedByName;
+    }
+    // Size guard: a sky mesh the dome words miss (a map nobody checked) is still left out when the old rule's names
+    // match and it is wider than 2 km. The radius is looked at first; the names are built only for such a component.
+    if (Component->Bounds.SphereRadius > HugeSkyRadiusCm && IsLegacySkyName(Component))
     {
         return EStaticGate::ExcludedByName;
     }
@@ -1496,11 +1496,37 @@ FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStati
     return EStaticGate::Pass;
 }
 
+bool FRGLSceneManager::IsSkyDomeMeshName(const FString& MeshName)
+{
+    static const TCHAR* const DomeWords[] = { TEXT("SkySphere"), TEXT("SkyDome"), TEXT("Sky_Sphere"), TEXT("Sky_Dome") };
+    for (const TCHAR* Word : DomeWords)
+    {
+        if (MeshName.Contains(Word, ESearchCase::IgnoreCase))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FRGLSceneManager::IsLegacySkyName(const UStaticMeshComponent* Component)
+{
+    if (!Component)
+    {
+        return false;
+    }
+    const AActor* Owner = Component->GetOwner();
+    const UStaticMesh* Mesh = Component->GetStaticMesh();
+    return (Owner && Owner->GetName().Contains(TEXT("Sky"), ESearchCase::IgnoreCase)) ||
+           Component->GetName().Contains(TEXT("Sky"), ESearchCase::IgnoreCase) ||
+           (Mesh && Mesh->GetName().Contains(TEXT("Sky"), ESearchCase::IgnoreCase));
+}
+
 bool FRGLSceneManager::ShouldRegisterComponent(UStaticMeshComponent* Component, bool& bOutOfRange) const
 {
     bOutOfRange = false;
 
-    // Validity, mesh, visibility, scale and the "Sky" name rule (shared with AuditScene).
+    // Validity, mesh, visibility, scale and the name rule (shared with AuditScene).
     if (GateStaticComponent(Component) != EStaticGate::Pass)
     {
         return false;
@@ -3050,7 +3076,7 @@ void FRGLSceneManager::SetSensorAuditParent(const void* SensorId, AActor* RootPa
     }
 }
 
-FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>* OutExcludedSample) const
+FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditExtras* OutExtras) const
 {
     namespace RA = RGLSceneAudit;
 
@@ -3258,12 +3284,41 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
     // ---- World side: every registered primitive of a visible level ----
     // A static mesh component is judged with the registration predicate's distance-independent part
     // (GateStaticComponent) and the two spheres above; ISMs per instance, like RegisterISMComponent.
-    auto SampleExcluded = [OutExcludedSample](const UStaticMeshComponent* SMC)
+    // With OutExtras, the name rule is also counted over the whole loaded world, whatever the distance (once per
+    // component), next to the old rule, and the components wider than 2 km are listed by mesh name.
+    auto AddListed = [](TArray<FString>& List, const FString& Name)
     {
-        if (OutExcludedSample && OutExcludedSample->Num() < 20)
+        if (List.Num() < FRGLSceneAuditExtras::MaxListed)
         {
-            OutExcludedSample->AddUnique(FString::Printf(TEXT("%s|%s|%s"), *GetNameSafe(SMC->GetOwner()),
-                *SMC->GetName(), *GetNameSafe(SMC->GetStaticMesh())));
+            List.AddUnique(Name);
+        }
+    };
+    auto CountWorldExclusion = [&](const UStaticMeshComponent* SMC, EStaticGate Gate)
+    {
+        const bool bExcluded = (Gate == EStaticGate::ExcludedByName);
+        const bool bLegacy = IsLegacySkyName(SMC);
+        const bool bHuge = SMC->Bounds.SphereRadius > HugeSkyRadiusCm;
+        if (!bExcluded && !bLegacy && !bHuge)
+        {
+            return;
+        }
+        const FString MeshName = GetNameSafe(SMC->GetStaticMesh());
+        if (bExcluded)
+        {
+            ++OutExtras->ExcludedWorld;
+            AddListed(OutExtras->ExcludedMeshes, MeshName);
+        }
+        if (bLegacy)
+        {
+            ++OutExtras->ExcludedLegacyWorld;
+            if (!bExcluded)
+            {
+                AddListed(OutExtras->LegacyOnlyMeshes, MeshName);
+            }
+        }
+        if (bHuge)
+        {
+            AddListed(OutExtras->HugeMeshes, MeshName);
         }
     };
     auto AuditStaticComponent = [&](UStaticMeshComponent* SMC)
@@ -3272,6 +3327,10 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
         if (Gate == EStaticGate::Reject)
         {
             return;   // no mesh, hidden, zero scale: not a candidate (and not a defect)
+        }
+        if (OutExtras)
+        {
+            CountWorldExclusion(SMC, Gate);
         }
         const FBoxSphereBounds& Bounds = SMC->Bounds;
         const bool bCompInSync = RA::InAnySphere(SyncSpheres, Bounds.Origin, Bounds.SphereRadius);
@@ -3288,7 +3347,6 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
             if (Gate == EStaticGate::ExcludedByName)
             {
                 ++R.ExcludedByName;
-                SampleExcluded(SMC);
                 return;
             }
             const FEntityInfo* Info = EntityMap.Find(SMC);
@@ -3347,7 +3405,6 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, TArray<FString>
             if (Gate == EStaticGate::ExcludedByName)
             {
                 ++R.ExcludedByName;
-                SampleExcluded(SMC);
                 continue;
             }
             if (RegisteredInstances[i])
@@ -3457,17 +3514,27 @@ void FRGLSceneManager::MaybeEmitAudit(UWorld* World, double SimTime, uint64 Fram
         return;
     }
 
-    TArray<FString> ExcludedSample;
-    const FRGLSceneAuditResult Result = AuditScene(World, bExcludedSampleLogged ? nullptr : &ExcludedSample);
+    // The first audit line of the world also looks at the name rule over the whole loaded world (FRGLSceneAuditExtras).
+    FRGLSceneAuditExtras Extras;
+    const bool bExcludedLine = !bExcludedLineLogged;
+    const FRGLSceneAuditResult Result = AuditScene(World, bExcludedLine ? &Extras : nullptr);
     LevelsAddedSinceAudit = 0;
     EmitSceneLine(FormatAuditLine(Frame, (SimTime >= 0.0) ? SimTime : CurrentSimTime, Result));
-    if (ExcludedSample.Num() > 0)
+    if (bExcludedLine)
     {
-        // Once per world: which names the "Sky" rule actually leaves out (spaces would break key=value parsing).
-        bExcludedSampleLogged = true;
-        EmitSceneLine(FString::Printf(TEXT("rgl_scene_audit_excluded frame=%llu n=%d names=%s"),
-            static_cast<unsigned long long>(Frame), ExcludedSample.Num(),
-            *FString::Join(ExcludedSample, TEXT(";")).Replace(TEXT(" "), TEXT("_"))));
+        // Once per world, with the first audit line: what the name rule leaves out, what only the old rule left out,
+        // and the meshes wider than 2 km (mesh names; spaces would break key=value parsing).
+        bExcludedLineLogged = true;
+        auto JoinNames = [](const TArray<FString>& Names)
+        {
+            return FString::Join(Names, TEXT(";")).Replace(TEXT(" "), TEXT("_"));
+        };
+        EmitSceneLine(FString::Printf(
+            TEXT("rgl_scene_audit_excluded frame=%llu n=%d names=%s excluded_world=%d excluded_legacy_world=%d "
+                 "legacy_only_meshes=%s huge_meshes=%s"),
+            static_cast<unsigned long long>(Frame), Extras.ExcludedMeshes.Num(), *JoinNames(Extras.ExcludedMeshes),
+            Extras.ExcludedWorld, Extras.ExcludedLegacyWorld, *JoinNames(Extras.LegacyOnlyMeshes),
+            *JoinNames(Extras.HugeMeshes)));
     }
 #if !UE_BUILD_SHIPPING
     ++AuditLinesEmitted_ForTest;
@@ -3519,7 +3586,7 @@ bool FRGLSceneManager::ConsumeRelevantLevelAdds()
 
     // Relevant = the level brings a registered static mesh component whose bounds reach some sensor's R and that
     // passes the registration gate: what the next periodic sync would register. The gate matters: a sky dome's bounds
-    // reach every sensor, but the "Sky" name rule leaves it out, so its level alone must not force a sync. The cheap
+    // reach every sensor, but the name rule leaves it out, so its level alone must not force a sync. The cheap
     // tests run first, the gate's name checks only for a component already in range. Only the added levels' actors
     // are looked at, not the whole world.
     bool bRelevant = false;

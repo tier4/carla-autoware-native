@@ -2,8 +2,8 @@
 // Shared fixture and helpers of the scene tests (CarlaRGL.SceneAudit.*, CarlaRGL.SceneSync.*) on the game world of
 // EmptyMap. The scene manager of a world is shared by every test, so counts are compared as differences around each
 // step (Diff), and every test works around its own base point (BaseFor), 1 km from the others.
-// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-15, 17-19, 31-33, 40, 46, 47 (SceneSync; 12 by the two level-sync
-// tests).
+// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-15, 17-19, 21, 22, 31-33, 40, 46, 47, 60 (SceneSync; 12 by the two
+// level-sync tests).
 // Give each new test a slot nobody else uses.
 
 #pragma once
@@ -18,6 +18,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "HAL/IConsoleManager.h"
+#include "UObject/Package.h"
 #if WITH_EDITOR
 #include "StaticMeshCompiler.h"
 #endif
@@ -76,6 +77,15 @@ inline UStaticMesh* LoadMeshReady(const TCHAR* Path, bool* bOutWasCompiling = nu
 #endif
     if (bOutWasCompiling) *bOutWasCompiling = bCompiling;
     return Mesh;
+}
+
+/// An empty transient static mesh whose name starts with BaseName (made unique in the transient package), for the
+/// name-rule tests: they must not depend on an engine asset being there (a missing asset would make them check
+/// nothing). It has no geometry and no render data; only a mesh the name rule leaves out may use it (never uploaded).
+inline UStaticMesh* NewNamedTransientMesh(const TCHAR* BaseName)
+{
+    const FName Name = MakeUniqueObjectName(GetTransientPackage(), UStaticMesh::StaticClass(), FName(BaseName));
+    return NewObject<UStaticMesh>(GetTransientPackage(), Name, RF_Transient);
 }
 
 /// Base point of a test: 2 km west, (Slot + 1) km south, 300 m up (the skeletal tests stay near x = 0).

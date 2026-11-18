@@ -54,7 +54,7 @@ struct FRGLSceneAuditResult
     int32 MissingInRange = 0;    // eligible, inside some sensor's range around its current position, not registered
     int32 MeshMismatch = 0;      // the component's static mesh is not the asset the entity was built from
     int32 StaleInstance = 0;     // ISM instance whose world transform changed since registration
-    int32 ExcludedByName = 0;    // left out by the "Sky" name rule (inside the spheres above)
+    int32 ExcludedByName = 0;    // left out by the name rule (sky domes; see GateStaticComponent), inside the spheres above
     int32 Unextractable = 0;     // left out while a failed extraction/upload waits for its retry (inside the spheres)
     int32 NonSmCollision = 0;    // components (not static mesh, skeletal mesh or Landscape) that block ray_cast's channel, inside the spheres
     int32 HlodRegistered = 0;    // registered entities owned by a World Partition HLOD actor
@@ -77,6 +77,19 @@ struct FRGLSceneAuditResult
     int32 SplineRegistered = 0;  // registered entities whose component is a USplineMeshComponent (uploaded undeformed)
     int32 CacheStale = 0;        // MeshCache entries whose asset is gone (the weak asset no longer resolves to the key)
     int32 PendingIsm = 0;        // Static ISM groups waiting for their instances to be re-evaluated against the sensor spheres
+};
+
+/// Optional output of FRGLSceneManager::AuditScene: the name rule over the whole loaded world (every registered static
+/// mesh component of a visible level that the rule looks at, whatever its distance to the sensors). Counts are
+/// components (an ISM component counts once). Each list holds distinct mesh names, at most MaxListed of them.
+struct FRGLSceneAuditExtras
+{
+    static constexpr int32 MaxListed = 100;
+    TArray<FString> ExcludedMeshes;    // meshes the name rule leaves out
+    TArray<FString> LegacyOnlyMeshes;  // meshes only the old rule ("sky" in the owner, component or mesh name) left out
+    TArray<FString> HugeMeshes;        // meshes of components whose bounds radius exceeds 2 km, whatever their names
+    int32 ExcludedWorld = 0;           // components the name rule leaves out
+    int32 ExcludedLegacyWorld = 0;     // components the old rule left out
 };
 
 /// Manages synchronization between the UE5 scene and the RGL scene.
@@ -144,8 +157,19 @@ public:
 
     /// Compare the RGL static scene with the loaded world (see FRGLSceneAuditResult). Changes nothing: no
     /// registration, no cache maintenance (FindCachedMesh is not called). Scans every actor of World.
-    /// OutExcludedSample (optional) collects up to 20 distinct "owner|component|mesh" names left out by the name rule.
-    FRGLSceneAuditResult AuditScene(UWorld* World, TArray<FString>* OutExcludedSample = nullptr) const;
+    /// OutExtras (optional) gets the name rule's world-wide counts and mesh lists (see FRGLSceneAuditExtras).
+    FRGLSceneAuditResult AuditScene(UWorld* World, FRGLSceneAuditExtras* OutExtras = nullptr) const;
+
+    // ---- The name rule (N1) ----
+
+    /// Components whose bounds radius exceeds this (2 km) are left out when the old rule's names match (size guard).
+    static constexpr float HugeSkyRadiusCm = 200000.0f;
+
+    /// True when MeshName contains SkySphere, SkyDome, Sky_Sphere or Sky_Dome (case-insensitive): a sky dome or sphere.
+    static bool IsSkyDomeMeshName(const FString& MeshName);
+
+    /// The old rule: "sky" (case-insensitive) in the owner's, the component's or the static mesh's name.
+    static bool IsLegacySkyName(const UStaticMeshComponent* Component);
 
     /// Range (cm) the sensor's rays reach, for missing_in_range / ghost_in_range. Call after RegisterSensor().
     /// Never set (or negative): RegistrationDistanceCm minus the 20 m unload margin.
@@ -236,8 +260,10 @@ private:
     bool ShouldRegisterComponent(UStaticMeshComponent* Component, bool& bOutOfRange) const;
 
     /// The distance-independent part of ShouldRegisterComponent (validity, registration, mesh, visibility, scale,
-    /// the "Sky" name rule), shared with AuditScene so the audit judges with the same predicate. A component that
+    /// the name rule), shared with AuditScene so the audit judges with the same predicate. A component that
     /// is not registered (its level is being streamed out, or its owner unregistered it) is no candidate.
+    /// The name rule leaves out a component whose mesh name is a sky dome's (IsSkyDomeMeshName), or whose bounds
+    /// radius exceeds HugeSkyRadiusCm and whose names the old rule matches (IsLegacySkyName).
     enum class EStaticGate : uint8 { Reject, ExcludedByName, Pass };
     static EStaticGate GateStaticComponent(const UStaticMeshComponent* Component);
 
@@ -592,7 +618,7 @@ private:
     // rgl.Scene.Audit line emission (MaybeEmitAudit)
     uint64 LastAuditFrame = 0;
     bool   bAuditFrameValid = false;
-    bool   bExcludedSampleLogged = false; // the rgl_scene_audit_excluded line was printed once for this world
+    bool   bExcludedLineLogged = false;   // the rgl_scene_audit_excluded line was printed (with the first audit line)
     uint64 AuditUpdateCount = 0;          // distinct frames seen while the audit is on
 
     // ---- Level-added sync (P5) ----
