@@ -3,7 +3,7 @@
 
   run_scenario.py --pkg <dir> --map <Odaiba|Town15|Town10HD_Opt>
                   --scenario <S1|S1p|S2|S3|S4|S5|S6|S7|CONTROL> --out <dir>
-                  [--no-audit] [--with-raycast] [--seed N] [--port 4000] [--speed-mps V]
+                  [--no-audit] [--with-raycast] [--seed N] [--port 4000] [--speed-mps V] [--fixed-dt DT]
 
 Starts the packaged server (the single <pkg>/*.sh launcher), drives a kinematic
 ego (physics off, set_transform every tick at a constant speed) along the
@@ -382,6 +382,9 @@ def main(argv):
     ap.add_argument("--port", type=int, default=4000)
     ap.add_argument("--speed-mps", type=float, default=None,
                     help="override the scenario's ego speed (e.g. the range-edge gap P8 grows with speed)")
+    ap.add_argument("--fixed-dt", type=float, default=None,
+                    help="override fixed_delta_seconds (the X2 E2E runs at 40 fps = 0.025; the RGL sync timer "
+                         "only advances on frames where a sensor updates, so dt changes the sync interval)")
     a = ap.parse_args(argv)
 
     os.makedirs(a.out, exist_ok=True)
@@ -391,6 +394,10 @@ def main(argv):
         if a.speed_mps <= 0:
             ap.error("--speed-mps must be > 0")
         sc = dataclasses.replace(sc, speed_mps=a.speed_mps)
+    if a.fixed_dt is not None:
+        if not 0.001 <= a.fixed_dt <= 0.1:
+            ap.error("--fixed-dt must be in [0.001, 0.1]")
+        sc_mod.FIXED_DT = a.fixed_dt   # every user reads sc_mod.FIXED_DT at call time
     wp_map = a.map == "Town15"
     expected = sc.radius_expected_m
     if expected is None:
@@ -399,7 +406,7 @@ def main(argv):
         exp_str = "%.1f" % (expected if wp_map else -1.0)
     base = dict(scenario=a.scenario, map=a.map, seed=a.seed, port=a.port,
                 no_audit=int(a.no_audit), with_raycast=int(a.with_raycast),
-                radius_expected_m=exp_str, speed_mps="%.1f" % sc.speed_mps)
+                radius_expected_m=exp_str, speed_mps="%.1f" % sc.speed_mps, fixed_dt="%.3f" % sc_mod.FIXED_DT)
     t_start = time.time()
     proc, pgid = None, None
     tick_log = []
