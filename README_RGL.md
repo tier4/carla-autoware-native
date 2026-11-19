@@ -424,3 +424,135 @@ Measured on the Shipping package (`check_dynamic_actor_visibility.py`, same bina
 
 Tick-cost impact (7 walkers + 3 vehicles + 1 RGL lidar, 20 Hz sync, world.tick() wall
 time): +11.4% median vs skeletal OFF (within the +20% budget).
+
+## World Partition maps
+
+On World Partition maps (for example Town15), Unreal Engine loads the map in cells around
+streaming sources, and the RGL scene follows what is loaded: a static mesh is in the RGL
+scene only while its cell is loaded (and it is inside some sensor's sphere), and it leaves
+the scene when the cell is unloaded. What is not loaded is not in the RGL scene, just as it
+is not in the physics scene that `ray_cast` lidars trace. This is by design; to see an
+area, get it loaded (see below). Maps without World Partition (for example Town10HD_Opt)
+are loaded whole and are not affected.
+
+> [!NOTE]
+> Landscape (terrain heightfield) components are not registered in the RGL scene, while
+> `ray_cast` lidars do hit them. Where the ground is a Landscape, the RGL lidar gets no
+> ground returns.
+
+### Which areas are loaded
+
+Cells are loaded around World Partition streaming sources. On a World Partition map,
+CARLA gives every vehicle and walker it spawns a spherical streaming source:
+
+| Spawned actor | Radius of its streaming source |
+|---|---|
+| Vehicle or walker whose `role_name` contains `hero` or `ego_vehicle` | `tile_stream_distance` at spawn time (default 3000 m) |
+| Any other vehicle or walker (for example `role_name` = `ego`) | 200 m |
+
+The spectator (the player controller's view) is a streaming source too. Sensors and the
+other actors CARLA spawns are not.
+
+* Attach RGL lidars to the hero vehicle. A `role_name` such as `ego` does not make a hero:
+  that vehicle loads only 200 m around it, and a sensor on it with a longer range sees
+  only what other streaming sources load beyond that.
+* `tile_stream_distance` applies to the hero only, and only when the hero spawns: the
+  radius is taken at spawn time, and changing the setting later does not resize it.
+* An `actor_active_distance` larger than `tile_stream_distance` raises
+  `tile_stream_distance` to the same value (CARLA logs a warning). Set both before
+  spawning the hero:
+
+  ```python
+  settings = world.get_settings()
+  settings.tile_stream_distance = 500.0   # m: the hero's streaming radius
+  settings.actor_active_distance = 500.0  # m: not larger than tile_stream_distance
+  world.apply_settings(settings)
+  # then spawn the hero (role_name='hero') and attach the lidars to it
+  ```
+
+* A roadside sensor (attached to nothing, or to an actor without a streaming source) has
+  its range loaded only when another streaming source covers it. Raise the hero's
+  `tile_stream_distance` so that its radius reaches the sensor's range, or mount the
+  sensor on a vehicle.
+
+### The stream warning
+
+On a World Partition map, after each static scene sync (periodic, and sooner when a sensor
+moves), the scene manager checks whether each sensor's range sphere is streamed in (its
+World Partition cells are activated). A sensor whose range stays not streamed in for 5 s
+of simulation time prints one line, once per sensor:
+
+```text
+rgl_scene_stream_warning t=12.400 sensor=0x7f3a2c001230 range_m=200 parent=BP_Car_C_1 parent_stream_radius_m=150 hint=attach_the_sensor_to_a_hero_vehicle_or_raise_tile_stream_distance
+```
+
+| Key | Meaning |
+|---|---|
+| `t` | Simulation time (s) of the check that printed the line |
+| `sensor` | Sensor id (the RGL session handle, as on the `rgl_hit_dump` line) |
+| `range_m` | Radius of the checked sphere: the sensor's range (m) |
+| `parent` | Root actor of the sensor's attachment chain, or `none` |
+| `parent_stream_radius_m` | Radius of that actor's streaming source (m); `-1` when it has none |
+| `hint` | What to do: attach the sensor to a hero vehicle, or raise `tile_stream_distance` |
+
+* No line is printed on maps without World Partition, nor while the parent's own
+  streaming source holds the whole range sphere: that is streaming still in progress (the
+  default 3 km hero radius can take more than 5 s to load at start-up), which a setting
+  cannot fix.
+* The check runs at syncs only, so the line comes at the first sync at least 5 s after
+  the first check that found the range not streamed in.
+* The line is printed once per sensor, even if the range is loaded and lost again later.
+
+### Sync cost with the default 3 km hero radius
+
+Each static sync scans every actor of the loaded world, although the RGL scene keeps only
+what is inside the sensors' spheres. With the default `tile_stream_distance` (3000 m) the
+hero keeps a 3 km disc loaded, and every sync scans all of it. Measured on Town15 with one
+200 m lidar on a driving hero:
+
+<!-- placeholder: the numbers come from the 3 km sync-cost measurement -->
+
+| Hero streaming radius (`tile_stream_distance`) | Static sync, p95 | Static sync, max |
+|---|---|---|
+| 3000 m (default) | TBD | TBD |
+
+To cut the loaded area and the sync time, lower both distances to what the sensors need:
+their range plus their distance from the hero's origin, with some margin.
+
+### Scene sync knobs
+
+The `rgl.Scene.*` and `rgl.Debug.*` knobs are CVars (see
+[Skeletal meshes](#skeletal-meshes-vehicle-bodies-walkers) for how to set CVars). A
+packaged Shipping server also takes the switch in the second column, for example
+`-rgl-scene-audit=10`. The values in effect of the first five are printed on an
+`rgl_scene_config` line at start-up and whenever one changes.
+
+<!-- placeholder: the last row becomes the sync clock and range-edge knobs -->
+
+| CVar | Shipping switch | Default | Effect |
+|---|---|---|---|
+| `rgl.Scene.MaxMeshCreatesPerUpdate` | `-rgl-scene-max-mesh-creates-per-update=` | 8 | Most new RGL meshes (or idle reactivations) per scene Update; the rest wait in a nearest-first queue. 0 = unlimited. |
+| `rgl.Scene.CreateBudgetMs` | `-rgl-scene-create-budget-ms=` | 4 | Wall-time budget (ms) for mesh creation per scene Update. 0 = unlimited. |
+| `rgl.Scene.UnloadDistanceFactor` | `-rgl-scene-unload-distance-factor=` | 1.0 | Static meshes unload only beyond the registration radius × factor + 20 m. Values below 1 count as 1. |
+| `rgl.Scene.IdleMeshCacheMax` | `-rgl-scene-idle-mesh-cache-max=` | 0 | RGL meshes kept resident after their last entity has left, least recently idled destroyed first. 0 = destroy at once. |
+| `rgl.Scene.MaxIsmInstanceChangesPerUpdate` | `-rgl-scene-max-ism-instance-changes-per-update=` | 512 | Most Static ISM instances added to or removed from the scene per scene Update when a sync has the ISM groups re-evaluated against the sensor spheres (on the Updates without a sync). 0 = unlimited. |
+| `rgl.Scene.Audit` | `-rgl-scene-audit=` | 0 | Read-only audit: N >= 1 prints an `rgl_scene_audit` line every N-th frame. Scans every actor, so leave it off when timing frames. |
+| `rgl.Debug.HitDumpDir` | `-rgl-debug-hit-dump=` | (empty) | Debug: directory that receives one file of hit points per dumped scan. Empty = off. |
+| `rgl.Debug.HitDumpEvery` | `-rgl-debug-hit-dump-every=` | 10 | Debug: with a dump directory set, dump each sensor's first scan and then every N-th one. |
+| TBD | TBD | TBD | Sync clock and range-edge knobs (to be added). |
+
+### ISM re-evaluation keys on the log lines
+
+Two keys on different lines have similar names and count the same queue at different
+moments: the queue of Static instanced static mesh (ISM) groups waiting to have their
+instances compared with the sensor spheres. Every sync refills the queue with all
+registered Static ISM groups; the Updates without a sync work through it, capped by
+`rgl.Scene.MaxIsmInstanceChangesPerUpdate`.
+
+| Line | Key | Meaning |
+|---|---|---|
+| `rgl_scene_sync` | `ism_pending` | Entries left in the queue when this sync refilled it: groups the previous round had not reached. Non-zero means the cap did not let the round finish between two syncs. |
+| `rgl_scene_audit` | `pending_ism` | Entries in the queue at the audited frame: groups not yet compared with the current sensor spheres. |
+
+Both counts include the entries of components that have been removed since they were
+queued; such an entry is dropped when the queue reaches it.

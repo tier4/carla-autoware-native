@@ -6,6 +6,7 @@
 // Then the fixes: unregistered ISM components leave the scene at once (P1), adding a level with geometry in some
 // sensor's R syncs (P5), the instances of Static ISMs are re-evaluated against the sensor spheres (P3), the name
 // rule leaves out sky domes and spheres only (N1), and the mesh cache is keyed by the asset's identity (P2).
+// Last, the warning for a sensor whose range is not streamed in on a World Partition map (P4).
 
 #include <util/ue-header-guard-begin.h>
 #include "CoreMinimal.h"
@@ -15,6 +16,8 @@
 #include "Engine/StaticMesh.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/SplineMeshComponent.h"
+#include "Components/WorldPartitionStreamingSourceComponent.h"
+#include "WorldPartition/WorldPartitionStreamingSource.h"
 #include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
 #include "UObject/GarbageCollection.h"
@@ -937,6 +940,160 @@ bool FSceneSyncStaleCacheKeyPurgedTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("after the purge: cache_stale +0"), Diff(R0, R3).CacheStale, 0);
     TestEqual(TEXT("after the purge: the live entry stays (cached meshes +1)"), C3.CachedMeshes - C0.CachedMeshes, 1);
     TestEqual(TEXT("after the purge: idle meshes +1"), C3.IdleMeshes - C0.IdleMeshes, 1);
+    return true;
+}
+
+// ============================================================================
+// P4: one rgl_scene_stream_warning per sensor whose range stays not streamed in on a World Partition map
+// ============================================================================
+
+// EmptyMap is not a World Partition map: the check that runs after each sync prints nothing, however long the sensor
+// has been there. Three distance-triggered syncs 6 s (sim) apart: the last one is 12 s after the first, beyond the 5 s a
+// World Partition map would wait.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncNoStreamWarningOnNonWpWorldTest, "CarlaRGL.SceneSync.NoStreamWarningOnNonWpWorld",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncNoStreamWarningOnNonWpWorldTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    TestTrue(TEXT("EmptyMap has no World Partition"), World->GetWorldPartition() == nullptr);
+    const FVector Base = BaseFor(25);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0070), Base, 10300.0);
+    F.SM.SetSyncInterval(1.0f);
+    F.Sync();
+    const int32 Warnings0 = F.SM.StreamWarnings_ForTest;
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+
+    const float StepCm = 3000.f;
+    TestTrue(TEXT("each step is beyond the distance trigger (0.2 R)"), StepCm > 0.2f * kRegistrationCm);
+    for (int32 Step = 0; Step < 3; ++Step)
+    {
+        F.T += 6.0;
+        F.SensorPos += FVector(StepCm, 0.f, 0.f);
+        F.Refresh();
+        F.SM.Update_ForTest(World, F.T);
+    }
+    TestEqual(TEXT("three syncs ran (the check runs after each)"), F.SM.SyncCount_ForTest - Syncs0, 3);
+    TestEqual(TEXT("no stream warning on a map without World Partition"), F.SM.StreamWarnings_ForTest - Warnings0, 0);
+    return true;
+}
+
+// The checks below go through the seam CheckStreamCoverage_ForTest, which gives each check the World Partition answer
+// (EmptyMap cannot stream). The fixture's sensor has no parent: nothing explains its uncovered range. The check times
+// are whole seconds, so "5 s after" is exact.
+static void CheckStreamAt(FAuditFixture& F, double At, bool bIsWp, bool bCovered)
+{
+    F.T = At;
+    F.Refresh();
+    F.SM.CheckStreamCoverage_ForTest(At, bIsWp, bCovered);
+}
+
+// Not streamed in since T0: no line at T0 + 4.9 s, one line at T0 + 5 s, still one at T0 + 20 s, and still one after
+// the range is covered and uncovered again (once per sensor).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncStreamWarningOnceAfterFiveSecondsTest, "CarlaRGL.SceneSync.StreamWarningOnceAfterFiveSeconds",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncStreamWarningOnceAfterFiveSecondsTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    const FVector Base = BaseFor(35);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0071), Base, 10400.0);
+    F.Sync();   // the sync also evicts sensors that other tests left behind (stale)
+    const int32 W0 = F.SM.StreamWarnings_ForTest;
+    const double T0 = 10401.0;
+
+    CheckStreamAt(F, T0, true, false);
+    TestEqual(TEXT("not streamed in at T0: no line yet"), F.SM.StreamWarnings_ForTest - W0, 0);
+    CheckStreamAt(F, T0 + 4.9, true, false);
+    TestEqual(TEXT("4.9 s not streamed in: no line"), F.SM.StreamWarnings_ForTest - W0, 0);
+    CheckStreamAt(F, T0 + 5.0, true, false);
+    TestEqual(TEXT("5 s not streamed in: one line"), F.SM.StreamWarnings_ForTest - W0, 1);
+    CheckStreamAt(F, T0 + 20.0, true, false);
+    TestEqual(TEXT("20 s not streamed in: still one line"), F.SM.StreamWarnings_ForTest - W0, 1);
+    CheckStreamAt(F, T0 + 21.0, true, true);
+    CheckStreamAt(F, T0 + 22.0, true, false);
+    CheckStreamAt(F, T0 + 40.0, true, false);
+    TestEqual(TEXT("covered, then 18 s not streamed in again: still one line (once per sensor)"),
+              F.SM.StreamWarnings_ForTest - W0, 1);
+    return true;
+}
+
+// The 5 s must be continuous: a check that finds the range streamed in starts the count again. Nothing is counted on a
+// map without World Partition (bIsWp = false).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncStreamWarningClockRestartsWhenCoveredTest, "CarlaRGL.SceneSync.StreamWarningClockRestartsWhenCovered",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncStreamWarningClockRestartsWhenCoveredTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    const FVector Base = BaseFor(36);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0072), Base, 10500.0);
+    F.Sync();
+    const int32 W0 = F.SM.StreamWarnings_ForTest;
+    const double T0 = 10501.0;
+
+    CheckStreamAt(F, T0, false, false);
+    CheckStreamAt(F, T0 + 20.0, false, false);
+    TestEqual(TEXT("not a World Partition map: no line after 20 s"), F.SM.StreamWarnings_ForTest - W0, 0);
+
+    CheckStreamAt(F, T0 + 21.0, true, false);
+    CheckStreamAt(F, T0 + 25.0, true, true);    // covered: the count starts again
+    CheckStreamAt(F, T0 + 27.0, true, false);
+    CheckStreamAt(F, T0 + 31.9, true, false);   // 10.9 s since T0 + 21, but 4.9 s since T0 + 27
+    TestEqual(TEXT("4.9 s since the range was last streamed in: no line"), F.SM.StreamWarnings_ForTest - W0, 0);
+    CheckStreamAt(F, T0 + 32.0, true, false);
+    TestEqual(TEXT("5 s since the range was last streamed in: one line"), F.SM.StreamWarnings_ForTest - W0, 1);
+    return true;
+}
+
+// Time during which the parent's own streaming source holds the whole range sphere is streaming in progress (the ring
+// loads it; the default 3 km hero ring needs more than 5 s at start-up), not a configuration the hint can fix: it does
+// not count. A ring smaller than the range does not hold it, and the count runs as for a sensor without a parent.
+// The source is not registered: EmptyMap has no World Partition subsystem to take it, and only its shapes are read.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncStreamWarningNotWhileParentRingHoldsRangeTest, "CarlaRGL.SceneSync.StreamWarningNotWhileParentRingHoldsRange",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncStreamWarningNotWhileParentRingHoldsRangeTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    const FVector Base = BaseFor(37);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0073), Base, 10600.0);
+    AStaticMeshActor* Parent = F.Keep(SpawnMeshActor(World, nullptr, Base, EComponentMobility::Movable));
+    if (!TestNotNull(TEXT("parent actor"), Parent)) return false;
+    UWorldPartitionStreamingSourceComponent* Source = NewObject<UWorldPartitionStreamingSourceComponent>(Parent);
+    FStreamingSourceShape Shape;
+    Shape.bUseGridLoadingRange = false;
+    Shape.Radius = 300000.f;   // 3 km, like the default hero ring
+    Source->Shapes.Add(Shape);
+    TestTrue(TEXT("the parent carries the source"), Parent->FindComponentByClass<UWorldPartitionStreamingSourceComponent>() == Source);
+    F.SM.SetSensorAuditParent(F.Sensor, Parent);
+    F.Sync();
+    const int32 W0 = F.SM.StreamWarnings_ForTest;
+    const double T0 = 10601.0;
+
+    CheckStreamAt(F, T0, true, false);
+    CheckStreamAt(F, T0 + 20.0, true, false);
+    TestEqual(TEXT("the 3 km ring holds the 100 m range: 20 s not streamed in, no line"), F.SM.StreamWarnings_ForTest - W0, 0);
+
+    Source->Shapes[0].Radius = 5000.f;   // 50 m: smaller than the range
+    CheckStreamAt(F, T0 + 21.0, true, false);
+    CheckStreamAt(F, T0 + 25.9, true, false);
+    TestEqual(TEXT("50 m ring: 4.9 s not streamed in, no line"), F.SM.StreamWarnings_ForTest - W0, 0);
+    CheckStreamAt(F, T0 + 26.0, true, false);
+    TestEqual(TEXT("50 m ring: 5 s not streamed in, one line"), F.SM.StreamWarnings_ForTest - W0, 1);
+    return true;
+}
+
+// The warning line: one grep-friendly key=value line, documented in README_RGL.md.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncStreamWarningLineFormatTest, "CarlaRGL.SceneSync.StreamWarningLineFormat",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncStreamWarningLineFormatTest::RunTest(const FString& Parameters)
+{
+    TestEqual(TEXT("with a parent"),
+              FRGLSceneManager::FormatStreamWarningLine(12.3456, reinterpret_cast<const void*>(0x5A0074), 200.0f,
+                                                        TEXT("BP_Car_C_1"), 200.0f),
+              FString(TEXT("rgl_scene_stream_warning t=12.346 sensor=0x5a0074 range_m=200 parent=BP_Car_C_1 "
+                           "parent_stream_radius_m=200 hint=attach_the_sensor_to_a_hero_vehicle_or_raise_tile_stream_distance")));
+    TestEqual(TEXT("without a parent"),
+              FRGLSceneManager::FormatStreamWarningLine(7.0, reinterpret_cast<const void*>(0x5A0075), 100.0f, FString(), -1.0f),
+              FString(TEXT("rgl_scene_stream_warning t=7.000 sensor=0x5a0075 range_m=100 parent=none "
+                           "parent_stream_radius_m=-1 hint=attach_the_sensor_to_a_hero_vehicle_or_raise_tile_stream_distance")));
     return true;
 }
 }

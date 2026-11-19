@@ -483,6 +483,10 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         IsmEmptySkippedSinceLog = 0;
         IsmMsSinceLog = 0.0;
         IsmMaxMsSinceLog = 0.0;
+
+        // P4: after the sync line, so its elapsed_ms does not include the streaming queries. Returns at once on a map
+        // without World Partition.
+        CheckStreamCoverage(World);
     }
 
     if (QueueEpisode.bActive && PendingCreates.Num() == 0)
@@ -3060,6 +3064,113 @@ void FRGLSceneManager::SetSensorAuditParent(const void* SensorId, AActor* RootPa
     }
 }
 
+float FRGLSceneManager::SensorRangeCm(const FSensorRegistration& S) const
+{
+    return (S.AuditRangeCm >= 0.0f) ? S.AuditRangeCm : FMath::Max(0.0f, S.RegistrationDistanceCm - UnregistrationHysteresisCm);
+}
+
+float FRGLSceneManager::StreamSourceRadiusCm(const AActor* RootParent)
+{
+    // The streaming source CARLA puts on spawned vehicles/walkers (CarlaEpisode.cpp) sits on the root actor.
+    float SourceRadiusCm = -1.0f;
+    if (RootParent)
+    {
+        if (const UWorldPartitionStreamingSourceComponent* Source =
+                RootParent->FindComponentByClass<UWorldPartitionStreamingSourceComponent>())
+        {
+            for (const FStreamingSourceShape& Shape : Source->Shapes)
+            {
+                if (!Shape.bUseGridLoadingRange)   // a grid-bound shape has no radius of its own
+                {
+                    SourceRadiusCm = FMath::Max(SourceRadiusCm, Shape.Radius);
+                }
+            }
+        }
+    }
+    return SourceRadiusCm;
+}
+
+// ============================================================================
+// Stream coverage warning (P4): the scene follows the loaded world, so a range that World Partition does not stream
+// in is not in it. Not a defect to fix here; the line tells the user how to get the range loaded.
+// ============================================================================
+
+FString FRGLSceneManager::FormatStreamWarningLine(double SimTime, const void* SensorId, float RangeM, const FString& ParentName,
+                                                  float ParentStreamRadiusM)
+{
+    return FString::Printf(
+        TEXT("rgl_scene_stream_warning t=%.3f sensor=0x%llx range_m=%.0f parent=%s parent_stream_radius_m=%.0f "
+             "hint=attach_the_sensor_to_a_hero_vehicle_or_raise_tile_stream_distance"),
+        SimTime, static_cast<unsigned long long>(reinterpret_cast<UPTRINT>(SensorId)), static_cast<double>(RangeM),
+        ParentName.IsEmpty() ? TEXT("none") : *ParentName, static_cast<double>(ParentStreamRadiusM));
+}
+
+void FRGLSceneManager::CheckStreamCoverage(UWorld* World)
+{
+    UWorldPartition* WorldPartition = World ? World->GetWorldPartition() : nullptr;
+    if (!WorldPartition)
+    {
+        return;   // not a World Partition map: the whole map is loaded
+    }
+    const UWorldPartitionSubsystem* WPSubsystem = World->GetSubsystem<UWorldPartitionSubsystem>();
+    if (!WPSubsystem || !WorldPartition->IsInitialized())
+    {
+        return;
+    }
+    TArray<FWorldPartitionStreamingQuerySource> Query;
+    FWorldPartitionStreamingQuerySource& Q = Query.AddDefaulted_GetRef();   // one sensor per query
+    Q.bUseGridLoadingRange = false;
+    Q.bSpatialQuery = true;
+    for (auto& Pair : RegisteredSensors)
+    {
+        FSensorRegistration& S = Pair.Value;
+        if (S.bStreamWarned)
+        {
+            continue;   // once per sensor: no more queries for it
+        }
+        Q.Location = S.Position;
+        Q.Radius = SensorRangeCm(S);
+        const bool bStreamedIn =
+            WPSubsystem->IsStreamingCompleted(EWorldPartitionRuntimeCellState::Activated, Query, /*bExactState=*/false);
+        StepStreamCoverage(Pair.Key, S, bStreamedIn);
+    }
+}
+
+void FRGLSceneManager::StepStreamCoverage(const void* SensorId, FSensorRegistration& S, bool bStreamedIn)
+{
+    if (S.bStreamWarned)
+    {
+        return;
+    }
+    const float RangeCm = SensorRangeCm(S);
+    const AActor* Parent = S.AuditParent.Get();
+    const float ParentRadiusCm = StreamSourceRadiusCm(Parent);
+    // The parent's own ring holds the whole range sphere: the sphere's cells load with the ring, so a not-streamed-in
+    // answer is streaming in progress (start-up, teleport), not something the hint can fix.
+    const bool bRingHoldsRange = Parent && ParentRadiusCm >= 0.0f &&
+        FVector::Dist(S.Position, Parent->GetActorLocation()) + RangeCm <= ParentRadiusCm;
+    if (bStreamedIn || bRingHoldsRange)
+    {
+        S.UncoveredSinceSimTime = -1.0;
+        return;
+    }
+    if (S.UncoveredSinceSimTime < 0.0 || CurrentSimTime < S.UncoveredSinceSimTime)   // a clock that went back starts again
+    {
+        S.UncoveredSinceSimTime = CurrentSimTime;
+    }
+    if (CurrentSimTime - S.UncoveredSinceSimTime < StreamWarningSeconds)
+    {
+        return;
+    }
+    S.bStreamWarned = true;
+    EmitSceneLine(FormatStreamWarningLine(CurrentSimTime, SensorId, RangeCm * RGLCoord::UE_TO_RGL,
+                                          Parent ? Parent->GetName() : FString(),
+                                          (ParentRadiusCm >= 0.0f) ? ParentRadiusCm * RGLCoord::UE_TO_RGL : -1.0f));
+#if !UE_BUILD_SHIPPING
+    ++StreamWarnings_ForTest;
+#endif
+}
+
 FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditExtras* OutExtras) const
 {
     namespace RA = RGLSceneAudit;
@@ -3091,30 +3202,12 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
             SyncSpheres.Add(RA::FAuditSphere{ S.LastSyncPosition, S.RegistrationDistanceCm });
         }
         CurrentRSpheres.Add(RA::FAuditSphere{ S.Position, S.RegistrationDistanceCm });
-        const float RangeCm = (S.AuditRangeCm >= 0.0f)
-            ? S.AuditRangeCm
-            : FMath::Max(0.0f, S.RegistrationDistanceCm - UnregistrationHysteresisCm);
-        RangeSpheres.Add(RA::FAuditSphere{ S.Position, RangeCm });
+        RangeSpheres.Add(RA::FAuditSphere{ S.Position, SensorRangeCm(S) });
 
-        // The streaming source CARLA puts on spawned vehicles/walkers (CarlaEpisode.cpp) sits on the root actor.
-        if (const AActor* Parent = S.AuditParent.Get())
+        const float SourceRadiusCm = StreamSourceRadiusCm(S.AuditParent.Get());
+        if (SourceRadiusCm >= 0.0f)
         {
-            if (const UWorldPartitionStreamingSourceComponent* Source =
-                    Parent->FindComponentByClass<UWorldPartitionStreamingSourceComponent>())
-            {
-                float SourceRadiusCm = -1.0f;
-                for (const FStreamingSourceShape& Shape : Source->Shapes)
-                {
-                    if (!Shape.bUseGridLoadingRange)   // a grid-bound shape has no radius of its own
-                    {
-                        SourceRadiusCm = FMath::Max(SourceRadiusCm, Shape.Radius);
-                    }
-                }
-                if (SourceRadiusCm >= 0.0f)
-                {
-                    MinParentRadiusCm = (MinParentRadiusCm < 0.0f) ? SourceRadiusCm : FMath::Min(MinParentRadiusCm, SourceRadiusCm);
-                }
-            }
+            MinParentRadiusCm = (MinParentRadiusCm < 0.0f) ? SourceRadiusCm : FMath::Min(MinParentRadiusCm, SourceRadiusCm);
         }
     }
     R.ParentStreamRadiusM = (MinParentRadiusCm >= 0.0f) ? MinParentRadiusCm * RGLCoord::UE_TO_RGL : -1.0f;
@@ -3665,6 +3758,18 @@ void FRGLSceneManager::Update_ForTest(UWorld* World, double SimTime)
 void FRGLSceneManager::OnLevelAddedToWorld_ForTest(ULevel* Level, UWorld* World)
 {
     OnLevelAddedToWorld(Level, World);
+}
+void FRGLSceneManager::CheckStreamCoverage_ForTest(double SimTime, bool bIsWp, bool bCovered)
+{
+    CurrentSimTime = SimTime;
+    if (!bIsWp)
+    {
+        return;   // as CheckStreamCoverage on a map without World Partition
+    }
+    for (auto& Pair : RegisteredSensors)
+    {
+        StepStreamCoverage(Pair.Key, Pair.Value, bCovered);
+    }
 }
 void FRGLSceneManager::AddIdleMeshEntry_ForTest(const UStaticMesh* Asset)
 {

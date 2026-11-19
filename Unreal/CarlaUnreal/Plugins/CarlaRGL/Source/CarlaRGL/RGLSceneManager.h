@@ -14,6 +14,8 @@
 //     create queue, an unload radius wider than the load radius, and an LRU of idle meshes
 //   - Re-evaluates the instances of Static instanced static meshes against the sensor spheres after each scan
 //     (on the following Updates, capped per Update), instead of choosing them once at registration
+//   - On World Partition maps, warns once per sensor whose range stays not streamed in (the scene follows the
+//     loaded world; what is not loaded is not in it)
 
 #pragma once
 
@@ -183,6 +185,11 @@ public:
     /// The rgl_scene_audit line (one grep-friendly key=value line).
     static FString FormatAuditLine(uint64 Frame, double SimTime, const FRGLSceneAuditResult& R);
 
+    /// The rgl_scene_stream_warning line (see CheckStreamCoverage). ParentName empty = no parent (printed as none);
+    /// ParentStreamRadiusM < 0 = the parent has no streaming source radius (printed as -1).
+    static FString FormatStreamWarningLine(double SimTime, const void* SensorId, float RangeM, const FString& ParentName,
+                                           float ParentStreamRadiusM);
+
     /// rgl.Scene.Audit = N >= 1 (Shipping: -rgl-scene-audit=N): print one rgl_scene_audit line every N-th
     /// call with a new Frame. Call after Update() and before the raytrace; further calls with the same Frame
     /// (other sensors ticking in that frame) do nothing. 0 = off (default).
@@ -224,6 +231,12 @@ public:
     int32 GetIsmEntityCount_ForTest(const UInstancedStaticMeshComponent* Comp) const;
     /// Levels waiting in the level-added list (P5).
     int32 GetPendingAddedLevelCount_ForTest() const { return PendingAddedLevels.Num(); }
+    /// rgl_scene_stream_warning lines printed by this instance (P4).
+    int32 StreamWarnings_ForTest = 0;
+    /// CheckStreamCoverage at SimTime with the World Partition answer given instead of asked: bIsWp = false is a map
+    /// without World Partition (nothing is counted), bCovered = every sensor's range sphere is streamed in. The rest
+    /// (the parent's ring, the 5 s, once per sensor) is the real logic. Sets the scene time like Update() does.
+    void CheckStreamCoverage_ForTest(double SimTime, bool bIsWp, bool bCovered);
 
     // Test seams: bypass the per-frame guard and the wall-clock sync timer; set scene time like Update() does.
     void SyncSkeletalNow_ForTest(UWorld* World, double SimTime);
@@ -584,6 +597,9 @@ private:
         // Scene audit (SetSensorAuditRange / SetSensorAuditParent).
         float   AuditRangeCm = -1.0f;              // < 0 = RegistrationDistanceCm - UnregistrationHysteresisCm
         TWeakObjectPtr<AActor> AuditParent;        // root of the sensor's attach chain; null = not attached
+        // Stream coverage warning (P4, CheckStreamCoverage).
+        double  UncoveredSinceSimTime = -1.0;      // sim time of the first check of the current not-streamed-in run; -1 = none
+        bool    bStreamWarned = false;             // the rgl_scene_stream_warning line was printed for this sensor
         // Self cutout (SetSensorSelfCutout); CutoutRadiusCm <= 0 = off.
         TWeakObjectPtr<AActor> CutoutVehicle;
         float      CutoutRadiusCm = 0.0f;
@@ -593,6 +609,29 @@ private:
     };
     /// Key = sensor id (session handle). Pointer key uses pointer hashing.
     TMap<const void*, FSensorRegistration> RegisteredSensors;
+
+    /// The range (cm) a sensor's rays reach (audit, stream check): SetSensorAuditRange's value, or, when it was never
+    /// set, RegistrationDistanceCm minus UnregistrationHysteresisCm. A sensor that only calls RegisterSensor is served.
+    float SensorRangeCm(const FSensorRegistration& S) const;
+
+    /// Radius (cm) that RootParent's World Partition streaming source loads around the actor: the largest radius among
+    /// its shapes that do not use the grid's loading range. -1 = no actor, no source, or no such shape. CARLA puts the
+    /// source on spawned vehicles and walkers (UCarlaEpisode::SpawnActorWithInfo). Shared with AuditScene.
+    static float StreamSourceRadiusCm(const AActor* RootParent);
+
+    // ---- Stream coverage warning (P4) ----
+    /// World Partition maps only (other maps: nothing). Runs after each static sync (Update). Per sensor not warned yet:
+    /// is its range sphere (position, SensorRangeCm) streamed in (Activated)? The same query as AuditScene's
+    /// stream_covered, one sensor at a time. A sensor whose sphere stays not streamed in for StreamWarningSeconds (sim,
+    /// from the first such check to a later one, with no covered check between) gets one rgl_scene_stream_warning
+    /// line, once per sensor (per registration). A check at which the parent's own streaming source sphere holds the
+    /// whole range sphere counts as covered: the parent's ring loads that sphere, so it is streaming in progress (the
+    /// default 3 km hero ring takes more than 5 s at start-up), not a configuration the hint can fix. RegisterSensor
+    /// alone is enough: no range set = SensorRangeCm's fallback, no parent = none (every not-streamed-in check counts).
+    void CheckStreamCoverage(UWorld* World);
+    /// One sensor's check at CurrentSimTime (bStreamedIn = its range sphere is Activated): the clock, then the line.
+    void StepStreamCoverage(const void* SensorId, FSensorRegistration& S, bool bStreamedIn);
+    static constexpr double StreamWarningSeconds = 5.0;
 
     /// Hysteresis for dynamic unloads to avoid add/remove churn around the boundary (UE5 cm).
     /// Static meshes unload beyond RegistrationDistanceCm * rgl.Scene.UnloadDistanceFactor + this margin
