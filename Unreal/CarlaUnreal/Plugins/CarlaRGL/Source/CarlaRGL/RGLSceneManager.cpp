@@ -465,16 +465,22 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
     {
         // The sync and this Update's create step (the ISM re-evaluation never runs in a sync's Update).
         const double ElapsedMs = (FPlatformTime::Seconds() - StepStartSeconds) * 1000.0;
-        EmitSceneLine(FString::Printf(
+        const FString SyncLine = FString::Printf(
             TEXT("rgl_scene_sync t=%.3f trigger=%s scanned=%d added_cached=%d queued=%d created=%d removed=%d "
                  "idle_destroyed=%d pending=%d elapsed_ms=%.2f drain_ms=%.2f failed=%d drain_reused=%d dropped=%d "
                  "range_skipped=%d sensors=%d entities=%d ismc=%d meshes=%d idle=%d dead_ismc=%d "
-                 "ism_added=%d ism_removed=%d ism_pending=%d ism_empty_skipped=%d ism_ms=%.2f ism_max_ms=%.2f"),
+                 "ism_added=%d ism_removed=%d ism_pending=%d ism_empty_skipped=%d ism_ms=%.2f ism_max_ms=%.2f "
+                 "scan_ms=%.2f reg_ms=%.2f remove_ms=%.2f skel_ms=%.2f"),
             CurrentSimTime, Trigger, SyncStats.ScannedActors, SyncStats.AddedCached, SyncStats.Queued,
             Drain.Created, SyncStats.Removed, IdleDestroyedSinceLog, PendingCreates.Num(), ElapsedMs, Drain.Ms,
             MeshFailuresSinceLog, Drain.RegisteredCached, Drain.Dropped, SyncStats.RangeSkipped, RegisteredSensors.Num(),
             EntityMap.Num(), ISMCEntityMap.Num(), MeshCache.Num(), IdleMeshLru.Num(), DeadIsmcSinceLog,
-            IsmAddedSinceLog, IsmRemovedSinceLog, IsmPendingAtSync, IsmEmptySkippedSinceLog, IsmMsSinceLog, IsmMaxMsSinceLog));
+            IsmAddedSinceLog, IsmRemovedSinceLog, IsmPendingAtSync, IsmEmptySkippedSinceLog, IsmMsSinceLog, IsmMaxMsSinceLog,
+            SyncStats.ScanMs, SyncStats.RegMs, SyncStats.RemoveMs, SyncStats.SkelMs);
+        EmitSceneLine(SyncLine);
+#if !UE_BUILD_SHIPPING
+        LastSyncLine_ForTest = SyncLine;
+#endif
         IdleDestroyedSinceLog = 0;
         MeshFailuresSinceLog = 0;
         DeadIsmcSinceLog = 0;
@@ -600,10 +606,10 @@ void FRGLSceneManager::InitializeFromWorld(UWorld* World)
         }
         ++ActorCount;
 
-        TArray<UStaticMeshComponent*> Components;
-        Actor->GetComponents<UStaticMeshComponent>(Components);
+        ScanComponents.Reset();   // one array for every actor (P7)
+        Actor->GetComponents<UStaticMeshComponent>(ScanComponents);
 
-        for (UStaticMeshComponent* Comp : Components)
+        for (UStaticMeshComponent* Comp : ScanComponents)
         {
             if (IsValid(Comp) && Comp->GetStaticMesh())
             {
@@ -630,6 +636,7 @@ void FRGLSceneManager::InitializeFromWorld(UWorld* World)
             }
         }
     }
+    ScanComponents.Reset();
 
     if (SkeletalEnabled())
     {
@@ -1450,17 +1457,18 @@ bool FRGLSceneManager::CollectInRangeInstances(const UInstancedStaticMeshCompone
     return OutIndices.Num() > 0;
 }
 
-FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStaticMeshComponent* Component)
+FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStaticMeshComponent* Component,
+                                                                    bool bRememberVerdict) const
 {
     // An unregistered component is not part of the loaded world (its level is being streamed out, or the owner
     // unregistered it): registering it would put a ghost into the scene (P1).
-    if (!IsValid(Component) || !Component->IsRegistered() || !Component->GetStaticMesh() || !Component->IsVisible())
+    const UStaticMesh* Mesh = IsValid(Component) ? Component->GetStaticMesh() : nullptr;
+    if (!Mesh || !Component->IsRegistered() || !Component->IsVisible())
     {
         return EStaticGate::Reject;
     }
 
-    const FTransform WorldTransform = Component->GetComponentTransform();
-    const FVector Scale = WorldTransform.GetScale3D();
+    const FVector Scale = Component->GetComponentTransform().GetScale3D();
     if (FMath::IsNearlyZero(Scale.X) || FMath::IsNearlyZero(Scale.Y) || FMath::IsNearlyZero(Scale.Z))
     {
         return EStaticGate::Reject;
@@ -1468,7 +1476,8 @@ FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStati
 
     // Sky domes and spheres are valid static meshes but should never take part in LiDAR ray tracing. Only the dome
     // words count, not "sky" anywhere in a name: that also dropped CARLA's shared skyscraper parts (SM_Skysc*).
-    if (IsSkyDomeMeshName(Component->GetStaticMesh()->GetName()))
+    // The verdict depends on the mesh alone: remembered per mesh, no name string per component (P7).
+    if (IsSkyDomeMesh(Mesh, bRememberVerdict))
     {
         return EStaticGate::ExcludedByName;
     }
@@ -1480,6 +1489,21 @@ FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStati
     }
 
     return EStaticGate::Pass;
+}
+
+bool FRGLSceneManager::IsSkyDomeMesh(const UStaticMesh* Mesh, bool bRemember) const
+{
+    const FObjectKey Key(Mesh);   // generation-aware: a mesh that takes a collected one's address has another key
+    if (const bool* Verdict = SkyVerdictByMesh.Find(Key))
+    {
+        return *Verdict;
+    }
+    const bool bDome = IsSkyDomeMeshName(Mesh->GetName());
+    if (bRemember)
+    {
+        SkyVerdictByMesh.Add(Key, bDome);
+    }
+    return bDome;
 }
 
 bool FRGLSceneManager::IsSkyDomeMeshName(const FString& MeshName)
@@ -1882,6 +1906,14 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
             It.RemoveCurrent(); // No strong asset reference; GC address reuse cannot inherit a failure.
         }
     }
+    // P7: the sky-name verdicts of meshes that are gone (no lookup can reach them again).
+    for (auto It = SkyVerdictByMesh.CreateIterator(); It; ++It)
+    {
+        if (!It.Key().ResolveObjectPtr())
+        {
+            It.RemoveCurrent();
+        }
+    }
 
     // Evict sensors that stopped refreshing (paused but not destroyed) so their
     // surrounding geometry can be released and stop holding VRAM.
@@ -1904,14 +1936,25 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
     // scan decides what is resident.
     PurgeIdleMeshes();
 
-    TSet<UStaticMeshComponent*> CurrentComponents;
-    TSet<UInstancedStaticMeshComponent*> CurrentISMComponents;
-    TArray<FPendingCreate> NewPending;
+    // P7: the scan's containers are members; Reset keeps their allocations from one sync to the next.
+    TSet<UStaticMeshComponent*>& CurrentComponents = ScanCurrentComponents;
+    TSet<UInstancedStaticMeshComponent*>& CurrentISMComponents = ScanCurrentIsmComponents;
+    TArray<FPendingCreate>& NewPending = ScanNewPending;
+    CurrentComponents.Reset();
+    CurrentISMComponents.Reset();
+    NewPending.Reset();
+    ScanSkeletalCandidates.Reset();
     int32 RemovedRegular = 0;
     int32 RemovedISM = 0;
+    const bool bSkeletal = SkeletalEnabled();
+
+    // The RGL calls made during the scan are timed apart (reg_ms) from the scan itself (scan_ms).
+    double RegSeconds = 0.0;
+    const double ScanStartSeconds = FPlatformTime::Seconds();
 
     // NOTE: a full-world actor scan on the game thread; its cost scales with the map, not with what changed
-    // (see elapsed_ms of a sync with created=0). A spatial index is the next step if that cost matters.
+    // (see scan_ms of a sync with created=0). A spatial index is the next step if that cost matters.
+    // One scan serves the static and the skeletal syncs: the skeletal sync used to visit every actor again.
     for (TActorIterator<AActor> It(World); It; ++It)
     {
         AActor* Actor = *It;
@@ -1921,10 +1964,17 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
         }
         ++OutStats.ScannedActors;
 
-        TArray<UStaticMeshComponent*> Components;
-        Actor->GetComponents<UStaticMeshComponent>(Components);
+        if (bSkeletal)
+        {
+            ScanActorSkeletal.Reset();
+            Actor->GetComponents<USkeletalMeshComponent>(ScanActorSkeletal);
+            ScanSkeletalCandidates.Append(ScanActorSkeletal);
+        }
 
-        for (UStaticMeshComponent* Comp : Components)
+        ScanComponents.Reset();
+        Actor->GetComponents<UStaticMeshComponent>(ScanComponents);
+
+        for (UStaticMeshComponent* Comp : ScanComponents)
         {
             bool bOutOfRange = false;
             if (!ShouldRegisterComponent(Comp, bOutOfRange))
@@ -1956,7 +2006,9 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
                     {
                         continue;
                     }
+                    const double RegStartSeconds = FPlatformTime::Seconds();
                     UnregisterISMComponent(ISMComp);
+                    RegSeconds += FPlatformTime::Seconds() - RegStartSeconds;
                     ++RemovedISM;
                 }
                 // A Static ISM none of whose instances reaches R is not queued: registering it would upload its mesh
@@ -1988,7 +2040,10 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
             // component that replaces a just-destroyed one with the same asset finds that one's mesh still live.
             if (FindCachedMesh(StaticMesh) && MeshRefCounts.FindRef(FObjectKey(StaticMesh)) > 0)
             {
-                if (RegisterComponent(Comp))   // dispatches ISMCs to RegisterISMComponent
+                const double RegStartSeconds = FPlatformTime::Seconds();
+                const bool bRegistered = RegisterComponent(Comp);   // dispatches ISMCs to RegisterISMComponent
+                RegSeconds += FPlatformTime::Seconds() - RegStartSeconds;
+                if (bRegistered)
                 {
                     ++OutStats.AddedCached;
                 }
@@ -2001,12 +2056,18 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
             Pending.GapCm = NearestSensorGapCm(Comp->Bounds.Origin, Comp->Bounds.SphereRadius);
         }
     }
+    ScanComponents.Reset();
+    ScanActorSkeletal.Reset();
+    OutStats.RegMs = RegSeconds * 1000.0;
+    OutStats.ScanMs = FMath::Max(0.0, (FPlatformTime::Seconds() - ScanStartSeconds - RegSeconds) * 1000.0);
     // The scan has seen every level added so far: none of them needs a level-triggered sync any more (P5).
     PendingAddedLevels.Reset();
 
     // Remove regular entities for components that no longer exist or moved out
     // of the LiDAR-relevant window.
-    TArray<UStaticMeshComponent*> ToRemove;
+    const double RemoveStartSeconds = FPlatformTime::Seconds();
+    TArray<UStaticMeshComponent*>& ToRemove = ScanToRemove;
+    ToRemove.Reset();
     for (auto& Pair : EntityMap)
     {
         // A destroyed component leaves a dangling raw key in this non-UObject map
@@ -2029,9 +2090,12 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
         ++RemovedRegular;
     }
 
+    ToRemove.Reset();
+
     // Remove ISMC entities for components that no longer exist or moved out
     // of the LiDAR-relevant window.
-    TArray<UInstancedStaticMeshComponent*> ISMCToRemove;
+    TArray<UInstancedStaticMeshComponent*>& ISMCToRemove = ScanIsmToRemove;
+    ISMCToRemove.Reset();
     for (auto& Pair : ISMCEntityMap)
     {
         // Same dangling-raw-key guard as the regular-entity loop above.
@@ -2050,13 +2114,20 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
         UnregisterISMComponent(Comp);
         ++RemovedISM;
     }
+    ISMCToRemove.Reset();
     OutStats.Removed = RemovedRegular + RemovedISM;
+    OutStats.RemoveMs = (FPlatformTime::Seconds() - RemoveStartSeconds) * 1000.0;
 
     // The new queue replaces the old one: what the scan no longer saw in range is dropped, and the
-    // order follows the sensors' current positions (nearest surface first).
+    // order follows the sensors' current positions (nearest surface first). The old queue's array is kept for the next
+    // sync's scan.
     NewPending.Sort([](const FPendingCreate& A, const FPendingCreate& B) { return A.GapCm < B.GapCm; });
-    PendingCreates = MoveTemp(NewPending);
+    Swap(PendingCreates, NewPending);
+    NewPending.Reset();
     OutStats.Queued = PendingCreates.Num();
+    // The sets hold raw component pointers: emptied (allocations kept) so that nothing stale waits for the next sync.
+    CurrentComponents.Reset();
+    CurrentISMComponents.Reset();
 
     // P3: every registered Static ISM group is compared with the sensor spheres again, nearest first, on the next
     // Updates without a sync (DrainIsmReevaluations). The queue is rebuilt like PendingCreates: a group the previous
@@ -2078,15 +2149,19 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
     PendingIsmReevals.Sort([](const FPendingIsmReeval& A, const FPendingIsmReeval& B) { return A.GapCm < B.GapCm; });
 
     // Skeletal components are tracked in a separate map with their own budget /
-    // hysteresis rules; a live kill-switch flip tears the whole skeletal path down.
-    if (SkeletalEnabled())
+    // hysteresis rules; a live kill-switch flip tears the whole skeletal path down. Their candidates come from the
+    // scan above (the same actors, in the same order as a scan of its own would visit them).
+    const double SkelStartSeconds = FPlatformTime::Seconds();
+    if (bSkeletal)
     {
-        SyncSkeletalComponents(World);
+        SyncSkeletalCandidates(ScanSkeletalCandidates);
     }
     else if (SkeletalEntityMap.Num() > 0)
     {
         TeardownSkeletal();
     }
+    ScanSkeletalCandidates.Reset();
+    OutStats.SkelMs = (FPlatformTime::Seconds() - SkelStartSeconds) * 1000.0;
     // The per-sync summary is the rgl_scene_sync line printed by Update() after the drain step.
 }
 
@@ -2658,6 +2733,19 @@ void FRGLSceneManager::UpdateSkeletalPoses()
 
 void FRGLSceneManager::SyncSkeletalComponents(UWorld* World)
 {
+    TArray<USkeletalMeshComponent*> Candidates;
+    TArray<USkeletalMeshComponent*> Comps;
+    for (TActorIterator<AActor> It(World); It; ++It)
+    {
+        AActor* Actor = *It; if (!IsValid(Actor)) continue;
+        Comps.Reset(); Actor->GetComponents<USkeletalMeshComponent>(Comps);
+        Candidates.Append(Comps);
+    }
+    SyncSkeletalCandidates(Candidates);
+}
+
+void FRGLSceneManager::SyncSkeletalCandidates(const TArray<USkeletalMeshComponent*>& Candidates)
+{
     const bool bTickPolicy = CVarRGLSkeletalAlwaysTickPose.GetValueOnGameThread() != 0;
     const int32 MaxEntities = FMath::Max(0, CVarRGLSkeletalMaxEntities.GetValueOnGameThread());
     for (auto& Pair : SkeletalEntityMap) if (USkeletalMeshComponent* Live = Pair.Value.Component.Get()) ApplyTickPolicy(Live, Pair.Value, bTickPolicy);
@@ -2665,24 +2753,19 @@ void FRGLSceneManager::SyncSkeletalComponents(UWorld* World)
     // 1) Evaluate every skeletal component: eligible set (with distance), hard-disqualified set, retry set.
     struct FCand { USkeletalMeshComponent* Comp; float DistSq; };
     TArray<FCand> Eligible; TSet<USkeletalMeshComponent*> Disqualified; int32 RangeSkipped = 0, RetryLater = 0;
-    for (TActorIterator<AActor> It(World); It; ++It)
+    for (USkeletalMeshComponent* C : Candidates)
     {
-        AActor* Actor = *It; if (!IsValid(Actor)) continue;
-        TArray<USkeletalMeshComponent*> Comps; Actor->GetComponents<USkeletalMeshComponent>(Comps);
-        for (USkeletalMeshComponent* C : Comps)
+        bool bOut = false, bRetry = false; FString Reason;
+        if (!ShouldRegisterSkeletalComponent(C, bOut, bRetry, Reason))
         {
-            bool bOut = false, bRetry = false; FString Reason;
-            if (!ShouldRegisterSkeletalComponent(C, bOut, bRetry, Reason))
-            {
-                if (bRetry) { ++RetryLater; WarnSkeletalOnce(C, C->GetSkeletalMeshAsset(), TEXT("not readable yet, will retry: ") + Reason); }
-                else if (bOut) ++RangeSkipped;
-                else Disqualified.Add(C);          // scope/visibility/scale/bNoSkeletonUpdate/bRenderStatic: no hysteresis
-                continue;
-            }
-            float Best = TNumericLimits<float>::Max();
-            for (const auto& S : RegisteredSensors) Best = FMath::Min(Best, (float)FVector::DistSquared(S.Value.Position, C->Bounds.Origin));
-            Eligible.Add({ C, Best });
+            if (bRetry) { ++RetryLater; WarnSkeletalOnce(C, C->GetSkeletalMeshAsset(), TEXT("not readable yet, will retry: ") + Reason); }
+            else if (bOut) ++RangeSkipped;
+            else Disqualified.Add(C);          // scope/visibility/scale/bNoSkeletonUpdate/bRenderStatic: no hysteresis
+            continue;
         }
+        float Best = TNumericLimits<float>::Max();
+        for (const auto& S : RegisteredSensors) Best = FMath::Min(Best, (float)FVector::DistSquared(S.Value.Position, C->Bounds.Origin));
+        Eligible.Add({ C, Best });
     }
     // 2) Unregister: dead, hard-disqualified, or out of range beyond hysteresis. Registrations that
     //    survive this step but are NOT eligible ("retained" by hysteresis) still occupy VRAM, so
@@ -3126,7 +3209,12 @@ void FRGLSceneManager::CheckStreamCoverage(UWorld* World)
         FSensorRegistration& S = Pair.Value;
         if (S.bStreamWarned)
         {
-            continue;   // once per sensor: no more queries for it
+            continue;   // once per registration: no more queries for it
+        }
+        if (ParentRingHoldsRange(S))
+        {
+            S.UncoveredSinceSimTime = -1.0;   // as StepStreamCoverage does for a held range, without the query
+            continue;
         }
         Q.Location = S.Position;
         Q.Radius = SensorRangeCm(S);
@@ -3142,14 +3230,10 @@ void FRGLSceneManager::StepStreamCoverage(const void* SensorId, FSensorRegistrat
     {
         return;
     }
-    const float RangeCm = SensorRangeCm(S);
-    const AActor* Parent = S.AuditParent.Get();
-    const float ParentRadiusCm = StreamSourceRadiusCm(Parent);
-    // The parent's own ring holds the whole range sphere: the sphere's cells load with the ring, so a not-streamed-in
-    // answer is streaming in progress (start-up, teleport), not something the hint can fix.
-    const bool bRingHoldsRange = Parent && ParentRadiusCm >= 0.0f &&
-        FVector::Dist(S.Position, Parent->GetActorLocation()) + RangeCm <= ParentRadiusCm;
-    if (bStreamedIn || bRingHoldsRange)
+    // Streamed in: the parent is not looked at. The parent's own ring holds the whole range sphere: the sphere's cells
+    // load with the ring, so a not-streamed-in answer is streaming in progress (start-up, teleport), not something the
+    // hint can fix.
+    if (bStreamedIn || ParentRingHoldsRange(S))
     {
         S.UncoveredSinceSimTime = -1.0;
         return;
@@ -3163,12 +3247,23 @@ void FRGLSceneManager::StepStreamCoverage(const void* SensorId, FSensorRegistrat
         return;
     }
     S.bStreamWarned = true;
+    const float RangeCm = SensorRangeCm(S);
+    const AActor* Parent = S.AuditParent.Get();
+    const float ParentRadiusCm = StreamSourceRadiusCm(Parent);
     EmitSceneLine(FormatStreamWarningLine(CurrentSimTime, SensorId, RangeCm * RGLCoord::UE_TO_RGL,
                                           Parent ? Parent->GetName() : FString(),
                                           (ParentRadiusCm >= 0.0f) ? ParentRadiusCm * RGLCoord::UE_TO_RGL : -1.0f));
 #if !UE_BUILD_SHIPPING
     ++StreamWarnings_ForTest;
 #endif
+}
+
+bool FRGLSceneManager::ParentRingHoldsRange(const FSensorRegistration& S) const
+{
+    const AActor* Parent = S.AuditParent.Get();
+    const float ParentRadiusCm = StreamSourceRadiusCm(Parent);
+    return Parent && ParentRadiusCm >= 0.0f &&
+           FVector::Dist(S.Position, Parent->GetActorLocation()) + SensorRangeCm(S) <= ParentRadiusCm;
 }
 
 FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditExtras* OutExtras) const
@@ -3400,7 +3495,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
     };
     auto AuditStaticComponent = [&](UStaticMeshComponent* SMC)
     {
-        const EStaticGate Gate = GateStaticComponent(SMC);
+        const EStaticGate Gate = GateStaticComponent(SMC, /*bRememberVerdict=*/false);   // read-only: no memo entry
         if (Gate == EStaticGate::Reject)
         {
             return;   // no mesh, hidden, zero scale: not a candidate (and not a defect)
@@ -3780,6 +3875,10 @@ void FRGLSceneManager::AddIdleMeshEntry_ForTest(const UStaticMesh* Asset)
     }
     MeshCache.Add(Key);
     IdleMeshLru.Add(Key);
+}
+int32 FRGLSceneManager::GetSkyVerdictCount_ForTest() const
+{
+    return SkyVerdictByMesh.Num();
 }
 int32 FRGLSceneManager::GetIsmEntityCount_ForTest(const UInstancedStaticMeshComponent* Comp) const
 {

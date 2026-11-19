@@ -9,7 +9,9 @@
 //   - Creates rgl_entity_t for each UStaticMeshComponent instance
 //   - Updates entity transforms each tick; drops entities whose component left the world (unregistered) at once
 //   - Handles actor creation/destruction via periodic world scans, plus a scan when a level with static
-//     geometry in some sensor's sphere is added (World Partition cells, level streaming)
+//     geometry in some sensor's sphere is added (World Partition cells, level streaming). One actor scan per sync
+//     serves the static and the skeletal paths; the sky-name verdict is remembered per mesh
+//     (the rgl_scene_sync line splits the sync's time: scan_ms, reg_ms, remove_ms, skel_ms)
 //   - Amortizes new-mesh creation across scans (rgl.Scene.* CVars): a budgeted, nearest-first
 //     create queue, an unload radius wider than the load radius, and an LRU of idle meshes
 //   - Re-evaluates the instances of Static instanced static meshes against the sensor spheres after each scan
@@ -222,6 +224,10 @@ public:
     /// Static syncs run by Update() / Update_ForTest(), and the trigger name of the last one.
     int32 SyncCount_ForTest = 0;
     FString LastSyncTrigger_ForTest;
+    /// The last rgl_scene_sync line printed by Update() / Update_ForTest() (P7: the tests read its keys).
+    FString LastSyncLine_ForTest;
+    /// Entries of the per-mesh memo of the sky-name verdict (P7).
+    int32 GetSkyVerdictCount_ForTest() const;
     /// Static meshes uploaded to RGL (rgl_mesh_create) by this instance.
     int32 MeshUploads_ForTest = 0;
     /// Puts an idle MeshCache entry for Asset (no RGL mesh, no entity), as if its last entity had left; nothing is
@@ -281,8 +287,15 @@ private:
     /// is not registered (its level is being streamed out, or its owner unregistered it) is no candidate.
     /// The name rule leaves out a component whose mesh name is a sky dome's (IsSkyDomeMeshName), or whose bounds
     /// radius exceeds HugeSkyRadiusCm and whose names the old rule matches (IsLegacySkyName).
+    /// P7: the dome-word verdict belongs to the mesh and is remembered per mesh (SkyVerdictByMesh), so a sync builds no
+    /// name string per component; the size guard is still judged per component (its names are built only for a
+    /// component wider than 2 km). bRememberVerdict = false (the read-only audit): a verdict not remembered yet is
+    /// worked out without adding it.
     enum class EStaticGate : uint8 { Reject, ExcludedByName, Pass };
-    static EStaticGate GateStaticComponent(const UStaticMeshComponent* Component);
+    EStaticGate GateStaticComponent(const UStaticMeshComponent* Component, bool bRememberVerdict = true) const;
+
+    /// IsSkyDomeMeshName of Mesh's name, through the per-mesh memo (see GateStaticComponent).
+    bool IsSkyDomeMesh(const UStaticMesh* Mesh, bool bRemember) const;
 
     /// Check whether an already registered component should stay in the active RGL scene.
     bool ShouldKeepRegisteredComponent(UStaticMeshComponent* Component) const;
@@ -334,6 +347,12 @@ private:
         int32 Queued = 0;         // components waiting for a new mesh or idle reactivation
         int32 Removed = 0;        // regular + ISMC components unregistered
         int32 RangeSkipped = 0;   // components outside every sensor's registration sphere
+        // P7: where the sync's wall time goes (scan_ms, reg_ms, remove_ms, skel_ms on the line).
+        double ScanMs = 0.0;      // the actor scan (static candidates, and the skeletal candidates of the same actors),
+                                  // without the RGL calls it makes (RegMs)
+        double RegMs = 0.0;       // RGL registrations during the scan (meshes with live entities, rebuilt ISM groups)
+        double RemoveMs = 0.0;    // removal of the registered components the scan no longer keeps
+        double SkelMs = 0.0;      // the skeletal sync on the scan's candidates
     };
 
     /// Per-Update counters of one drain step of the pending-create queue.
@@ -439,7 +458,11 @@ private:
     bool  RegisterSkeletalComponent(USkeletalMeshComponent* Comp);
     void  UnregisterSkeletalComponent(USkeletalMeshComponent* Key);
     void  UpdateSkeletalPoses();
+    /// The skeletal sync with its own actor scan (initialization, the test seam).
     void  SyncSkeletalComponents(UWorld* World);
+    /// The skeletal sync on Candidates: every skeletal mesh component of the scanned actors, in scan order.
+    /// SyncWorldComponents gathers them in its own actor scan (P7: one scan of the world per sync, not two).
+    void  SyncSkeletalCandidates(const TArray<USkeletalMeshComponent*>& Candidates);
     void  TeardownSkeletal();
     void  ApplyTickPolicy(USkeletalMeshComponent* Comp, FSkeletalEntityInfo& Info, bool bEnable);
     void  WarnSkeletalOnce(const USkeletalMeshComponent* Comp, const USkeletalMesh* Mesh, const FString& Msg);
@@ -571,6 +594,19 @@ private:
     TArray<FPendingIsmReeval> PendingIsmReevals;
     TArray<int32> IsmScanIndices;   // CollectInRangeInstances' output in the sync's scan, reused
 
+    // ---- P7: the sync's scan, kept between syncs so that a sync allocates nothing in steady state ----
+    /// Name-rule verdict per static mesh (true = a sky dome's mesh name), worked out once per mesh. Entries whose key no
+    /// longer resolves are dropped at each sync. Filled by the sync paths only (the audit reads it).
+    mutable TMap<FObjectKey, bool> SkyVerdictByMesh;
+    TArray<UStaticMeshComponent*> ScanComponents;              // one actor's static mesh components
+    TArray<USkeletalMeshComponent*> ScanActorSkeletal;         // one actor's skeletal mesh components
+    TArray<USkeletalMeshComponent*> ScanSkeletalCandidates;    // every scanned actor's skeletal mesh components
+    TSet<UStaticMeshComponent*> ScanCurrentComponents;         // regular components the scan keeps
+    TSet<UInstancedStaticMeshComponent*> ScanCurrentIsmComponents;   // ISM components the scan keeps
+    TArray<FPendingCreate> ScanNewPending;                     // the next create queue (swapped with PendingCreates)
+    TArray<UStaticMeshComponent*> ScanToRemove;
+    TArray<UInstancedStaticMeshComponent*> ScanIsmToRemove;
+
     /// ISM re-evaluation telemetry since the last rgl_scene_sync line (ism_* keys).
     int32  IsmAddedSinceLog = 0;
     int32  IsmRemovedSinceLog = 0;
@@ -628,9 +664,13 @@ private:
     /// whole range sphere counts as covered: the parent's ring loads that sphere, so it is streaming in progress (the
     /// default 3 km hero ring takes more than 5 s at start-up), not a configuration the hint can fix. RegisterSensor
     /// alone is enough: no range set = SensorRangeCm's fallback, no parent = none (every not-streamed-in check counts).
+    /// The ring is looked at first: a sensor whose parent's ring holds its range is not queried.
     void CheckStreamCoverage(UWorld* World);
     /// One sensor's check at CurrentSimTime (bStreamedIn = its range sphere is Activated): the clock, then the line.
+    /// A streamed-in check returns before the parent is looked at.
     void StepStreamCoverage(const void* SensorId, FSensorRegistration& S, bool bStreamedIn);
+    /// The parent's own streaming source sphere holds S's whole range sphere (S.AuditParent, StreamSourceRadiusCm).
+    bool ParentRingHoldsRange(const FSensorRegistration& S) const;
     static constexpr double StreamWarningSeconds = 5.0;
 
     /// Hysteresis for dynamic unloads to avoid add/remove churn around the boundary (UE5 cm).

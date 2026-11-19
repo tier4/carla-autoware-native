@@ -2,7 +2,7 @@
 // Shared fixture and helpers of the scene tests (CarlaRGL.SceneAudit.*, CarlaRGL.SceneSync.*) on the game world of
 // EmptyMap. The scene manager of a world is shared by every test, so counts are compared as differences around each
 // step (Diff), and every test works around its own base point (BaseFor), 1 km from the others.
-// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-15, 17-19, 21-25, 31-37, 40, 46, 47, 60 (SceneSync; 12 by the two
+// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-15, 17-19, 21-27, 31-38, 40, 46, 47, 60 (SceneSync; 12 by the two
 // level-sync tests).
 // Give each new test a slot nobody else uses.
 

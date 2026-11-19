@@ -6,11 +6,13 @@
 // Then the fixes: unregistered ISM components leave the scene at once (P1), adding a level with geometry in some
 // sensor's R syncs (P5), the instances of Static ISMs are re-evaluated against the sensor spheres (P3), the name
 // rule leaves out sky domes and spheres only (N1), and the mesh cache is keyed by the asset's identity (P2).
-// Last, the warning for a sensor whose range is not streamed in on a World Partition map (P4).
+// Then the warning for a sensor whose range is not streamed in on a World Partition map (P4). Last, the lighter sync
+// (P7): the sky-name verdict remembered per mesh, and the sync's cost on its line.
 
 #include <util/ue-header-guard-begin.h>
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/Parse.h"
 #include "Engine/World.h"
 #include "Engine/Level.h"
 #include "Engine/StaticMesh.h"
@@ -1094,6 +1096,128 @@ bool FSceneSyncStreamWarningLineFormatTest::RunTest(const FString& Parameters)
               FRGLSceneManager::FormatStreamWarningLine(7.0, reinterpret_cast<const void*>(0x5A0075), 100.0f, FString(), -1.0f),
               FString(TEXT("rgl_scene_stream_warning t=7.000 sensor=0x5a0075 range_m=100 parent=none "
                            "parent_stream_radius_m=-1 hint=attach_the_sensor_to_a_hero_vehicle_or_raise_tile_stream_distance")));
+    return true;
+}
+
+// ============================================================================
+// P7: a lighter static sync (the sky-name verdict is remembered per mesh; the scan's arrays are reused)
+// ============================================================================
+
+// The name rule's verdict belongs to the mesh, not to the component: a Movable cube is registered, leaves the scene when
+// its mesh becomes a sky sphere, and comes back when the cube returns. A transient mesh named SM_SkySphere stands in for
+// the engine's asset (no dependency on engine content; it is never uploaded).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSkyVerdictFollowsMeshSwapTest, "CarlaRGL.SceneSync.SkyVerdictFollowsMeshSwap",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSkyVerdictFollowsMeshSwapTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    TStrongObjectPtr<UStaticMesh> Sky(NewNamedTransientMesh(TEXT("SM_SkySphere")));
+    if (!TestNotNull(TEXT("sky sphere mesh"), Sky.Get())) return false;
+    TestTrue(FString::Printf(TEXT("a dome word in the mesh name (%s)"), *Sky->GetName()), FRGLSceneManager::IsSkyDomeMeshName(Sky->GetName()));
+    const FVector Base = BaseFor(26);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0080), Base, 11000.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AStaticMeshActor* A = F.Keep(SpawnMeshActor(World, Cube, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Movable));
+    if (!TestNotNull(TEXT("movable cube"), A)) return false;
+    UStaticMeshComponent* Comp = A->GetStaticMeshComponent();
+    F.Sync();
+    const FRGLSceneAuditResult D1 = Diff(R0, F.Audit());
+    TestEqual(TEXT("cube: registered +1"), D1.Registered, 1);
+    TestEqual(TEXT("cube: excluded_by_name +0"), D1.ExcludedByName, 0);
+
+    Comp->SetStaticMesh(Sky.Get());
+    if (!TestTrue(TEXT("the sky mesh is applied"), Comp->GetStaticMesh() == Sky.Get())) return false;
+    F.Sync();
+    const FRGLSceneAuditResult R2 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(26, F.T, R2));
+    const FRGLSceneAuditResult D2 = Diff(R0, R2);
+    TestEqual(TEXT("sky sphere: registered 0"), D2.Registered, 0);
+    TestEqual(TEXT("sky sphere: excluded_by_name +1"), D2.ExcludedByName, 1);
+    TestEqual(TEXT("sky sphere: not missing"), D2.MissingInRange, 0);
+
+    Comp->SetStaticMesh(Cube);
+    if (!TestTrue(TEXT("the cube is applied again"), Comp->GetStaticMesh() == Cube)) return false;
+    F.Sync();
+    const FRGLSceneAuditResult D3 = Diff(R0, F.Audit());
+    TestEqual(TEXT("cube again: registered +1"), D3.Registered, 1);
+    TestEqual(TEXT("cube again: excluded_by_name +0"), D3.ExcludedByName, 0);
+    TestEqual(TEXT("cube again: not missing"), D3.MissingInRange, 0);
+    TestEqual(TEXT("cube again: no ghost"), D3.Ghost, 0);
+    return true;
+}
+
+// The cost of a sync with 2,000 static cubes in range (logged; no threshold), and the scan's own time on the sync line
+// (scan_ms) that the P7 measurement reads. The line comes from an Update whose sync the sensor's 30 m move triggers
+// (more than the 24 m distance trigger; every cube stays inside R).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSyncCostLoggedTest, "CarlaRGL.SceneSync.SyncCostLogged",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSyncCostLoggedTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(27);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0081), Base, 11100.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    const int32 NumCubes = 2000;   // 50 x 40 grid, 2 m pitch: all within 65 m of the sensor
+    for (int32 i = 0; i < NumCubes; ++i)
+    {
+        const FVector Offset(200.f * static_cast<float>(i % 50) - 4900.f, 200.f * static_cast<float>(i / 50) - 3900.f, 0.f);
+        F.Keep(SpawnMeshActor(World, Cube, Base + Offset, EComponentMobility::Static));
+    }
+    const double S0 = FPlatformTime::Seconds();
+    F.Sync();   // registers the cubes
+    const double S1 = FPlatformTime::Seconds();
+    F.Sync();   // nothing new: the scan alone
+    const double S2 = FPlatformTime::Seconds();
+    const FRGLSceneAuditResult R1 = F.Audit();
+    TestEqual(TEXT("all registered"), Diff(R0, R1).Registered, NumCubes);
+
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    F.T += 0.1;
+    F.SensorPos += FVector(3000.f, 0.f, 0.f);
+    F.Refresh();
+    F.SM.Update_ForTest(World, F.T);
+    TestEqual(TEXT("the move triggered one sync"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("trigger"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("distance")));
+    const FString Line = F.SM.LastSyncLine_ForTest;
+    AddInfo(Line);
+    float ScanMs = -1.0f;
+    TestTrue(TEXT("the sync line has scan_ms="), Line.Contains(TEXT(" scan_ms="), ESearchCase::CaseSensitive) &&
+                                                   FParse::Value(*Line, TEXT("scan_ms="), ScanMs) && ScanMs >= 0.0f);
+    TestEqual(TEXT("still all registered after the move"), Diff(R0, F.Audit()).Registered, NumCubes);
+    AddInfo(FString::Printf(TEXT("sync_cost cubes=%d sync_ms_first=%.3f sync_ms_second=%.3f line_scan_ms=%.3f"),
+                            NumCubes, (S1 - S0) * 1000.0, (S2 - S1) * 1000.0, ScanMs));
+    return true;
+}
+
+// The verdict memo does not keep meshes that are gone: an entry whose key no longer resolves (the mesh is garbage) is
+// dropped at the next sync. The sync that first sees a mesh adds its entry.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSkyVerdictMemoPurgedTest, "CarlaRGL.SceneSync.SkyVerdictMemoPurged",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSkyVerdictMemoPurgedTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    const FVector Base = BaseFor(38);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0082), Base, 11200.0);
+    F.Sync();
+    const int32 N0 = F.SM.GetSkyVerdictCount_ForTest();
+
+    UStaticMesh* Dome = NewNamedTransientMesh(TEXT("SM_SkyDome"));
+    if (!TestNotNull(TEXT("dome mesh"), Dome)) return false;
+    AStaticMeshActor* A = SpawnMeshActor(World, Dome, Base + FVector(5000.f, 0.f, 0.f), EComponentMobility::Movable);
+    if (!TestNotNull(TEXT("dome actor"), A)) return false;
+    F.Sync();
+    TestEqual(TEXT("the sync that saw the dome remembers its verdict: +1"), F.SM.GetSkyVerdictCount_ForTest() - N0, 1);
+
+    A->Destroy();
+    Dome->MarkAsGarbage();
+    F.Sync();
+    TestEqual(TEXT("the mesh is garbage: its entry is gone at the next sync"), F.SM.GetSkyVerdictCount_ForTest() - N0, 0);
     return true;
 }
 }
