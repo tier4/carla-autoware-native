@@ -412,8 +412,9 @@ wall 時間): skeletal OFF に比べて中央値で +11.4% (予算 +20% の内)�
 
 Town15 などの World Partition の地図では、Unreal Engine は streaming source の周りの cell
 単位で地図を読み込み、RGL の scene は読み込まれたものに従う。static mesh が RGL の scene に
-入るのは、その cell が読み込まれている間 (かつ、どれかのセンサーの球の中にある間) だけで、
-cell が外されると scene からも外れる。読み込まれていないものは RGL の scene に無い。
+入るのは、その cell が読み込まれている間 (かつ、mobility が Static のものは、どれかの
+センサーの球の中にある間。Movable のものは距離によらず残す) だけで、cell が外されると
+scene からも外れる。読み込まれていないものは RGL の scene に無い。
 `ray_cast` の LiDAR が辿る physics の scene に無いのと同じである。これは設計どおりで、
 ある区域を見るには、そこを読み込ませる (下を見る)。World Partition でない地図
 (例: Town10HD_Opt) は全体が読み込まれ、影響を受けない。
@@ -429,7 +430,7 @@ cell は、World Partition の streaming source の周りで読み込まれる�
 
 | spawn した actor | その streaming source の半径 |
 |---|---|
-| `role_name` に `hero` か `ego_vehicle` を含む車両・歩行者 | spawn の時点の `tile_stream_distance` (既定 3000 m) |
+| `role_name` に `hero` か `ego_vehicle` を含む (大文字・小文字は問わない) 車両・歩行者 | spawn の時点の `tile_stream_distance` (既定 3000 m) |
 | それ以外の車両・歩行者 (例: `role_name` = `ego`) | 200 m |
 
 spectator (player controller の視点) も streaming source である。センサーと、CARLA が
@@ -441,8 +442,9 @@ spawn するその他の actor は、streaming source ではない。
 * `tile_stream_distance` が効くのは hero だけで、それも hero の spawn の時だけである。
   半径は spawn の時点で決まり、後で設定を変えても変わらない。
 * `actor_active_distance` が `tile_stream_distance` より大きいと、`tile_stream_distance`
-  は同じ値に引き上げられる (CARLA は警告の log を出す)。hero の spawn の前に、両方を
-  設定する。
+  は同じ値に引き上げられる (CARLA は警告の log を出す)。`actor_active_distance` の既定は
+  2000 m なので、2 km より小さい `tile_stream_distance` は、`actor_active_distance` も
+  小さくしたときだけ効く。hero の spawn の前に、両方を設定する。
 
   ```python
   settings = world.get_settings()
@@ -454,14 +456,15 @@ spawn するその他の actor は、streaming source ではない。
 
 * 路側のセンサー (何にも付けない、または streaming source の無い actor に付ける) の range
   は、他の streaming source が覆うときしか読み込まれない。hero の `tile_stream_distance`
-  を上げてその半径がセンサーの range に届くようにするか、センサーを車両に載せる。
+  を、hero の球がセンサーの range を丸ごと含む (hero からセンサーまでの距離とセンサーの
+  range の和が半径以下になる) まで上げるか、センサーを車両に載せる。
 
 ### 読み込みの警告
 
 World Partition の地図では、static な scene の同期のたびに (周期的に、センサーが動けば
 それより早く)、scene manager が、各センサーの range の球が読み込み済み (その World
 Partition の cell が activated) かを確かめる。range が sim 時間で
-5 s 続けて読み込み済みでないセンサーは、センサーごとに 1 回だけ次の行を出す。
+5 s 続けて読み込み済みでないセンサーは、センサーの登録 1 回につき 1 回だけ次の行を出す。
 
 ```text
 rgl_scene_stream_warning t=12.400 sensor=0x7f3a2c001230 range_m=200 parent=BP_Car_C_1 parent_stream_radius_m=150 hint=attach_the_sensor_to_a_hero_vehicle_or_raise_tile_stream_distance
@@ -481,7 +484,9 @@ rgl_scene_stream_warning t=12.400 sensor=0x7f3a2c001230 range_m=200 parent=BP_Ca
   5 s より長くかかることがある)、設定では直せないからである。
 * 確認は同期のときだけ行う。そのため行が出るのは、range が読み込み済みでないと分かった
   最初の確認から 5 s 以上たった、最初の同期のときである。
-* range が後で読み込まれ、また外れても、行はセンサーごとに 1 回だけである。
+* range が後で読み込まれ、また外れても、行はセンサーの登録 1 回につき 1 回だけである。
+  5 s より長く tick しなかったセンサーは scene manager から外れ、また tick すると新しく
+  登録されるので、行をもう一度出すことがある。
 
 ### 既定の 3 km の hero の半径での同期の費用
 
@@ -529,7 +534,7 @@ Update が `rgl.Scene.MaxIsmInstanceChangesPerUpdate` の上限の内で順に�
 
 | 行 | Key | 意味 |
 |---|---|---|
-| `rgl_scene_sync` | `ism_pending` | この同期が queue を入れ直したときに残っていた entry の数: 前の回が届かなかった群。0 でなければ、上限のため、2 回の同期の間に回が終わらなかった。 |
+| `rgl_scene_sync` | `ism_pending` | この同期が queue を入れ直したときに残っていた entry の数: 前の回が届かなかった群。0 でないのは、前の同期からの Update で回が終わらなかったとき: 上限で止まったか、同期が続いた (回は同期の無い Update でだけ進む)。 |
 | `rgl_scene_audit` | `pending_ism` | 検査した frame の時点の queue の entry の数: まだ今のセンサーの球と比べていない群。 |
 
 どちらの数にも、queue に入れた後に外された component の entry が入る。そのような entry は、

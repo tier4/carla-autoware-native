@@ -431,8 +431,9 @@ time): +11.4% median vs skeletal OFF (within the +20% budget).
 
 On World Partition maps (for example Town15), Unreal Engine loads the map in cells around
 streaming sources, and the RGL scene follows what is loaded: a static mesh is in the RGL
-scene only while its cell is loaded (and it is inside some sensor's sphere), and it leaves
-the scene when the cell is unloaded. What is not loaded is not in the RGL scene, just as it
+scene only while its cell is loaded (and, if its mobility is Static, while it is inside
+some sensor's sphere; Movable ones are kept at any distance), and it leaves the scene when
+the cell is unloaded. What is not loaded is not in the RGL scene, just as it
 is not in the physics scene that `ray_cast` lidars trace. This is by design; to see an
 area, get it loaded (see below). Maps without World Partition (for example Town10HD_Opt)
 are loaded whole and are not affected.
@@ -449,7 +450,7 @@ CARLA gives every vehicle and walker it spawns a spherical streaming source:
 
 | Spawned actor | Radius of its streaming source |
 |---|---|
-| Vehicle or walker whose `role_name` contains `hero` or `ego_vehicle` | `tile_stream_distance` at spawn time (default 3000 m) |
+| Vehicle or walker whose `role_name` contains `hero` or `ego_vehicle` (in any letter case) | `tile_stream_distance` at spawn time (default 3000 m) |
 | Any other vehicle or walker (for example `role_name` = `ego`) | 200 m |
 
 The spectator (the player controller's view) is a streaming source too. Sensors and the
@@ -461,8 +462,9 @@ other actors CARLA spawns are not.
 * `tile_stream_distance` applies to the hero only, and only when the hero spawns: the
   radius is taken at spawn time, and changing the setting later does not resize it.
 * An `actor_active_distance` larger than `tile_stream_distance` raises
-  `tile_stream_distance` to the same value (CARLA logs a warning). Set both before
-  spawning the hero:
+  `tile_stream_distance` to the same value (CARLA logs a warning). The default
+  `actor_active_distance` is 2000 m, so a `tile_stream_distance` below 2 km takes effect
+  only with a smaller `actor_active_distance`. Set both before spawning the hero:
 
   ```python
   settings = world.get_settings()
@@ -474,15 +476,16 @@ other actors CARLA spawns are not.
 
 * A roadside sensor (attached to nothing, or to an actor without a streaming source) has
   its range loaded only when another streaming source covers it. Raise the hero's
-  `tile_stream_distance` so that its radius reaches the sensor's range, or mount the
-  sensor on a vehicle.
+  `tile_stream_distance` until the hero's sphere holds the sensor's whole range (the
+  distance from the hero to the sensor plus the sensor's range is at most the radius), or
+  mount the sensor on a vehicle.
 
 ### The stream warning
 
 On a World Partition map, after each static scene sync (periodic, and sooner when a sensor
 moves), the scene manager checks whether each sensor's range sphere is streamed in (its
 World Partition cells are activated). A sensor whose range stays not streamed in for 5 s
-of simulation time prints one line, once per sensor:
+of simulation time prints one line, once per registration of the sensor:
 
 ```text
 rgl_scene_stream_warning t=12.400 sensor=0x7f3a2c001230 range_m=200 parent=BP_Car_C_1 parent_stream_radius_m=150 hint=attach_the_sensor_to_a_hero_vehicle_or_raise_tile_stream_distance
@@ -503,7 +506,9 @@ rgl_scene_stream_warning t=12.400 sensor=0x7f3a2c001230 range_m=200 parent=BP_Ca
   cannot fix.
 * The check runs at syncs only, so the line comes at the first sync at least 5 s after
   the first check that found the range not streamed in.
-* The line is printed once per sensor, even if the range is loaded and lost again later.
+* The line is printed once per registration of the sensor, even if the range is loaded
+  and lost again later. A sensor that stops ticking for more than 5 s is dropped from the
+  scene manager; when it ticks again it is registered anew and can print the line again.
 
 ### Sync cost with the default 3 km hero radius
 
@@ -553,7 +558,7 @@ registered Static ISM groups; the Updates without a sync work through it, capped
 
 | Line | Key | Meaning |
 |---|---|---|
-| `rgl_scene_sync` | `ism_pending` | Entries left in the queue when this sync refilled it: groups the previous round had not reached. Non-zero means the cap did not let the round finish between two syncs. |
+| `rgl_scene_sync` | `ism_pending` | Entries left in the queue when this sync refilled it: groups the previous round had not reached. Non-zero when the Updates since the previous sync did not finish the round: the cap stopped it, or the syncs came back to back (the round runs only on Updates without a sync). |
 | `rgl_scene_audit` | `pending_ism` | Entries in the queue at the audited frame: groups not yet compared with the current sensor spheres. |
 
 Both counts include the entries of components that have been removed since they were
