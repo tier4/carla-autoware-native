@@ -1,6 +1,8 @@
 CARLA with RobotecGPULidar (RGL)
 ================================
 
+[日本語](README_RGL.ja.md)
+
 This document describes how to build and run CARLA with
 [RobotecGPULidar (RGL)](https://github.com/RobotecAI/RobotecGPULidar) — a
 GPU-accelerated ray-traced LiDAR simulation library. The setup is driven by
@@ -400,7 +402,7 @@ Known limits:
 * **Ego self-occlusion costs returns**: those rays used to pass through the unregistered
   ego body and hit the scene beyond it. They now terminate on the body and come back below
   the sensor's minimum range, so they are dropped rather than reported. Measured on an
-  empty Odaiba with the j6gen2 ego and its two roof Pandars, the raw cloud shrinks 17.8%
+  empty Odaiba with a test ego vehicle and its two roof Pandars, the raw cloud shrinks 17.8%
   (1,186,458 -> 975,408 points over 20 frames) with the skeletal path on. This matches a
   real vehicle, which does occlude its own lidar, but it is a large enough change that
   detector behaviour shifts: in that same scene a roadside object 82 m away went from
