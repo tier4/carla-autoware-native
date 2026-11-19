@@ -35,7 +35,7 @@ enum class EIMUOutputMode : uint8
 /// High-precision IMU. When substep mode is active and a valid Chaos vehicle
 /// physics proxy is available, the gyroscope and accelerometer are computed and
 /// published once per physics substep (each with its own timestamp), driven by
-/// a PostIntegrate sim callback that captures the vehicle body kinematics on
+/// a PostSolve sim callback that captures the vehicle body kinematics on
 /// the physics thread. In upsample mode (or when no proxy is available), the
 /// frame-rate value is emitted N times per frame (zero-order hold) to maintain
 /// the target output_rate_hz. Noise/bias model, compass, serialization and ROS2
