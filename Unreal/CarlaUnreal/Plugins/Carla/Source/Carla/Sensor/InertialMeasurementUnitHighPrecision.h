@@ -76,7 +76,7 @@ private:
 
   // ---- Phase 1 frame-rate gyro state (used by the fallback path) ----
 
-  /// Sensor world rotation captured on the previous tick.
+  /// Sensor world rotation captured on the previous tick for the gyro log map.
   FQuat PrevRotation = FQuat::Identity;
 
   /// World time (seconds) of the previous tick; NaN until first valid tick.
@@ -107,7 +107,7 @@ private:
 
   // ---- Game-thread per-substep IMU integration state ----
 
-  /// Previous IMU world rotation (for the gyro finite difference).
+  /// Previous IMU world rotation (for the gyro log map).
   FQuat PrevImuRot = FQuat::Identity;
   bool  bSubstepPrevValid = false;
 
@@ -117,6 +117,16 @@ private:
     FVector::OneVector * std::numeric_limits<float>::quiet_NaN()
   };
   float PrevSubDt = std::numeric_limits<float>::quiet_NaN();
+
+  /// Forget the per-substep history (after a gap or a fallback frame), so the
+  /// next substep sample re-seeds it instead of spanning the gap.
+  void ResetSubstepHistory()
+  {
+    bSubstepPrevValid = false;
+    PrevImuPos[0] = FVector::OneVector * std::numeric_limits<float>::quiet_NaN();
+    PrevImuPos[1] = FVector::OneVector * std::numeric_limits<float>::quiet_NaN();
+    PrevSubDt = std::numeric_limits<float>::quiet_NaN();
+  }
 
   // ---- Raw sink (carla_imu_raw_sink.h), set from blueprint attributes ----
 
