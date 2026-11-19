@@ -18,13 +18,13 @@
 #include <util/ue-header-guard-end.h>
 
 /// One per-substep raw kinematics sample of the vehicle body, captured on the
-/// physics thread. Only the post-integrate quantities (P/Q) are kept, as those
-/// are the up-to-date integrated values at OnPostIntegrate_Internal time.
+/// physics thread. Only the solved pose (P/Q at OnPostSolve_Internal time, the
+/// end of the substep after the constraint solve) is kept.
 /// IMU math is done on the game thread; nothing here touches CARLA sensor state.
 struct FIMUSubstepSample
 {
-  FVector PosP = FVector::ZeroVector;   // GetP() (post-integrate position)
-  FQuat   RotQ = FQuat::Identity;       // GetQ() (post-integrate rotation)
+  FVector PosP = FVector::ZeroVector;   // GetP() (solved position)
+  FQuat   RotQ = FQuat::Identity;       // GetQ() (solved rotation)
   float   Dt = 0.0f;                    // substep dt (seconds)
 };
 
@@ -43,18 +43,18 @@ struct FIMUSubstepOutput : public Chaos::FSimCallbackOutput
   void Reset() { Samples.Reset(); }
 };
 
-/// Fires once per physics substep on the physics thread (PostIntegrate);
+/// Fires once per physics substep on the physics thread (PostSolve);
 /// captures raw vehicle body kinematics into the per-step output array.
-/// NOTE: the Presimulate option bit is REQUIRED in addition to PostIntegrate.
+/// NOTE: the Presimulate option bit is REQUIRED in addition to PostSolve.
 /// The Chaos solver only adds a callback to its SimCallbackObjects list when it
 /// has the Presimulate option (PBDRigidsSolver.cpp: SimCallbackObjects.Add gated
-/// on HasOption(Presimulate)); the per-substep PostIntegrate lambda then iterates
+/// on HasOption(Presimulate)); the per-substep PostSolve lambda then iterates
 /// that same list. Without Presimulate the object is never registered and
-/// OnPostIntegrate_Internal never fires (the sensor falls back to frame rate).
+/// OnPostSolve_Internal never fires (the sensor falls back to frame rate).
 class FIMUSubstepCallback : public Chaos::TSimCallbackObject<
     FIMUSubstepInput,
     FIMUSubstepOutput,
-    Chaos::ESimCallbackOptions::Presimulate | Chaos::ESimCallbackOptions::PostIntegrate>
+    Chaos::ESimCallbackOptions::Presimulate | Chaos::ESimCallbackOptions::PostSolve>
 {
 public:
   virtual FName GetFNameForStatId() const override
@@ -68,5 +68,5 @@ private:
   // check(false), so the override is required.
   virtual void OnPreSimulate_Internal() override {}
 
-  virtual void OnPostIntegrate_Internal() override;
+  virtual void OnPostSolve_Internal() override;
 };

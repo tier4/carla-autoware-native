@@ -491,7 +491,7 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTick(
   {
     const FIMUSubstepSample& S = Frame[k];
 
-    // GetQ/GetP are the up-to-date post-integrate values at OnPostIntegrate_Internal time.
+    // GetQ/GetP are the solved values at OnPostSolve_Internal time.
     const FQuat   BodyRot = S.RotQ;
     const FVector BodyPos = S.PosP;
 
