@@ -20,6 +20,7 @@
 // LibCarla headers: disable-ue4-macros block.
 #include <util/disable-ue4-macros.h>
 #include "carla/geom/Math.h"
+#include "carla/geom/QuaternionAngularVelocity.h"
 #include "carla/ros2/ROS2.h"
 #if PLATFORM_LINUX
 // ImuMath.h uses M_PI, which only LibCarla's own targets define on MSVC; the
@@ -218,24 +219,17 @@ carla::geom::Vector3D AInertialMeasurementUnitHighPrecision::ComputeGyroscope()
     return carla::geom::Vector3D{};
   }
 
-  const FQuat DeltaRotation = CurrentRotation * PrevRotation.Inverse();
-  FVector Axis;
-  float Angle;
-  DeltaRotation.ToAxisAndAngle(Axis, Angle);
-
-  // Take the short path: a tiny step must not be reported as ~2*pi the other way.
-  if (Angle > PI)
-  {
-    Angle -= 2.0f * PI;
-  }
-
-  const FVector WorldAngularVelocity = (Angle / DeltaTime) * Axis;
+  const auto Omega = carla::geom::AngularVelocityFromQuaternions(
+      {PrevRotation.W, PrevRotation.X, PrevRotation.Y, PrevRotation.Z},
+      {CurrentRotation.W, CurrentRotation.X, CurrentRotation.Y, CurrentRotation.Z},
+      DeltaTime);
+  const FVector WorldAngularVelocity(Omega[0], Omega[1], Omega[2]);
   FVector LocalAngularVelocity =
       CurrentRotation.UnrotateVector(WorldAngularVelocity);
 
   PrevRotation = CurrentRotation;
 
-  // Guard against NaN from a degenerate axis/angle decomposition.
+  // Guard against NaN from invalid rotation data.
   if (LocalAngularVelocity.ContainsNaN())
   {
     LocalAngularVelocity = FVector::ZeroVector;
@@ -413,6 +407,7 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTick(
   // Upsample-only mode: skip substep registration entirely; emit ZOH samples.
   if (ConfiguredMode == EIMUOutputMode::Upsample)
   {
+    ResetSubstepHistory();
     EmitZOHSamples(this, OutputRateHz, DeltaTime);
     return;
   }
@@ -428,6 +423,7 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTick(
   // the first call; the base NaN guard handles the first-sample transition.
   if (SubstepCallback == nullptr)
   {
+    ResetSubstepHistory();
     EmitZOHSamples(this, OutputRateHz, DeltaTime);
     return;
   }
@@ -455,6 +451,9 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTick(
   // the base NaN/IsFinite guard will re-seed on the next valid call.
   if (N == 0)
   {
+    // The next substep sample must not be differenced against a rotation or
+    // positions from before this gap (it would be divided by one substep dt).
+    ResetSubstepHistory();
     EmitZOHSamples(this, OutputRateHz, DeltaTime);
     return;
   }
@@ -504,16 +503,12 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTick(
 
     if (bSubstepPrevValid && S.Dt > 0.0f)
     {
-      // Gyro: rotation finite difference (same scheme as the Phase 1 path).
-      FQuat dq = ImuRot * PrevImuRot.Inverse();
-      FVector Axis;
-      float Angle;
-      dq.ToAxisAndAngle(Axis, Angle);
-      if (Angle > PI)
-      {
-        Angle -= 2.0f * PI;
-      }
-      FVector wWorld = (Angle / S.Dt) * Axis;
+      // Gyro: quaternion log map, also accurate for small angular rates.
+      const auto Omega = carla::geom::AngularVelocityFromQuaternions(
+          {PrevImuRot.W, PrevImuRot.X, PrevImuRot.Y, PrevImuRot.Z},
+          {ImuRot.W, ImuRot.X, ImuRot.Y, ImuRot.Z},
+          S.Dt);
+      FVector wWorld(Omega[0], Omega[1], Omega[2]);
       FVector wLocal = ImuRot.UnrotateVector(wWorld);
       if (wLocal.ContainsNaN())
       {
