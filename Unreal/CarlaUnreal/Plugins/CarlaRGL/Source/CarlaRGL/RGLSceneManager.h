@@ -8,7 +8,8 @@
 //     (FObjectKey: after garbage collection, another asset at the same address has another key)
 //   - Creates rgl_entity_t for each UStaticMeshComponent instance
 //   - Updates entity transforms each tick; drops entities whose component left the world (unregistered) at once
-//   - Handles actor creation/destruction via periodic world scans, plus a scan when a level with static
+//   - Handles actor creation/destruction via periodic world scans (every rgl.Scene.SyncIntervalSeconds of simulation time
+//     by default; rgl.Scene.SyncClock = 0 counts the scene Updates' world dt instead), plus a scan when a level with static
 //     geometry in some sensor's sphere is added (World Partition cells, level streaming). One actor scan per sync
 //     serves the static and the skeletal paths; the sky-name verdict is remembered per mesh
 //     (the rgl_scene_sync line splits the sync's time: scan_ms, reg_ms, remove_ms, skel_ms)
@@ -41,7 +42,7 @@
 #include "Components/SkinnedMeshComponent.h"   // EVisibilityBasedAnimTickOption
 #include "Containers/BitArray.h"
 #include "Math/Sphere.h"
-#include "HAL/IConsoleManager.h"               // EConsoleVariableFlags (ApplyWpSceneSwitches)
+#include "HAL/IConsoleManager.h"               // EConsoleVariableFlags (ApplySceneSwitches)
 #include "Misc/Optional.h"
 #include <util/ue-header-guard-end.h>
 
@@ -176,8 +177,43 @@ public:
     void SetSensorSelfCutout(const void* SensorId, AActor* Vehicle, float RadiusCm, const FTransform& SensorWorldTransform,
                              float MinElevationDeg, float MaxElevationDeg);
 
-    /// Set the world sync interval in simulation seconds. Default: 1.0s. Minimum: 0.1s.
-    void SetSyncInterval(float Seconds) { SyncIntervalSeconds = FMath::Max(0.1f, Seconds); }
+    /// Set the periodic sync interval: writes rgl.Scene.SyncIntervalSeconds with ECVF_SetByCode (seconds of the clock
+    /// rgl.Scene.SyncClock chooses). Default: 1.0 s. Minimum: 0.1 s. The CVar is process-wide: every world's manager
+    /// reads it at each Update.
+    void SetSyncInterval(float Seconds);
+
+    /// The effective values of the rgl.Scene.* knobs (after their range checks), as the rgl_scene_config line prints them.
+    struct FSceneKnobs
+    {
+        int32 MaxMeshCreatesPerUpdate = 8;
+        float CreateBudgetMs = 4.0f;
+        float UnloadDistanceFactor = 1.0f;
+        int32 IdleMeshCacheMax = 0;
+        int32 MaxIsmInstanceChangesPerUpdate = 512;
+        float UnloadMarginCm = 2000.0f;     // not a CVar: the manager's unload margin (LogSceneConfigIfChanged fills it in)
+        int32 SyncClock = 1;                // rgl.Scene.SyncClock: 1 = simulation time, 0 = the scene Updates' world dt
+        float SyncIntervalSeconds = 1.0f;   // rgl.Scene.SyncIntervalSeconds (>= 0.1)
+        int32 WpMap = 0;                    // not a CVar: the culling applies to this world (LogSceneConfigIfChanged fills it in)
+        int32 WpMovableCulling = 1;
+        float MovableMinMarginM = 20.0f;
+        float MovableSensorSpeedBoundMps = 50.0f;
+        float MovableObjectSpeedBoundMps = 50.0f;
+        float MovableMaxUpdateGapSeconds = 0.1f;
+        float MovableCreateLatencySeconds = 1.0f;
+        int32 MaxMovableEntityChangesPerUpdate = 512;
+        float MovableEntityBudgetMs = 4.0f;
+        bool operator==(const FSceneKnobs& O) const;
+        bool operator!=(const FSceneKnobs& O) const { return !(*this == O); }
+    };
+    /// The rgl.Scene.* CVars through their range checks (an invalid value: its default, with one warning line).
+    static FSceneKnobs ReadSceneKnobs();
+    /// The rgl_scene_config line (one grep-friendly key=value line): the knobs at SimTime; sync_clock=sim|update.
+    static FString FormatSceneConfigLine(double SimTime, const FSceneKnobs& K);
+
+    /// The Shipping-safe -rgl-scene-<knob>= switches (and -rgl-debug-hit-dump=, -rgl-debug-hit-dump-every=), read from
+    /// CommandLine: each switch present sets its rgl.* CVar with SetBy; an absent one leaves its CVar alone. The first
+    /// manager calls it once with the process command line (ECVF_SetByCommandline, below the code and console).
+    static void ApplySceneSwitches(const TCHAR* CommandLine, EConsoleVariableFlags SetBy = ECVF_SetByCommandline);
 
     /// Check if the scene manager has been initialized.
     bool IsInitialized() const { return bInitialized; }
@@ -187,8 +223,8 @@ public:
 
     // ---- World Partition culling of non-Static parts (rgl.Scene.WpMovableCulling; README_RGL "non-Static parts") ----
 
-    /// The clock the periodic sync runs on: the Update clock adds the world dt once per scene Update (the original
-    /// timer), the simulation clock follows the simulation time.
+    /// The clock the periodic sync runs on (rgl.Scene.SyncClock): the Update clock adds the world dt once per scene Update
+    /// (0, the original timer), the simulation clock follows the simulation time (1, the default).
     enum class EWpCullClock : uint8 { UpdateClock, SimClock };
     /// How long a part chosen out by distance may go without being looked at again and registered (seconds, sim).
     struct FWpCullHorizon
@@ -197,8 +233,9 @@ public:
         double HorizonSeconds = 0.0;     // H = T_sync_max + L_create + U
     };
     /// Update clock: T_sync_max = ceil(I / d) * max(U, d) + U; simulation clock: I + U. H = T_sync_max + L_create + U.
-    /// I = the sync interval the trigger uses, d = the world dt, U = rgl.Scene.MovableMaxUpdateGapSeconds,
-    /// L_create = rgl.Scene.MovableCreateLatencySeconds. A dt that is not positive and finite is taken as U.
+    /// I = the sync interval the trigger uses (rgl.Scene.SyncIntervalSeconds), d = the world dt,
+    /// U = rgl.Scene.MovableMaxUpdateGapSeconds, L_create = rgl.Scene.MovableCreateLatencySeconds. A dt that is not
+    /// positive and finite is taken as U. The culling sync passes the clock rgl.Scene.SyncClock chooses.
     static FWpCullHorizon ComputeWpCullHorizon(EWpCullClock Clock, double IntervalSeconds, double WorldDtSeconds,
                                                double MaxUpdateGapSeconds, double CreateLatencySeconds);
     /// M = max(MinMarginM, (V_sensor + V_object) * H), metres.
@@ -215,10 +252,6 @@ public:
     /// bRemember = false (the read-only audit): a verdict is not added to the sticky set (a part once protected stays so).
     EWpProtect ClassifyWpProtection(const UStaticMeshComponent* Component, bool bRemember = true) const;
     static const TCHAR* WpProtectName(EWpProtect Reason);
-
-    /// The -rgl-scene-<knob>= switches of the World Partition culling, read from CommandLine (the scene switches call it
-    /// once with the process command line and ECVF_SetByCommandline). Sets the rgl.Scene.* CVars with SetBy.
-    static void ApplyWpSceneSwitches(const TCHAR* CommandLine, EConsoleVariableFlags SetBy);
 
     /// Wall time of the first RGL API call made between Arm and Disarm (wait_ms= / wait_api= of the sync line): the
     /// call that waits for the previous raytrace graph, plus its own work. Later calls are not timed.
@@ -376,6 +409,8 @@ public:
     float GetWpLoadRadiusCm_ForTest(const void* SensorId) const;
     /// The last rgl_scene_config line printed by this instance.
     FString LastConfigLine_ForTest;
+    /// The rgl_scene_sensor lines of the last Update that synced (one per sensor synced for the first time; empty if none).
+    TArray<FString> LastSensorLines_ForTest;
     /// Entities added / removed by the WP queue in the last Update.
     int32 WpAddedLastUpdate_ForTest = 0;
     int32 WpRemovedLastUpdate_ForTest = 0;
@@ -665,12 +700,9 @@ private:
     };
     FQueueEpisode QueueEpisode;
 
-    /// Last printed rgl.Scene.* knob values (rgl_scene_config line).
-    int32 LoggedMaxCreates = -1;
-    float LoggedCreateBudgetMs = -1.0f;
-    float LoggedUnloadFactor = -1.0f;
-    int32 LoggedIdleMeshCacheMax = -1;
-    int32 LoggedMaxIsmChanges = -1;
+    /// Last printed rgl.Scene.* knob values (rgl_scene_config line); none printed yet while bSceneKnobsLogged is false.
+    FSceneKnobs LoggedSceneKnobs;
+    bool bSceneKnobsLogged = false;
 
     /// Mapping: UStaticMeshComponent* -> RGL entity + weak reference.
     struct FEntityInfo
@@ -785,6 +817,10 @@ private:
     /// set, RegistrationDistanceCm minus UnregistrationHysteresisCm. A sensor that only calls RegisterSensor is served.
     float SensorRangeCm(const FSensorRegistration& S) const;
 
+    /// The distance trigger (cm): a sensor that moved farther than this since the last sync syncs now. 0.2 x
+    /// RegistrationDistanceCm. Printed as trigger_m= on the sensor's rgl_scene_sensor line.
+    float SyncTriggerCm(const FSensorRegistration& S) const;
+
     /// Radius (cm) that RootParent's World Partition streaming source loads around the actor: the largest radius among
     /// its shapes that do not use the grid's loading range. -1 = no actor, no source, or no such shape. CARLA puts the
     /// source on spawned vehicles and walkers (UCarlaEpisode::SpawnActorWithInfo). Shared with AuditScene.
@@ -823,12 +859,13 @@ private:
     rgl_mesh_t GroundMesh = nullptr;
     rgl_entity_t GroundEntity = nullptr;
 
-    /// Time-based periodic sync interval (simulation seconds).
-    float SyncIntervalSeconds = 1.0f;
+    /// The Update clock of the periodic sync (rgl.Scene.SyncClock = 0): the world dt of the scene Updates since the last
+    /// sync. Counted on either clock (a live switch to 0 continues from it); the interval is rgl.Scene.SyncIntervalSeconds.
     float TimeSinceLastSync = 0.0f;
 
     // ---- Scene audit bookkeeping ----
-    double LastSyncSimTime = -1.0;        // CurrentSimTime of the last static sync; -1 = none yet
+    double LastSyncSimTime = -1.0;        // CurrentSimTime of the last static sync; -1 = none yet (also the simulation clock
+                                          // of the periodic sync, rgl.Scene.SyncClock = 1)
     double LastUpdateWallSeconds = 0.0;   // FPlatformTime::Seconds() of the last Update that ran
     double LastFrameMs = 0.0;             // wall time between the last two Updates that ran
     int32  LevelsAddedSinceAudit = 0;     // LevelAddedToWorld events of this world since the last audit line (0 while off)
@@ -929,15 +966,16 @@ private:
     double WpMarginCm = 0.0;                // M of that sync
     double WpPrevUpdateSimTime = -1.0;      // sim time of the previous Update (U check)
     bool bWpStartupSceneIntervalPending = false; // R10: every sensor at the preceding interval start was newly initialized
+    /// The inputs of the horizon and margin (the sync clock and interval included: rgl.Scene.SyncClock, SyncIntervalSeconds).
     struct FWpKnobs
     {
         int32 Enable = 1; float MinMarginM = 20.f; float SensorSpeedMps = 50.f; float ObjectSpeedMps = 50.f;
-        float MaxUpdateGapS = 0.1f; float CreateLatencyS = 1.0f; float IntervalS = 1.0f;
+        float MaxUpdateGapS = 0.1f; float CreateLatencyS = 1.0f; float IntervalS = 1.0f; int32 Clock = 1;
         bool operator==(const FWpKnobs& O) const
         {
             return Enable == O.Enable && MinMarginM == O.MinMarginM && SensorSpeedMps == O.SensorSpeedMps &&
                    ObjectSpeedMps == O.ObjectSpeedMps && MaxUpdateGapS == O.MaxUpdateGapS &&
-                   CreateLatencyS == O.CreateLatencyS && IntervalS == O.IntervalS;
+                   CreateLatencyS == O.CreateLatencyS && IntervalS == O.IntervalS && Clock == O.Clock;
         }
         bool operator!=(const FWpKnobs& O) const { return !(*this == O); }
     };
@@ -959,11 +997,6 @@ private:
     TMap<FString, int32> WpViolationCounts; // by kind (whole life)
     /// The wait probe of the sync's measured interval (wait_ms=).
     FRGLFirstCallProbe WaitProbe;
-    /// Logged values of the WP knobs (rgl_scene_config).
-    FWpKnobs LoggedWpKnobs;
-    int32 LoggedWpMaxChanges = -2;
-    float LoggedWpBudgetMs = -2.0f;
-    int32 LoggedWpMap = -1;
 
     /// World dt of this Update (the test seam may replace it).
     float WorldDeltaSeconds(const UWorld* World) const;

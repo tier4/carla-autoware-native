@@ -1621,6 +1621,8 @@ bool FSceneSyncWpSkeletalPolicyUnchangedTest::RunTest(const FString& Parameters)
 // R_load) and is culled, then comes at 5 m/s (the bound); 30 other parts wait in the queue (cap 2 per Update). Syncs come
 // only from the interval. At every Update, nothing known is missing inside the range; the part is promoted at the sync that
 // sees it move, registered before its bounds reach the range, and kept afterwards even when it jumps away.
+// On both sync clocks (rgl.Scene.SyncClock): the Update clock (T_sync_max 2.1 s, R_load 132 m; a periodic sync every
+// 20 Updates of dt 0.05 s) and the simulation clock (1.1 s, 122 m; a periodic sync every 1 s = 10 Updates of 0.1 s).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpApproachingObjectBeforeRangeTest, "CarlaRGL.SceneSync.WpApproachingObjectBeforeRange",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncWpApproachingObjectBeforeRangeTest::RunTest(const FString& Parameters)
@@ -1628,44 +1630,62 @@ bool FSceneSyncWpApproachingObjectBeforeRangeTest::RunTest(const FString& Parame
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(68);
-    FWpTestScope W(World, true);
-    SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 2);
-    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0908), Base, 12700.0);
-    F.Sync();
-    const FRGLSceneAuditResult R0 = F.Audit();
-    AStaticMeshActor* Mover = F.Keep(SpawnPart(World, Cube, Base + FVector(14500.f, 0.f, 0.f)));
-    if (!TestNotNull(TEXT("mover"), Mover)) return false;
-    for (int32 i = 0; i < 30; ++i)
+    for (int32 Clock = 0; Clock <= 1; ++Clock)
     {
-        F.Keep(SpawnPart(World, Cube, BandPoint(Base, i, 30, 10500.f, 13000.f)));
-    }
-    UStaticMeshComponent* MC = Mover->GetStaticMeshComponent();
-    const int32 Syncs0 = F.SM.SyncCount_ForTest;
-    FMissFrames Miss;
-    double RegisteredAtGapCm = -1.0;
-    for (int32 k = 0; k < 100; ++k)
-    {
-        Mover->SetActorLocation(Mover->GetActorLocation() - FVector(50.f, 0.f, 0.f));   // 5 m/s
-        StepUpdate(F, World);
-        Miss.Look(Diff(R0, F.Audit()), F.T);
-        TestTrue(TEXT("at most 2 changes per Update"), F.SM.WpAddedLastUpdate_ForTest + F.SM.WpRemovedLastUpdate_ForTest <= 2);
-        if (RegisteredAtGapCm < 0.0 && F.SM.IsEntityRegistered_ForTest(MC))
+        const TCHAR* ClockName = Clock ? TEXT("sim clock") : TEXT("update clock");
+        auto Msg = [ClockName](const TCHAR* What) { return FString::Printf(TEXT("%s: %s"), ClockName, What); };
+        FWpTestScope W(World, true, 0.05f, 5.0f, Clock);
+        SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 2);
+        FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0908), Base, 12700.0 + 50.0 * Clock);
+        F.Sync();
+        const FRGLSceneAuditResult R0 = F.Audit();
+        AStaticMeshActor* Mover = F.Keep(SpawnPart(World, Cube, Base + FVector(14500.f, 0.f, 0.f)));
+        if (!TestNotNull(*Msg(TEXT("mover")), Mover)) return false;
+        for (int32 i = 0; i < 30; ++i)
         {
-            RegisteredAtGapCm = FVector::Dist(MC->Bounds.Origin, Base) - MC->Bounds.SphereRadius - kRangeCm;
+            F.Keep(SpawnPart(World, Cube, BandPoint(Base, i, 30, 10500.f, 13000.f)));
         }
+        UStaticMeshComponent* MC = Mover->GetStaticMeshComponent();
+        TestTrue(*Msg(TEXT("the mover starts beyond R_load + its radius")),
+                 FVector::Dist(MC->Bounds.Origin, Base) > F.SM.GetWpLoadRadiusCm_ForTest(F.Sensor) + MC->Bounds.SphereRadius);
+        const int32 Syncs0 = F.SM.SyncCount_ForTest;
+        const int32 Deadline0 = F.SM.WpDeadlineSyncs_ForTest();
+        FMissFrames Miss;
+        double RegisteredAtGapCm = -1.0;
+        int32 OverCap = 0;
+        for (int32 k = 0; k < 100; ++k)
+        {
+            Mover->SetActorLocation(Mover->GetActorLocation() - FVector(50.f, 0.f, 0.f));   // 5 m/s
+            StepUpdate(F, World);
+            Miss.Look(Diff(R0, F.Audit()), F.T);
+            OverCap += (F.SM.WpAddedLastUpdate_ForTest + F.SM.WpRemovedLastUpdate_ForTest > 2) ? 1 : 0;
+            if (RegisteredAtGapCm < 0.0 && F.SM.IsEntityRegistered_ForTest(MC))
+            {
+                RegisteredAtGapCm = FVector::Dist(MC->Bounds.Origin, Base) - MC->Bounds.SphereRadius - kRangeCm;
+            }
+        }
+        const int32 Syncs = F.SM.SyncCount_ForTest - Syncs0;
+        AddInfo(FString::Printf(TEXT("%s: frames=%d bad=%d first=%s syncs=%d deadline_syncs=%d registered_at_gap_m=%.1f last_trigger=%s"),
+                                ClockName, Miss.Frames, Miss.Bad, *Miss.First, Syncs, F.SM.WpDeadlineSyncs_ForTest() - Deadline0,
+                                RegisteredAtGapCm / 100.0, *F.SM.LastSyncTrigger_ForTest));
+        TestEqual(*Msg(TEXT("at most 2 changes per Update")), OverCap, 0);
+        TestEqual(*Msg(TEXT("no frame with a part missing in range")), Miss.Bad, 0);
+        TestTrue(*Msg(TEXT("registered before its bounds reached the range")), RegisteredAtGapCm > 0.0);
+        TestTrue(*Msg(TEXT("promoted")), F.SM.IsWpPromoted_ForTest(MC));
+        // 10 s of simulation in 100 Updates: the periodic sync follows the clock (every 1 s, or every 20 Updates).
+        TestTrue(*Msg(TEXT("the periodic syncs follow the clock")), Clock ? (Syncs >= 9) : (Syncs >= 4 && Syncs <= 6));
+        if (Clock == 1)
+        {
+            TestEqual(*Msg(TEXT("no deadline sync (the clock is the sim time)")), F.SM.WpDeadlineSyncs_ForTest() - Deadline0, 0);
+        }
+        // A jump away (a violation of the speed bound): still kept, never culled again.
+        Mover->SetActorLocation(Base + FVector(40000.f, 0.f, 0.f));
+        for (int32 k = 0; k < 25; ++k)
+        {
+            StepUpdate(F, World);
+        }
+        TestTrue(*Msg(TEXT("kept at 400 m after the jump")), F.SM.IsEntityRegistered_ForTest(MC));
     }
-    AddInfo(FString::Printf(TEXT("frames=%d bad=%d first=%s syncs=%d registered_at_gap_m=%.1f last_trigger=%s"), Miss.Frames, Miss.Bad,
-                            *Miss.First, F.SM.SyncCount_ForTest - Syncs0, RegisteredAtGapCm / 100.0, *F.SM.LastSyncTrigger_ForTest));
-    TestEqual(TEXT("no frame with a part missing in range"), Miss.Bad, 0);
-    TestTrue(TEXT("registered before its bounds reached the range"), RegisteredAtGapCm > 0.0);
-    TestTrue(TEXT("promoted"), F.SM.IsWpPromoted_ForTest(MC));
-    // A jump away (a violation of the speed bound): still kept, never culled again.
-    Mover->SetActorLocation(Base + FVector(40000.f, 0.f, 0.f));
-    for (int32 k = 0; k < 25; ++k)
-    {
-        StepUpdate(F, World);
-    }
-    TestTrue(TEXT("kept at 400 m after the jump"), F.SM.IsEntityRegistered_ForTest(MC));
     return true;
 }
 
@@ -2165,6 +2185,9 @@ bool FSceneSyncWpCullStateDoesNotCrossWorldsTest::RunTest(const FString& Paramet
 // R5: the dt shrinks after the culling sync (0.05 -> 0.005 s) and the periodic sync would come 20 s later; a culled part
 // 420.9 m away (R_load 420 m with the default 50 m/s bounds) comes at 50 m/s and would reach the range at 6.4 s. The
 // deadline on the sim clock syncs in time (trigger wp_deadline); nothing is missing at any Update.
+// On both sync clocks: the above is the Update clock. On the simulation clock (rgl.Scene.SyncClock = 1) the periodic
+// sync counts simulation time, so a shrinking dt does not stretch it: R_load 320 m (T_sync_max 1.1 s, H 2.2 s), the part
+// starts 320.9 m away, a sync every 1 s finds it, and no deadline sync is needed.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpDtShrinkForcesSyncTest, "CarlaRGL.SceneSync.WpDtShrinkForcesSync",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncWpDtShrinkForcesSyncTest::RunTest(const FString& Parameters)
@@ -2172,40 +2195,57 @@ bool FSceneSyncWpDtShrinkForcesSyncTest::RunTest(const FString& Parameters)
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(79);
-    FWpTestScope W(World, true, 0.05f, /*SpeedMps=*/50.f);
-    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0914), Base, 13800.0);
-    F.Sync();
-    const float LoadCm = F.SM.GetWpLoadRadiusCm_ForTest(F.Sensor);
-    AddInfo(FString::Printf(TEXT("R_load=%.1f m"), LoadCm / 100.f));
-    TestTrue(TEXT("R_load 420 m"), FMath::IsNearlyEqual(LoadCm, 42000.f, 1.f));
-    const FRGLSceneAuditResult R0 = F.Audit();
-    AStaticMeshActor* A = F.Keep(SpawnPart(World, Cube, Base + FVector(42000.f + 90.f, 0.f, 0.f)));
-    if (!TestNotNull(TEXT("part"), A)) return false;
-    UStaticMeshComponent* AC = A->GetStaticMeshComponent();
-    TestTrue(TEXT("beyond R_load + its radius"), FVector::Dist(AC->Bounds.Origin, Base) > LoadCm + AC->Bounds.SphereRadius);
-    F.Sync();
-    TestFalse(TEXT("culled"), F.SM.IsEntityRegistered_ForTest(AC));
-    F.SM.WorldDtOverride_ForTest = 0.005f;
-    const int32 Deadline0 = F.SM.WpDeadlineSyncs_ForTest();
-    FMissFrames Miss;
-    double RegisteredAtGapCm = -1.0;
-    bool bSawDeadline = false;
-    for (int32 k = 0; k < 66; ++k)
+    for (int32 Clock = 0; Clock <= 1; ++Clock)
     {
-        A->SetActorLocation(A->GetActorLocation() - FVector(500.f, 0.f, 0.f));   // 50 m/s
-        StepUpdate(F, World);
-        bSawDeadline |= (F.SM.LastSyncTrigger_ForTest == TEXT("wp_deadline"));
-        Miss.Look(Diff(R0, F.Audit()), F.T);
-        if (RegisteredAtGapCm < 0.0 && F.SM.IsEntityRegistered_ForTest(AC))
+        const TCHAR* ClockName = Clock ? TEXT("sim clock") : TEXT("update clock");
+        auto Msg = [ClockName](const TCHAR* What) { return FString::Printf(TEXT("%s: %s"), ClockName, What); };
+        FWpTestScope W(World, true, 0.05f, /*SpeedMps=*/50.f, Clock);
+        FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0914), Base, 13800.0 + 50.0 * Clock);
+        F.Sync();
+        const float LoadCm = F.SM.GetWpLoadRadiusCm_ForTest(F.Sensor);
+        AddInfo(FString::Printf(TEXT("%s: R_load=%.1f m"), ClockName, LoadCm / 100.f));
+        TestTrue(*Msg(Clock ? TEXT("R_load 320 m") : TEXT("R_load 420 m")), FMath::IsNearlyEqual(LoadCm, Clock ? 32000.f : 42000.f, 1.f));
+        const FRGLSceneAuditResult R0 = F.Audit();
+        AStaticMeshActor* A = F.Keep(SpawnPart(World, Cube, Base + FVector(LoadCm + 90.f, 0.f, 0.f)));
+        if (!TestNotNull(*Msg(TEXT("part")), A)) return false;
+        UStaticMeshComponent* AC = A->GetStaticMeshComponent();
+        TestTrue(*Msg(TEXT("beyond R_load + its radius")), FVector::Dist(AC->Bounds.Origin, Base) > LoadCm + AC->Bounds.SphereRadius);
+        F.Sync();
+        TestFalse(*Msg(TEXT("culled")), F.SM.IsEntityRegistered_ForTest(AC));
+        F.SM.WorldDtOverride_ForTest = 0.005f;
+        const int32 Deadline0 = F.SM.WpDeadlineSyncs_ForTest();
+        const int32 Syncs0 = F.SM.SyncCount_ForTest;
+        FMissFrames Miss;
+        double RegisteredAtGapCm = -1.0;
+        bool bSawDeadline = false;
+        for (int32 k = 0; k < 66; ++k)
         {
-            RegisteredAtGapCm = FVector::Dist(AC->Bounds.Origin, Base) - AC->Bounds.SphereRadius - kRangeCm;
+            A->SetActorLocation(A->GetActorLocation() - FVector(500.f, 0.f, 0.f));   // 50 m/s
+            StepUpdate(F, World);
+            bSawDeadline |= (F.SM.LastSyncTrigger_ForTest == TEXT("wp_deadline"));
+            Miss.Look(Diff(R0, F.Audit()), F.T);
+            if (RegisteredAtGapCm < 0.0 && F.SM.IsEntityRegistered_ForTest(AC))
+            {
+                RegisteredAtGapCm = FVector::Dist(AC->Bounds.Origin, Base) - AC->Bounds.SphereRadius - kRangeCm;
+            }
         }
+        const int32 Syncs = F.SM.SyncCount_ForTest - Syncs0;
+        AddInfo(FString::Printf(TEXT("%s: frames=%d bad=%d first=%s syncs=%d deadline_syncs=%d registered_at_gap_m=%.1f"), ClockName,
+                                Miss.Frames, Miss.Bad, *Miss.First, Syncs, F.SM.WpDeadlineSyncs_ForTest() - Deadline0,
+                                RegisteredAtGapCm / 100.0));
+        if (Clock == 0)
+        {
+            TestTrue(*Msg(TEXT("a wp_deadline sync ran")), bSawDeadline && F.SM.WpDeadlineSyncs_ForTest() - Deadline0 >= 1);
+        }
+        else
+        {
+            TestEqual(*Msg(TEXT("no deadline sync: the periodic sync counts sim time")), F.SM.WpDeadlineSyncs_ForTest() - Deadline0, 0);
+            TestTrue(*Msg(TEXT("a periodic sync every 1 s of sim time (6.6 s)")), Syncs >= 5);
+        }
+        TestEqual(*Msg(TEXT("no frame with a part missing in range")), Miss.Bad, 0);
+        TestTrue(*Msg(TEXT("registered before its bounds reached the range")), RegisteredAtGapCm > 0.0);
+        F.SM.WorldDtOverride_ForTest = 0.05f;
     }
-    AddInfo(FString::Printf(TEXT("frames=%d bad=%d first=%s deadline_syncs=%d registered_at_gap_m=%.1f"), Miss.Frames, Miss.Bad, *Miss.First,
-                            F.SM.WpDeadlineSyncs_ForTest() - Deadline0, RegisteredAtGapCm / 100.0));
-    TestTrue(TEXT("a wp_deadline sync ran"), bSawDeadline && F.SM.WpDeadlineSyncs_ForTest() - Deadline0 >= 1);
-    TestEqual(TEXT("no frame with a part missing in range"), Miss.Bad, 0);
-    TestTrue(TEXT("registered before its bounds reached the range"), RegisteredAtGapCm > 0.0);
     return true;
 }
 
@@ -2237,6 +2277,31 @@ bool FSceneSyncWpCullHorizonMatchesClockTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("R_load = range + M covers (Vs + Vo) * H"), 100.0 + M >= 100.0 + (50.0 + 50.0) * H0 - 1e-9);
     // The distance trigger is no input: T_sync_max is the same whatever it would be.
     TestTrue(TEXT("no distance input"), H(C::UpdateClock, 1.0, 0.05f, 0.1, 1.0).SyncBoundSeconds == H(C::UpdateClock, 1.0, 0.05f, 0.1, 1.0).SyncBoundSeconds);
+
+    // The manager's own horizon follows the sync clock and interval knobs (rgl.Scene.SyncClock, SyncIntervalSeconds): the
+    // init sync of the fixture's sensor (range 100 m) with FWpTestScope's U 0.1 s, L 1 s and 5 + 5 m/s. Update clock, I 1 s,
+    // dt 0.05 -> T 2.1, M 32 m, R_load 132 m; Update clock, I 2.5 s, dt 0.025 -> T 10.1, H 11.2, M 112 m, R_load 212 m;
+    // simulation clock, I 1 s -> T 1.1, H 2.2, M 22 m, R_load 122 m whatever the dt (0.05 or 0.025); I 2.5 s -> T 2.6, R_load 137 m.
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    struct FCase { int32 Clock; float Interval; float Dt; double Bound; float LoadCm; };
+    const FCase Cases[] = { { 0, 1.0f, 0.05f, 2.1, 13200.f }, { 0, 2.5f, 0.025f, 10.1, 21200.f },
+                            { 1, 1.0f, 0.05f, 1.1, 12200.f }, { 1, 1.0f, 0.025f, 1.1, 12200.f }, { 1, 2.5f, 0.025f, 2.6, 13700.f } };
+    int32 Index = 0;
+    for (const FCase& Case : Cases)
+    {
+        FWpTestScope W(World, true, Case.Dt, 5.0f, Case.Clock);
+        FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0A10), BaseFor(84), 15400.0 + 10.0 * Index++);
+        F.SM.SetSyncInterval(Case.Interval);
+        StepUpdate(F, World);   // the sensor's init sync
+        const FString Line = F.SM.LastSyncLine_ForTest;
+        AddInfo(Line);
+        const FString What = FString::Printf(TEXT("clock %d, I %.1f, dt %.3f"), Case.Clock, Case.Interval, Case.Dt);
+        TestEqual(What + TEXT(": an init sync ran"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("init")));
+        TestTrue(What + FString::Printf(TEXT(": wp_sync_bound_s=%.2f"), Case.Bound),
+                 Line.Contains(FString::Printf(TEXT(" wp_sync_bound_s=%.2f "), Case.Bound)));
+        TestTrue(What + FString::Printf(TEXT(": R_load %.0f m"), Case.LoadCm / 100.f),
+                 FMath::IsNearlyEqual(F.SM.GetWpLoadRadiusCm_ForTest(F.Sensor), Case.LoadCm, 1.f));
+    }
     return true;
 }
 
@@ -2249,7 +2314,7 @@ bool FSceneSyncWpSceneConfigShowsKnobsTest::RunTest(const FString& Parameters)
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     FWpTestScope W(World, true);
     FRGLSceneManager& SM = W.SM;
-    FRGLSceneManager::ApplyWpSceneSwitches(
+    FRGLSceneManager::ApplySceneSwitches(
         TEXT("-rgl-scene-wp-movable-culling=1 -rgl-scene-movable-min-margin-m=30 -rgl-scene-movable-sensor-speed-bound-mps=40 "
              "-rgl-scene-movable-object-speed-bound-mps=45 -rgl-scene-movable-max-update-gap-seconds=0.2 "
              "-rgl-scene-movable-create-latency-seconds=1.5 -rgl-scene-max-movable-entity-changes-per-update=256 "
@@ -2275,8 +2340,10 @@ bool FSceneSyncWpSceneConfigShowsKnobsTest::RunTest(const FString& Parameters)
         TestTrue(FString::Printf(TEXT("config line has '%s'"), Key), Line.Contains(Key));
     }
     TestTrue(TEXT("config line ends with the budget"), Line.EndsWith(TEXT(" movable_entity_budget_ms=0.00")));
+    TestTrue(TEXT("config line has the sync clock (FWpTestScope: the Update clock, 1 s)"),
+             Line.Contains(TEXT(" sync_clock=update sync_interval_s=1.00 ")));
     // Invalid values: the defaults are used (and said once).
-    FRGLSceneManager::ApplyWpSceneSwitches(TEXT("-rgl-scene-movable-sensor-speed-bound-mps=-5 -rgl-scene-max-movable-entity-changes-per-update=-1 "
+    FRGLSceneManager::ApplySceneSwitches(TEXT("-rgl-scene-movable-sensor-speed-bound-mps=-5 -rgl-scene-max-movable-entity-changes-per-update=-1 "
                                                 "-rgl-scene-movable-min-margin-m=5 -rgl-scene-wp-movable-culling=7"), ECVF_SetByCode);
     SM.Update_ForTest(World, 14000.1);
     Line = SM.LastConfigLine_ForTest;
@@ -2450,6 +2517,8 @@ bool FSceneSyncWpInRangeDiscoveryBurstTest::RunTest(const FString& Parameters)
 // R7 boundary: first 0.15 s interval (U=.1, dt=.05), then dt shrinks with prefetch work waiting. A culled object
 // approaches a stationary sensor at the bound; the deadline and budget finish it BEFORE raw range, on every frame.
 // Only the first <=U+dt gap is exempt; second gaps, late sensors' second gaps, and oversized first gaps still violate.
+// On both sync clocks: on the simulation clock (R_load 320 m) the periodic sync counts sim time, so the shrinking dt
+// needs no deadline sync; everything else is the same.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpStartupGapBoundaryTest, "CarlaRGL.SceneSync.WpStartupGapBoundary",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncWpStartupGapBoundaryTest::RunTest(const FString& Parameters)
@@ -2457,75 +2526,291 @@ bool FSceneSyncWpStartupGapBoundaryTest::RunTest(const FString& Parameters)
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(83);
-    FWpTestScope W(World, true, 0.05f, 50.f);
-    SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 1);
-    SetFloatCVar(TEXT("rgl.Scene.MovableEntityBudgetMs"), 0.f);
-    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A091A), Base, 14700.0);
-    AStaticMeshActor* A = F.Keep(SpawnPart(World, Cube, Base + FVector(42100.f, 0.f, 0.f)));
-    UStaticMeshComponent* C = A->GetStaticMeshComponent();
-    auto V = [&F](const TCHAR* K) { return F.SM.GetWpViolations_ForTest(K); };
-    const int32 U0 = V(TEXT("update_gap")), P0 = V(TEXT("pose_gap"));
-    const int32 Age0 = V(TEXT("queue_age")), Late0 = V(TEXT("late_create"));
-    StepUpdate(F, World);
-    TestFalse(TEXT("approaching part initially culled"), F.SM.IsEntityRegistered_ForTest(C));
-    const FRGLSceneAuditResult R0 = F.Audit();
-    A->SetActorLocation(A->GetActorLocation() - FVector(750.f, 0.f, 0.f));
-    // R10: only A was active at the interval start. Seven sensors join at its END, before the next init sync.
-    // Their uninitialized state must not invalidate A's first scene-wide interval (nor excuse a later interval).
-    TArray<const void*> JoinedSensors;
-    for (UPTRINT i = 0; i < 7; ++i)
+    for (int32 Clock = 0; Clock <= 1; ++Clock)
     {
-        const void* Sensor = reinterpret_cast<const void*>(0x5A0920 + i);
-        JoinedSensors.Add(Sensor);
-        F.SM.RegisterSensor(Sensor, Base, kRegistrationCm, F.T + 0.15);
-    }
-    StepUpdate(F, World, 0.15);
-    TestEqual(TEXT("R10: seven joining sensors do not invalidate the first update interval"), V(TEXT("update_gap")) - U0, 0);
-    TestEqual(TEXT("R7: first pose gap <= U+dt exempt"), V(TEXT("pose_gap")) - P0, 0);
-    for (const void* Sensor : JoinedSensors) F.SM.UnregisterSensor(Sensor);
-    for (int32 i = 0; i < 8; ++i) F.Keep(SpawnPart(World, Cube, BandPoint(Base, i, 8, 20000.f, 22000.f)));
-    F.SM.WorldDtOverride_ForTest = 0.005f;
-    // R5 must force the scan before the old horizon expires, including the first extra dt.
-    const int32 Deadline0 = F.SM.WpDeadlineSyncs_ForTest();
-    int32 PendingMax = 0, Missing = 0;
-    double RegisteredGap = -1.0;
-    for (int32 k = 0; k < 66; ++k)
-    {
-        A->SetActorLocation(A->GetActorLocation() - FVector(500.f, 0.f, 0.f));
+        const TCHAR* ClockName = Clock ? TEXT("sim clock") : TEXT("update clock");
+        auto Msg = [ClockName](const TCHAR* What) { return FString::Printf(TEXT("%s: %s"), ClockName, What); };
+        FWpTestScope W(World, true, 0.05f, 50.f, Clock);
+        SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 1);
+        SetFloatCVar(TEXT("rgl.Scene.MovableEntityBudgetMs"), 0.f);
+        FAuditFixture F(World, reinterpret_cast<const void*>(0x5A091A), Base, 14700.0 + 50.0 * Clock);
+        AStaticMeshActor* A = F.Keep(SpawnPart(World, Cube, Base + FVector(42100.f, 0.f, 0.f)));
+        if (!TestNotNull(*Msg(TEXT("part")), A)) return false;
+        UStaticMeshComponent* C = A->GetStaticMeshComponent();
+        auto V = [&F](const TCHAR* K) { return F.SM.GetWpViolations_ForTest(K); };
+        const int32 U0 = V(TEXT("update_gap")), P0 = V(TEXT("pose_gap"));
+        const int32 Age0 = V(TEXT("queue_age")), Late0 = V(TEXT("late_create"));
         StepUpdate(F, World);
-        PendingMax = FMath::Max(PendingMax, F.SM.GetWpPendingJobs_ForTest());
-        Missing += Diff(R0, F.Audit()).MissingInRange > 0 ? 1 : 0;
-        if (RegisteredGap < 0.0 && F.SM.IsEntityRegistered_ForTest(C))
-            RegisteredGap = FVector::Dist(C->Bounds.Origin, Base) - C->Bounds.SphereRadius - kRangeCm;
+        TestFalse(*Msg(TEXT("approaching part initially culled")), F.SM.IsEntityRegistered_ForTest(C));
+        const FRGLSceneAuditResult R0 = F.Audit();
+        A->SetActorLocation(A->GetActorLocation() - FVector(750.f, 0.f, 0.f));
+        // R10: only A was active at the interval start. Seven sensors join at its END, before the next init sync.
+        // Their uninitialized state must not invalidate A's first scene-wide interval (nor excuse a later interval).
+        TArray<const void*> JoinedSensors;
+        for (UPTRINT i = 0; i < 7; ++i)
+        {
+            const void* Sensor = reinterpret_cast<const void*>(0x5A0920 + i);
+            JoinedSensors.Add(Sensor);
+            F.SM.RegisterSensor(Sensor, Base, kRegistrationCm, F.T + 0.15);
+        }
+        StepUpdate(F, World, 0.15);
+        TestEqual(*Msg(TEXT("R10: seven joining sensors do not invalidate the first update interval")), V(TEXT("update_gap")) - U0, 0);
+        TestEqual(*Msg(TEXT("R7: first pose gap <= U+dt exempt")), V(TEXT("pose_gap")) - P0, 0);
+        for (const void* Sensor : JoinedSensors) F.SM.UnregisterSensor(Sensor);
+        for (int32 i = 0; i < 8; ++i) F.Keep(SpawnPart(World, Cube, BandPoint(Base, i, 8, 20000.f, 22000.f)));
+        F.SM.WorldDtOverride_ForTest = 0.005f;
+        // R5 must force the scan before the old horizon expires, including the first extra dt (Update clock).
+        const int32 Deadline0 = F.SM.WpDeadlineSyncs_ForTest();
+        int32 PendingMax = 0, Missing = 0;
+        double RegisteredGap = -1.0;
+        for (int32 k = 0; k < 66; ++k)
+        {
+            A->SetActorLocation(A->GetActorLocation() - FVector(500.f, 0.f, 0.f));
+            StepUpdate(F, World);
+            PendingMax = FMath::Max(PendingMax, F.SM.GetWpPendingJobs_ForTest());
+            Missing += Diff(R0, F.Audit()).MissingInRange > 0 ? 1 : 0;
+            if (RegisteredGap < 0.0 && F.SM.IsEntityRegistered_ForTest(C))
+                RegisteredGap = FVector::Dist(C->Bounds.Origin, Base) - C->Bounds.SphereRadius - kRangeCm;
+        }
+        AddInfo(FString::Printf(TEXT("%s: pending_max=%d missing_frames=%d deadline_syncs=%d registered_gap_m=%.1f"), ClockName,
+                                PendingMax, Missing, F.SM.WpDeadlineSyncs_ForTest() - Deadline0, RegisteredGap / 100.0));
+        TestTrue(*Msg(TEXT("creation work really waited")), PendingMax > 0);
+        if (Clock == 0)
+        {
+            TestTrue(*Msg(TEXT("deadline forced a sync after dt shrink")), F.SM.WpDeadlineSyncs_ForTest() > Deadline0);
+        }
+        else
+        {
+            TestEqual(*Msg(TEXT("no deadline sync: the periodic sync counts sim time")), F.SM.WpDeadlineSyncs_ForTest() - Deadline0, 0);
+        }
+        TestEqual(*Msg(TEXT("every frame complete inside raw range")), Missing, 0);
+        TestTrue(*Msg(TEXT("registered strictly before range")), RegisteredGap > 0.0);
+        TestEqual(*Msg(TEXT("all creation waits met L_create")), V(TEXT("queue_age")) - Age0, 0);
+        TestEqual(*Msg(TEXT("no late creation")), V(TEXT("late_create")) - Late0, 0);
+        TestEqual(*Msg(TEXT("normal later update gaps")), V(TEXT("update_gap")) - U0, 0);
+        TestEqual(*Msg(TEXT("normal later pose gaps")), V(TEXT("pose_gap")) - P0, 0);
+        F.SM.WorldDtOverride_ForTest = 0.05f;
+        StepUpdate(F, World, 0.15);
+        TestEqual(*Msg(TEXT("second update gap is a violation")), V(TEXT("update_gap")) - U0, 1);
+        TestEqual(*Msg(TEXT("second pose gap is a violation")), V(TEXT("pose_gap")) - P0, 1);
+        const void* Late = reinterpret_cast<const void*>(0x5A091B);
+        F.SM.RegisterSensor(Late, Base, kRegistrationCm, F.T);
+        StepUpdate(F, World);
+        F.SM.RegisterSensor(Late, Base, kRegistrationCm, F.T); // first pose's origin is the init sync
+        F.T += 0.15; F.Refresh(); F.SM.RegisterSensor(Late, Base, kRegistrationCm, F.T); F.SM.Update_ForTest(World, F.T);
+        const int32 P1 = V(TEXT("pose_gap"));
+        F.T += 0.15; F.Refresh(); F.SM.RegisterSensor(Late, Base, kRegistrationCm, F.T); F.SM.Update_ForTest(World, F.T);
+        TestEqual(*Msg(TEXT("late sensor second gap also violates (both sensors)")), V(TEXT("pose_gap")) - P1, 2);
+        F.SM.UnregisterSensor(Late);
+        // A fresh sensor with an oversized FIRST interval (>U+dt) cannot claim start-up.
+        F.SM.UnregisterSensor(F.Sensor);
+        F.Refresh(); F.SM.Update_ForTest(World, F.T);
+        const int32 U1 = V(TEXT("update_gap")), P2 = V(TEXT("pose_gap"));
+        StepUpdate(F, World, 0.20);
+        TestEqual(*Msg(TEXT("oversized first update gap violates")), V(TEXT("update_gap")) - U1, 1);
+        TestEqual(*Msg(TEXT("oversized first pose gap violates")), V(TEXT("pose_gap")) - P2, 1);
     }
-    TestTrue(TEXT("creation work really waited"), PendingMax > 0);
-    TestTrue(TEXT("deadline forced a sync after dt shrink"), F.SM.WpDeadlineSyncs_ForTest() > Deadline0);
-    TestEqual(TEXT("every frame complete inside raw range"), Missing, 0);
-    TestTrue(TEXT("registered strictly before range"), RegisteredGap > 0.0);
-    TestEqual(TEXT("all creation waits met L_create"), V(TEXT("queue_age")) - Age0, 0);
-    TestEqual(TEXT("no late creation"), V(TEXT("late_create")) - Late0, 0);
-    TestEqual(TEXT("normal later update gaps"), V(TEXT("update_gap")) - U0, 0);
-    TestEqual(TEXT("normal later pose gaps"), V(TEXT("pose_gap")) - P0, 0);
-    F.SM.WorldDtOverride_ForTest = 0.05f;
-    StepUpdate(F, World, 0.15);
-    TestEqual(TEXT("second update gap is a violation"), V(TEXT("update_gap")) - U0, 1);
-    TestEqual(TEXT("second pose gap is a violation"), V(TEXT("pose_gap")) - P0, 1);
-    const void* Late = reinterpret_cast<const void*>(0x5A091B);
-    F.SM.RegisterSensor(Late, Base, kRegistrationCm, F.T);
+    return true;
+}
+
+// ============================================================================
+// P8 part 1: the clock and the interval of the periodic sync (rgl.Scene.SyncClock, rgl.Scene.SyncIntervalSeconds), the
+// shared parser of the -rgl-scene-*= switches, the rgl_scene_config line and the per-sensor rgl_scene_sensor line
+// ============================================================================
+
+// The default clock is simulation time: with the sensor still and a world dt of 0.01 s per Update, Updates 0.1 ... 0.9 s
+// (sim) after a sync do not sync, the Update 1.0 s after it does (trigger time). The original timer would have counted
+// 0.1 s by then. Simulation time going back (earlier than the last sync) syncs at once instead of waiting to catch up.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSyncTimerCountsSimTimeTest, "CarlaRGL.SceneSync.SyncTimerCountsSimTime",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSyncTimerCountsSimTimeTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    TestEqual(TEXT("the default clock is simulation time (rgl.Scene.SyncClock = 1)"),
+              IConsoleManager::Get().FindConsoleVariable(TEXT("rgl.Scene.SyncClock"))->GetInt(), 1);
+    FRGLSceneManager::FWpScope_ForTest Dt(FRGLSceneManager::GetInstance(World), /*bWp=*/false, 0.01f);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0A01), BaseFor(44), 15000.0);
+    F.SM.SetSyncInterval(1.0f);
+    F.Sync();
+    const double TS = F.T;
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    for (int32 k = 1; k <= 9; ++k)
+    {
+        F.T = TS + 0.1 * k;
+        F.Refresh();
+        F.SM.Update_ForTest(World, F.T);
+    }
+    TestEqual(TEXT("+0.1 ... +0.9 s: no sync"), F.SM.SyncCount_ForTest - Syncs0, 0);
+    F.T = TS + 1.0;
+    F.Refresh();
+    F.SM.Update_ForTest(World, F.T);
+    TestEqual(TEXT("+1.0 s: one sync"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("+1.0 s: trigger=time"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("time")));
+    F.T = TS + 1.5;
+    F.Refresh();
+    F.SM.Update_ForTest(World, F.T);
+    TestEqual(TEXT("+1.5 s: no sync"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    F.T = TS + 0.5;
+    F.Refresh();
+    F.SM.Update_ForTest(World, F.T);
+    TestEqual(TEXT("back to +0.5 s (before the last sync): a sync"), F.SM.SyncCount_ForTest - Syncs0, 2);
+    TestEqual(TEXT("back to +0.5 s: trigger=time"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("time")));
+    return true;
+}
+
+// rgl.Scene.SyncClock = 0, the original timer: only the world dt of the scene Updates counts. With a world dt of 0.125 s,
+// seven Updates 0.2 s (sim) apart (1.4 s of simulation time, 0.875 s of Update dt) do not sync; the eighth (1.0 s) does.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSyncClockLegacyCountsUpdateFramesTest, "CarlaRGL.SceneSync.SyncClockLegacyCountsUpdateFrames",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSyncClockLegacyCountsUpdateFramesTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    FCVarGuard ClockGuard(TEXT("rgl.Scene.SyncClock"));
+    SetCVar(TEXT("rgl.Scene.SyncClock"), 0);
+    FRGLSceneManager::FWpScope_ForTest Dt(FRGLSceneManager::GetInstance(World), /*bWp=*/false, 0.125f);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0A02), BaseFor(44), 15100.0);
+    F.SM.SetSyncInterval(1.0f);
+    F.Sync();
+    const double TS = F.T;
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    for (int32 k = 1; k <= 7; ++k)
+    {
+        F.T = TS + 0.2 * k;
+        F.Refresh();
+        F.SM.Update_ForTest(World, F.T);
+    }
+    TestEqual(TEXT("7 Updates (1.4 s sim, 0.875 s of Update dt): no sync"), F.SM.SyncCount_ForTest - Syncs0, 0);
+    F.T = TS + 1.6;
+    F.Refresh();
+    F.SM.Update_ForTest(World, F.T);
+    TestEqual(TEXT("the 8th Update (1.0 s of Update dt): one sync"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("trigger=time"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("time")));
+    return true;
+}
+
+// ApplySceneSwitches reads every -rgl-scene-*= switch (and the hit dump's) from the string it is given and sets the CVar
+// with the given priority; a switch that is absent leaves its CVar alone. The guards put every value back.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSceneSwitchesParseTest, "CarlaRGL.SceneSync.SceneSwitchesParse",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSceneSwitchesParseTest::RunTest(const FString& Parameters)
+{
+    FCVarGuard G1(TEXT("rgl.Scene.MaxMeshCreatesPerUpdate"));
+    FFloatCVarGuard G2(TEXT("rgl.Scene.CreateBudgetMs"));
+    FFloatCVarGuard G3(TEXT("rgl.Scene.UnloadDistanceFactor"));
+    FCVarGuard G4(TEXT("rgl.Scene.IdleMeshCacheMax"));
+    FCVarGuard G5(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"));
+    FCVarGuard G6(TEXT("rgl.Scene.Audit"));
+    FStringCVarGuard G7(TEXT("rgl.Debug.HitDumpDir"));
+    FCVarGuard G8(TEXT("rgl.Debug.HitDumpEvery"));
+    FCVarGuard G9(TEXT("rgl.Scene.WpMovableCulling"));
+    FFloatCVarGuard G10(TEXT("rgl.Scene.MovableMinMarginM"));
+    FFloatCVarGuard G11(TEXT("rgl.Scene.MovableSensorSpeedBoundMps"));
+    FFloatCVarGuard G12(TEXT("rgl.Scene.MovableObjectSpeedBoundMps"));
+    FFloatCVarGuard G13(TEXT("rgl.Scene.MovableMaxUpdateGapSeconds"));
+    FFloatCVarGuard G14(TEXT("rgl.Scene.MovableCreateLatencySeconds"));
+    FCVarGuard G15(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"));
+    FFloatCVarGuard G16(TEXT("rgl.Scene.MovableEntityBudgetMs"));
+    FCVarGuard G17(TEXT("rgl.Scene.SyncClock"));
+    FFloatCVarGuard G18(TEXT("rgl.Scene.SyncIntervalSeconds"));
+    FRGLSceneManager::ApplySceneSwitches(
+        TEXT("-rgl-scene-max-mesh-creates-per-update=3 -rgl-scene-create-budget-ms=2.5 -rgl-scene-unload-distance-factor=1.5 "
+             "-rgl-scene-idle-mesh-cache-max=7 -rgl-scene-max-ism-instance-changes-per-update=64 -rgl-scene-audit=5 "
+             "-rgl-debug-hit-dump=/nonexistent/rgl-switch-parse -rgl-debug-hit-dump-every=4 -rgl-scene-wp-movable-culling=0 "
+             "-rgl-scene-movable-min-margin-m=25 -rgl-scene-movable-sensor-speed-bound-mps=30 "
+             "-rgl-scene-movable-object-speed-bound-mps=35 -rgl-scene-movable-max-update-gap-seconds=0.25 "
+             "-rgl-scene-movable-create-latency-seconds=2 -rgl-scene-max-movable-entity-changes-per-update=128 "
+             "-rgl-scene-movable-entity-budget-ms=6 -rgl-scene-sync-clock=0 -rgl-scene-sync-interval-seconds=2.5"),
+        ECVF_SetByCode);
+    auto F = [](const TCHAR* N) { return IConsoleManager::Get().FindConsoleVariable(N)->GetFloat(); };
+    auto I = [](const TCHAR* N) { return IConsoleManager::Get().FindConsoleVariable(N)->GetInt(); };
+    auto S = [](const TCHAR* N) { return IConsoleManager::Get().FindConsoleVariable(N)->GetString(); };
+    TestEqual(TEXT("max mesh creates"), I(TEXT("rgl.Scene.MaxMeshCreatesPerUpdate")), 3);
+    TestEqual(TEXT("create budget ms"), F(TEXT("rgl.Scene.CreateBudgetMs")), 2.5f);
+    TestEqual(TEXT("unload distance factor"), F(TEXT("rgl.Scene.UnloadDistanceFactor")), 1.5f);
+    TestEqual(TEXT("idle mesh cache max"), I(TEXT("rgl.Scene.IdleMeshCacheMax")), 7);
+    TestEqual(TEXT("max ISM instance changes"), I(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate")), 64);
+    TestEqual(TEXT("audit"), I(TEXT("rgl.Scene.Audit")), 5);
+    TestEqual(TEXT("hit dump dir"), S(TEXT("rgl.Debug.HitDumpDir")), FString(TEXT("/nonexistent/rgl-switch-parse")));
+    TestEqual(TEXT("hit dump every"), I(TEXT("rgl.Debug.HitDumpEvery")), 4);
+    TestEqual(TEXT("WP movable culling"), I(TEXT("rgl.Scene.WpMovableCulling")), 0);
+    TestEqual(TEXT("min margin"), F(TEXT("rgl.Scene.MovableMinMarginM")), 25.f);
+    TestEqual(TEXT("sensor speed"), F(TEXT("rgl.Scene.MovableSensorSpeedBoundMps")), 30.f);
+    TestEqual(TEXT("object speed"), F(TEXT("rgl.Scene.MovableObjectSpeedBoundMps")), 35.f);
+    TestEqual(TEXT("update gap"), F(TEXT("rgl.Scene.MovableMaxUpdateGapSeconds")), 0.25f);
+    TestEqual(TEXT("create latency"), F(TEXT("rgl.Scene.MovableCreateLatencySeconds")), 2.f);
+    TestEqual(TEXT("max movable changes"), I(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate")), 128);
+    TestEqual(TEXT("movable budget ms"), F(TEXT("rgl.Scene.MovableEntityBudgetMs")), 6.f);
+    TestEqual(TEXT("sync clock"), I(TEXT("rgl.Scene.SyncClock")), 0);
+    TestEqual(TEXT("sync interval"), F(TEXT("rgl.Scene.SyncIntervalSeconds")), 2.5f);
+    // Only the interval: the clock keeps its value.
+    FRGLSceneManager::ApplySceneSwitches(TEXT("-rgl-scene-sync-interval-seconds=3"), ECVF_SetByCode);
+    TestEqual(TEXT("absent switch: the clock is left alone"), I(TEXT("rgl.Scene.SyncClock")), 0);
+    TestEqual(TEXT("the interval alone: 3"), F(TEXT("rgl.Scene.SyncIntervalSeconds")), 3.f);
+    return true;
+}
+
+// The rgl_scene_config line from the knobs: the defaults carry sync_clock=sim sync_interval_s=1.00; every key the line
+// carried before (the create queue, the ISM cap, the unload margin, the World Partition culling) is still on it, in its
+// order; other values and invalid ones (a clock other than 0/1 -> sim, an interval below 0.1 s -> 0.1 s) are shown.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSceneConfigLineShowsKnobsTest, "CarlaRGL.SceneSync.SceneConfigLineShowsKnobs",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSceneConfigLineShowsKnobsTest::RunTest(const FString& Parameters)
+{
+    const FString Line = FRGLSceneManager::FormatSceneConfigLine(1.0, FRGLSceneManager::ReadSceneKnobs());
+    AddInfo(Line);
+    TestTrue(TEXT("the line starts with its name and the time"), Line.StartsWith(TEXT("rgl_scene_config t=1.000 ")));
+    TestTrue(TEXT("defaults: sync_clock=sim sync_interval_s=1.00"), Line.Contains(TEXT(" sync_clock=sim sync_interval_s=1.00 ")));
+    const TCHAR* const Keys[] = {
+        TEXT(" max_mesh_creates_per_update="), TEXT(" create_budget_ms="), TEXT(" unload_distance_factor="),
+        TEXT(" idle_mesh_cache_max="), TEXT(" max_ism_instance_changes_per_update="), TEXT(" unload_margin_cm="),
+        TEXT(" sync_clock="), TEXT(" sync_interval_s="), TEXT(" wp_culling="), TEXT(" wp_movable_culling="),
+        TEXT(" movable_min_margin_m="), TEXT(" movable_sensor_speed_bound_mps="), TEXT(" movable_object_speed_bound_mps="),
+        TEXT(" movable_max_update_gap_seconds="), TEXT(" movable_create_latency_seconds="),
+        TEXT(" max_movable_entity_changes_per_update="), TEXT(" movable_entity_budget_ms=") };
+    int32 From = 0;
+    for (const TCHAR* Key : Keys)
+    {
+        const int32 At = Line.Find(Key, ESearchCase::CaseSensitive, ESearchDir::FromStart, From);
+        TestTrue(FString::Printf(TEXT("'%s' on the line, after the keys before it"), Key), At != INDEX_NONE);
+        From = (At != INDEX_NONE) ? At + 1 : From;
+    }
+    {
+        FCVarGuard Clock(TEXT("rgl.Scene.SyncClock"));
+        FFloatCVarGuard Interval(TEXT("rgl.Scene.SyncIntervalSeconds"));
+        SetCVar(TEXT("rgl.Scene.SyncClock"), 0);
+        SetFloatCVar(TEXT("rgl.Scene.SyncIntervalSeconds"), 2.5f);
+        const FString L2 = FRGLSceneManager::FormatSceneConfigLine(2.0, FRGLSceneManager::ReadSceneKnobs());
+        AddInfo(L2);
+        TestTrue(TEXT("clock 0, interval 2.5"), L2.Contains(TEXT(" sync_clock=update sync_interval_s=2.50 ")));
+        SetCVar(TEXT("rgl.Scene.SyncClock"), 7);
+        SetFloatCVar(TEXT("rgl.Scene.SyncIntervalSeconds"), 0.01f);
+        const FString L3 = FRGLSceneManager::FormatSceneConfigLine(3.0, FRGLSceneManager::ReadSceneKnobs());
+        AddInfo(L3);
+        TestTrue(TEXT("clock 7 -> sim, interval 0.01 -> 0.10"), L3.Contains(TEXT(" sync_clock=sim sync_interval_s=0.10 ")));
+    }
+    return true;
+}
+
+// The first sync of a sensor prints its effective numbers once: rgl_scene_sensor t= sensor= registration_m= range_m=
+// trigger_m= (the distance trigger: 0.2 R). The fixture's sensor: R 120 m, range 100 m -> trigger 24 m. A later sync of
+// the same sensor (a 30 m move) prints none.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSceneSensorLineAtFirstSyncTest, "CarlaRGL.SceneSync.SceneSensorLineAtFirstSync",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSceneSensorLineAtFirstSyncTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0A03), BaseFor(44), 15200.0);   // registered, never synced
     StepUpdate(F, World);
-    F.SM.RegisterSensor(Late, Base, kRegistrationCm, F.T); // first pose's origin is the init sync
-    F.T += 0.15; F.Refresh(); F.SM.RegisterSensor(Late, Base, kRegistrationCm, F.T); F.SM.Update_ForTest(World, F.T);
-    const int32 P1 = V(TEXT("pose_gap"));
-    F.T += 0.15; F.Refresh(); F.SM.RegisterSensor(Late, Base, kRegistrationCm, F.T); F.SM.Update_ForTest(World, F.T);
-    TestEqual(TEXT("late sensor second gap also violates (both sensors)"), V(TEXT("pose_gap")) - P1, 2);
-    F.SM.UnregisterSensor(Late);
-    // A fresh sensor with an oversized FIRST interval (>U+dt) cannot claim start-up.
-    F.SM.UnregisterSensor(F.Sensor);
-    F.Refresh(); F.SM.Update_ForTest(World, F.T);
-    const int32 U1 = V(TEXT("update_gap")), P2 = V(TEXT("pose_gap"));
-    StepUpdate(F, World, 0.20);
-    TestEqual(TEXT("oversized first update gap violates"), V(TEXT("update_gap")) - U1, 1);
-    TestEqual(TEXT("oversized first pose gap violates"), V(TEXT("pose_gap")) - P2, 1);
+    TestEqual(TEXT("the sensor's first sync"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("init")));
+    const FString Expected = FString::Printf(
+        TEXT("rgl_scene_sensor t=%.3f sensor=0x%llx registration_m=120.0 range_m=100.0 trigger_m=24.0"), F.T,
+        static_cast<unsigned long long>(reinterpret_cast<UPTRINT>(F.Sensor)));
+    for (const FString& L : F.SM.LastSensorLines_ForTest) AddInfo(L);
+    TestTrue(TEXT("the sensor line of the first sync"), F.SM.LastSensorLines_ForTest.Contains(Expected));
+    F.SensorPos += FVector(3000.f, 0.f, 0.f);
+    StepUpdate(F, World);
+    TestEqual(TEXT("a later sync"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("distance")));
+    TestEqual(TEXT("no sensor line at a later sync"), F.SM.LastSensorLines_ForTest.Num(), 0);
     return true;
 }
 }

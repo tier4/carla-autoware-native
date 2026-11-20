@@ -137,6 +137,18 @@ static TAutoConsoleVariable<int32> CVarRGLSceneMaxIsmInstanceChangesPerUpdate(TE
          "the registered ISM groups against the sensor spheres (on the Updates without a sync); the rest wait for the "
          "next Update. 0 = unlimited."), ECVF_Default);
 
+// ---- The periodic static sync: its clock and interval ----
+// The sync's time trigger. The original timer added the world dt once per scene Update, so the time between Updates that
+// the dt does not cover (a 0.1 s LiDAR at a 0.025 s world dt: 0.075 s per Update) was not counted, and a 1 s interval took
+// about 4 s of simulation time. rgl.Scene.SyncClock = 0 restores it (the A/B and the old-value runs).
+static TAutoConsoleVariable<int32> CVarRGLSceneSyncClock(TEXT("rgl.Scene.SyncClock"), 1,
+    TEXT("Clock of the periodic static sync: 1 = simulation time (a sync once rgl.Scene.SyncIntervalSeconds of simulation "
+         "time have passed since the last sync), 0 = the world dt of the scene Updates only (the original timer; with Updates "
+         "less often than every frame it runs slower than simulation time). Other values are taken as 1."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneSyncIntervalSeconds(TEXT("rgl.Scene.SyncIntervalSeconds"), 1.0f,
+    TEXT("Seconds of the rgl.Scene.SyncClock clock between two periodic static syncs (at least 0.1). The distance, level "
+         "and new-sensor triggers come on top of it."), ECVF_Default);
+
 static int32 SceneMaxMeshCreatesPerUpdate() { return FMath::Max(0, CVarRGLSceneMaxMeshCreatesPerUpdate.GetValueOnGameThread()); }
 static float SceneCreateBudgetMs()          { const float V = CVarRGLSceneCreateBudgetMs.GetValueOnGameThread(); return (V > 0.0f) ? V : 0.0f; }
 static float SceneUnloadDistanceFactor()    { const float V = CVarRGLSceneUnloadDistanceFactor.GetValueOnGameThread(); return (V >= 1.0f) ? V : 1.0f; }
@@ -247,11 +259,40 @@ static int32 SceneMaxMovableEntityChangesPerUpdate()
     }
     return V;
 }
+static int32 SceneSyncClock()
+{
+    const int32 V = CVarRGLSceneSyncClock.GetValueOnGameThread();
+    if (V != 0 && V != 1)
+    {
+        WarnInvalidKnob(TEXT("rgl.Scene.SyncClock"), V, 1);
+        return 1;
+    }
+    return V;
+}
+static float SceneSyncIntervalSeconds()
+{
+    const float V = CVarRGLSceneSyncIntervalSeconds.GetValueOnGameThread();
+    if (!FMath::IsFinite(V))
+    {
+        WarnInvalidKnob(TEXT("rgl.Scene.SyncIntervalSeconds"), V, 1.0);
+        return 1.0f;
+    }
+    if (V < 0.1f)
+    {
+        WarnInvalidKnob(TEXT("rgl.Scene.SyncIntervalSeconds"), V, 0.1);   // the floor SetSyncInterval has always had
+        return 0.1f;
+    }
+    return V;
+}
 
 // The first RGL call of the sync's measured interval is timed (wait_ms=); other calls pass straight through.
 #define RGL_PROBED(Api, Expr) WaitProbe.Call(TEXT(Api), [&]() { return (Expr); })
 
-void FRGLSceneManager::ApplyWpSceneSwitches(const TCHAR* CommandLine, EConsoleVariableFlags SetBy)
+// Shipping-safe command-line switches for the rgl.* scene CVars (same reasoning as the skeletal ones above). Omitted
+// switches keep the CVar defaults: 8 creates, 4 ms, unload factor 1.0, idle cache 0, 512 ISM instance changes, audit off,
+// hit dump off (every 10th scan once a directory is given), the World Partition culling's knobs (above), the sync on the
+// simulation clock every 1 s.
+void FRGLSceneManager::ApplySceneSwitches(const TCHAR* CommandLine, EConsoleVariableFlags SetBy)
 {
     if (!CommandLine)
     {
@@ -259,6 +300,48 @@ void FRGLSceneManager::ApplyWpSceneSwitches(const TCHAR* CommandLine, EConsoleVa
     }
     int32 I = 0;
     float F = 0.0f;
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-max-mesh-creates-per-update="), I))
+    {
+        CVarRGLSceneMaxMeshCreatesPerUpdate->Set(I, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-create-budget-ms="), F))
+    {
+        CVarRGLSceneCreateBudgetMs->Set(F, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-unload-distance-factor="), F))
+    {
+        CVarRGLSceneUnloadDistanceFactor->Set(F, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-idle-mesh-cache-max="), I))
+    {
+        CVarRGLSceneIdleMeshCacheMax->Set(I, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-max-ism-instance-changes-per-update="), I))
+    {
+        CVarRGLSceneMaxIsmInstanceChangesPerUpdate->Set(I, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-audit="), I))
+    {
+        CVarRGLSceneAudit->Set(I, SetBy);
+    }
+    FString S;
+    if (FParse::Value(CommandLine, TEXT("-rgl-debug-hit-dump="), S))
+    {
+        CVarRGLDebugHitDumpDir->Set(*S, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-debug-hit-dump-every="), I))
+    {
+        CVarRGLDebugHitDumpEvery->Set(I, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-sync-clock="), I))
+    {
+        CVarRGLSceneSyncClock->Set(I, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-sync-interval-seconds="), F))
+    {
+        CVarRGLSceneSyncIntervalSeconds->Set(F, SetBy);
+    }
+    // The World Partition culling of non-Static parts (7b).
     if (FParse::Value(CommandLine, TEXT("-rgl-scene-wp-movable-culling="), I))
     {
         CVarRGLSceneWpMovableCulling->Set(I, SetBy);
@@ -293,48 +376,68 @@ void FRGLSceneManager::ApplyWpSceneSwitches(const TCHAR* CommandLine, EConsoleVa
     }
 }
 
-// Shipping-safe command-line switches for the rgl.Scene.* CVars (same reasoning as the skeletal ones above).
-// Omitted switches keep the CVar defaults: 8 creates, 4 ms, unload factor 1.0, idle cache 0, 512 ISM instance changes,
-// audit off, hit dump off (every 10th scan once a directory is given); the World Partition culling's knobs (above).
+// The process command line's switches, once (the first manager, or the first hit-dump query).
 static void ApplySceneCommandLineOverrides()
 {
     static bool bApplied = false; if (bApplied) return; bApplied = true;
-    FRGLSceneManager::ApplyWpSceneSwitches(FCommandLine::Get(), ECVF_SetByCommandline);
-    int32 I = 0;
-    float F = 0.0f;
-    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-max-mesh-creates-per-update="), I))
-    {
-        CVarRGLSceneMaxMeshCreatesPerUpdate->Set(I, ECVF_SetByCommandline);
-    }
-    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-create-budget-ms="), F))
-    {
-        CVarRGLSceneCreateBudgetMs->Set(F, ECVF_SetByCommandline);
-    }
-    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-unload-distance-factor="), F))
-    {
-        CVarRGLSceneUnloadDistanceFactor->Set(F, ECVF_SetByCommandline);
-    }
-    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-idle-mesh-cache-max="), I))
-    {
-        CVarRGLSceneIdleMeshCacheMax->Set(I, ECVF_SetByCommandline);
-    }
-    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-max-ism-instance-changes-per-update="), I))
-    {
-        CVarRGLSceneMaxIsmInstanceChangesPerUpdate->Set(I, ECVF_SetByCommandline);
-    }
-    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-audit="), I))
-    {
-        CVarRGLSceneAudit->Set(I, ECVF_SetByCommandline);
-    }
-    FString S;
-    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-debug-hit-dump="), S))
-    {
-        CVarRGLDebugHitDumpDir->Set(*S, ECVF_SetByCommandline);
-    }
-    if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-debug-hit-dump-every="), I))
-    {
-        CVarRGLDebugHitDumpEvery->Set(I, ECVF_SetByCommandline);
-    }
+    FRGLSceneManager::ApplySceneSwitches(FCommandLine::Get(), ECVF_SetByCommandline);
+}
+
+void FRGLSceneManager::SetSyncInterval(float Seconds)
+{
+    CVarRGLSceneSyncIntervalSeconds->Set(FMath::Max(0.1f, Seconds), ECVF_SetByCode);
+}
+
+bool FRGLSceneManager::FSceneKnobs::operator==(const FSceneKnobs& O) const
+{
+    return MaxMeshCreatesPerUpdate == O.MaxMeshCreatesPerUpdate && CreateBudgetMs == O.CreateBudgetMs &&
+           UnloadDistanceFactor == O.UnloadDistanceFactor && IdleMeshCacheMax == O.IdleMeshCacheMax &&
+           MaxIsmInstanceChangesPerUpdate == O.MaxIsmInstanceChangesPerUpdate && UnloadMarginCm == O.UnloadMarginCm &&
+           SyncClock == O.SyncClock && SyncIntervalSeconds == O.SyncIntervalSeconds && WpMap == O.WpMap &&
+           WpMovableCulling == O.WpMovableCulling && MovableMinMarginM == O.MovableMinMarginM &&
+           MovableSensorSpeedBoundMps == O.MovableSensorSpeedBoundMps &&
+           MovableObjectSpeedBoundMps == O.MovableObjectSpeedBoundMps &&
+           MovableMaxUpdateGapSeconds == O.MovableMaxUpdateGapSeconds &&
+           MovableCreateLatencySeconds == O.MovableCreateLatencySeconds &&
+           MaxMovableEntityChangesPerUpdate == O.MaxMovableEntityChangesPerUpdate &&
+           MovableEntityBudgetMs == O.MovableEntityBudgetMs;
+}
+
+FRGLSceneManager::FSceneKnobs FRGLSceneManager::ReadSceneKnobs()
+{
+    FSceneKnobs K;
+    K.MaxMeshCreatesPerUpdate = SceneMaxMeshCreatesPerUpdate();
+    K.CreateBudgetMs = SceneCreateBudgetMs();
+    K.UnloadDistanceFactor = SceneUnloadDistanceFactor();
+    K.IdleMeshCacheMax = SceneIdleMeshCacheMax();
+    K.MaxIsmInstanceChangesPerUpdate = SceneMaxIsmInstanceChangesPerUpdate();
+    K.SyncClock = SceneSyncClock();
+    K.SyncIntervalSeconds = SceneSyncIntervalSeconds();
+    K.WpMovableCulling = SceneWpMovableCulling();
+    K.MovableMinMarginM = SceneMovableMinMarginM();
+    K.MovableSensorSpeedBoundMps = SceneMovableSensorSpeedBoundMps();
+    K.MovableObjectSpeedBoundMps = SceneMovableObjectSpeedBoundMps();
+    K.MovableMaxUpdateGapSeconds = SceneMovableMaxUpdateGapSeconds();
+    K.MovableCreateLatencySeconds = SceneMovableCreateLatencySeconds();
+    K.MaxMovableEntityChangesPerUpdate = SceneMaxMovableEntityChangesPerUpdate();
+    K.MovableEntityBudgetMs = SceneMovableEntityBudgetMs();
+    return K;
+}
+
+FString FRGLSceneManager::FormatSceneConfigLine(double SimTime, const FSceneKnobs& K)
+{
+    // The 7b keys after the older ones; wp_culling = the culling applies to this world (World Partition and enabled).
+    return FString::Printf(
+        TEXT("rgl_scene_config t=%.3f max_mesh_creates_per_update=%d create_budget_ms=%.2f unload_distance_factor=%.2f "
+             "idle_mesh_cache_max=%d max_ism_instance_changes_per_update=%d unload_margin_cm=%.0f sync_clock=%s "
+             "sync_interval_s=%.2f wp_culling=%d wp_movable_culling=%d movable_min_margin_m=%.1f "
+             "movable_sensor_speed_bound_mps=%.1f movable_object_speed_bound_mps=%.1f movable_max_update_gap_seconds=%.3f "
+             "movable_create_latency_seconds=%.3f max_movable_entity_changes_per_update=%d movable_entity_budget_ms=%.2f"),
+        SimTime, K.MaxMeshCreatesPerUpdate, K.CreateBudgetMs, K.UnloadDistanceFactor, K.IdleMeshCacheMax,
+        K.MaxIsmInstanceChangesPerUpdate, K.UnloadMarginCm, K.SyncClock == 1 ? TEXT("sim") : TEXT("update"),
+        K.SyncIntervalSeconds, K.WpMap, K.WpMovableCulling, K.MovableMinMarginM, K.MovableSensorSpeedBoundMps,
+        K.MovableObjectSpeedBoundMps, K.MovableMaxUpdateGapSeconds, K.MovableCreateLatencySeconds,
+        K.MaxMovableEntityChangesPerUpdate, K.MovableEntityBudgetMs);
 }
 
 TMap<UWorld*, FRGLSceneManager*> FRGLSceneManager::Instances;
@@ -516,19 +619,24 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
     // (Phase 1: high-speed safety).
     // The time, sensor and distance conditions are all evaluated (the sensor loop is a handful of entries) so the
     // telemetry can name the trigger; a sync happens when any of them, or the level condition below, holds.
+    // The time condition's clock (rgl.Scene.SyncClock): simulation time since the last sync (1, the default; time going
+    // back before the last sync is due at once rather than waiting to catch up), or the world dt added once per scene
+    // Update (0, the original timer: with Updates less often than every frame it runs slower than simulation time).
+    const float IntervalSeconds = SceneSyncIntervalSeconds();
     TimeSinceLastSync += WorldDeltaSeconds(World);
-    const bool bTimeDue = (TimeSinceLastSync >= SyncIntervalSeconds);
+    const bool bTimeDue = (SceneSyncClock() == 1)
+        ? (LastSyncSimTime < 0.0 || CurrentSimTime < LastSyncSimTime || CurrentSimTime - LastSyncSimTime >= IntervalSeconds)
+        : (TimeSinceLastSync >= IntervalSeconds);
     bool bNewSensor = false;   // a sensor without a previous sync (startup, newly spawned or re-registered sensor)
     bool bMoved = false;
     for (const auto& Pair : RegisteredSensors)
     {
         const FSensorRegistration& S = Pair.Value;
-        const float TriggerCm = 0.2f * S.RegistrationDistanceCm;
         if (!S.bLastSyncValid)
         {
             bNewSensor = true;
         }
-        else if (FVector::Dist(S.Position, S.LastSyncPosition) > TriggerCm)
+        else if (FVector::Dist(S.Position, S.LastSyncPosition) > SyncTriggerCm(S))
         {
             bMoved = true;
         }
@@ -554,6 +662,8 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
 
     const double StepStartSeconds = FPlatformTime::Seconds();
     FSceneSyncStats SyncStats;
+    // Sensors synced for the first time by this Update: their rgl_scene_sensor lines follow the sync line.
+    TArray<const void*, TInlineAllocator<8>> FirstSyncSensors;
     if (bShouldSync)
     {
         // wait_ms=: the first RGL call from here to elapsed_ms is timed (nothing is called, reordered or added for it).
@@ -564,6 +674,10 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         for (auto& Pair : RegisteredSensors)
         {
             FSensorRegistration& S = Pair.Value;
+            if (!S.bLastSyncValid)
+            {
+                FirstSyncSensors.Add(Pair.Key);
+            }
             if (bWpActive && !S.bLastSyncValid)
             {
                 S.WpInitSyncSimTime = CurrentSimTime;
@@ -695,7 +809,24 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         EmitSceneLine(SyncLine);
 #if !UE_BUILD_SHIPPING
         LastSyncLine_ForTest = SyncLine;
+        LastSensorLines_ForTest.Reset();
 #endif
+        // Once per sensor (per registration), at its first sync: the numbers in effect for it (after the sync line, so
+        // that elapsed_ms does not include the printing).
+        for (const void* SensorId : FirstSyncSensors)
+        {
+            if (const FSensorRegistration* S = RegisteredSensors.Find(SensorId))
+            {
+                const FString SensorLine = FString::Printf(
+                    TEXT("rgl_scene_sensor t=%.3f sensor=0x%llx registration_m=%.1f range_m=%.1f trigger_m=%.1f"),
+                    CurrentSimTime, static_cast<unsigned long long>(reinterpret_cast<UPTRINT>(SensorId)),
+                    S->RegistrationDistanceCm / 100.0, SensorRangeCm(*S) / 100.0, SyncTriggerCm(*S) / 100.0);
+                EmitSceneLine(SensorLine);
+#if !UE_BUILD_SHIPPING
+                LastSensorLines_ForTest.Add(SensorLine);
+#endif
+            }
+        }
         WpCheckN = 0;
         WpCheckInstances = 0;
         WpCheckMs = 0.0;
@@ -2672,40 +2803,16 @@ bool FRGLSceneManager::ReevaluateIsmGroup(UInstancedStaticMeshComponent* Compone
 
 void FRGLSceneManager::LogSceneConfigIfChanged()
 {
-    const int32 MaxCreates = SceneMaxMeshCreatesPerUpdate();
-    const float BudgetMs = SceneCreateBudgetMs();
-    const float UnloadFactor = SceneUnloadDistanceFactor();
-    const int32 IdleMax = SceneIdleMeshCacheMax();
-    const int32 MaxIsmChanges = SceneMaxIsmInstanceChangesPerUpdate();
-    const FWpKnobs WpKnobs = CurrentWpKnobs();
-    const int32 WpMaxChanges = SceneMaxMovableEntityChangesPerUpdate();
-    const float WpBudgetMs = SceneMovableEntityBudgetMs();
-    const int32 WpMap = bWpActive ? 1 : 0;
-    if (MaxCreates == LoggedMaxCreates && BudgetMs == LoggedCreateBudgetMs &&
-        UnloadFactor == LoggedUnloadFactor && IdleMax == LoggedIdleMeshCacheMax && MaxIsmChanges == LoggedMaxIsmChanges &&
-        WpKnobs == LoggedWpKnobs && WpMaxChanges == LoggedWpMaxChanges && WpBudgetMs == LoggedWpBudgetMs && WpMap == LoggedWpMap)
+    FSceneKnobs K = ReadSceneKnobs();
+    K.UnloadMarginCm = UnregistrationHysteresisCm;
+    K.WpMap = bWpActive ? 1 : 0;
+    if (bSceneKnobsLogged && K == LoggedSceneKnobs)
     {
         return;
     }
-    LoggedMaxCreates = MaxCreates;
-    LoggedCreateBudgetMs = BudgetMs;
-    LoggedUnloadFactor = UnloadFactor;
-    LoggedIdleMeshCacheMax = IdleMax;
-    LoggedMaxIsmChanges = MaxIsmChanges;
-    LoggedWpKnobs = WpKnobs;
-    LoggedWpMaxChanges = WpMaxChanges;
-    LoggedWpBudgetMs = WpBudgetMs;
-    LoggedWpMap = WpMap;
-    // 7b keys after the older ones: wp_culling = the culling applies to this world (World Partition and enabled).
-    const FString Line = FString::Printf(
-        TEXT("rgl_scene_config t=%.3f max_mesh_creates_per_update=%d create_budget_ms=%.2f unload_distance_factor=%.2f "
-             "idle_mesh_cache_max=%d max_ism_instance_changes_per_update=%d unload_margin_cm=%.0f sync_interval_s=%.2f "
-             "wp_culling=%d wp_movable_culling=%d movable_min_margin_m=%.1f movable_sensor_speed_bound_mps=%.1f "
-             "movable_object_speed_bound_mps=%.1f movable_max_update_gap_seconds=%.3f movable_create_latency_seconds=%.3f "
-             "max_movable_entity_changes_per_update=%d movable_entity_budget_ms=%.2f"),
-        CurrentSimTime, MaxCreates, BudgetMs, UnloadFactor, IdleMax, MaxIsmChanges, UnregistrationHysteresisCm,
-        SyncIntervalSeconds, WpMap, WpKnobs.Enable, WpKnobs.MinMarginM, WpKnobs.SensorSpeedMps, WpKnobs.ObjectSpeedMps,
-        WpKnobs.MaxUpdateGapS, WpKnobs.CreateLatencyS, WpMaxChanges, WpBudgetMs);
+    bSceneKnobsLogged = true;
+    LoggedSceneKnobs = K;
+    const FString Line = FormatSceneConfigLine(CurrentSimTime, K);
     EmitSceneLine(Line);
 #if !UE_BUILD_SHIPPING
     LastConfigLine_ForTest = Line;
@@ -2808,7 +2915,8 @@ FRGLSceneManager::FWpKnobs FRGLSceneManager::CurrentWpKnobs() const
     K.ObjectSpeedMps = SceneMovableObjectSpeedBoundMps();
     K.MaxUpdateGapS = SceneMovableMaxUpdateGapSeconds();
     K.CreateLatencyS = SceneMovableCreateLatencySeconds();
-    K.IntervalS = SyncIntervalSeconds;
+    K.IntervalS = SceneSyncIntervalSeconds();
+    K.Clock = SceneSyncClock();
     return K;
 }
 
@@ -3013,7 +3121,8 @@ void FRGLSceneManager::WpCheckContracts(const UWorld* World, bool& bOutDeadline,
         bOutJump = true;
     }
     // The next Update may come up to U later: sync now if that would pass the time the last culling sync assumed. With a
-    // fixed dt the periodic sync comes first (T_sync_max holds its rounding), so this fires only when the dt shrank.
+    // fixed dt the periodic sync comes first (T_sync_max holds its rounding), so this fires only when the dt shrank on
+    // the Update clock; on the simulation clock (T_sync_max = I + U) the periodic sync always comes first.
     else if (CurrentSimTime - WpLastSyncSimTime + U > WpAssumedSyncSeconds + 1.0e-6)
     {
         bOutDeadline = true;
@@ -3023,8 +3132,9 @@ void FRGLSceneManager::WpCheckContracts(const UWorld* World, bool& bOutDeadline,
 void FRGLSceneManager::WpBeginSync(float Dt)
 {
     const FWpKnobs K = CurrentWpKnobs();
-    const FWpCullHorizon H = ComputeWpCullHorizon(EWpCullClock::UpdateClock, SyncIntervalSeconds, Dt, K.MaxUpdateGapS,
-                                                  K.CreateLatencyS);
+    // The periodic sync's own clock and interval (the time trigger in UpdateStep reads the same two knobs).
+    const EWpCullClock Clock = (K.Clock == 1) ? EWpCullClock::SimClock : EWpCullClock::UpdateClock;
+    const FWpCullHorizon H = ComputeWpCullHorizon(Clock, K.IntervalS, Dt, K.MaxUpdateGapS, K.CreateLatencyS);
     WpAssumedSyncSeconds = H.SyncBoundSeconds;
     WpHorizonSeconds = H.HorizonSeconds;
     WpMarginCm = ComputeWpMarginM(H.HorizonSeconds, K.SensorSpeedMps, K.ObjectSpeedMps, K.MinMarginM) * 100.0;
@@ -4476,6 +4586,11 @@ void FRGLSceneManager::SetSensorAuditParent(const void* SensorId, AActor* RootPa
 float FRGLSceneManager::SensorRangeCm(const FSensorRegistration& S) const
 {
     return (S.AuditRangeCm >= 0.0f) ? S.AuditRangeCm : FMath::Max(0.0f, S.RegistrationDistanceCm - UnregistrationHysteresisCm);
+}
+
+float FRGLSceneManager::SyncTriggerCm(const FSensorRegistration& S) const
+{
+    return 0.2f * S.RegistrationDistanceCm;
 }
 
 float FRGLSceneManager::StreamSourceRadiusCm(const AActor* RootParent)

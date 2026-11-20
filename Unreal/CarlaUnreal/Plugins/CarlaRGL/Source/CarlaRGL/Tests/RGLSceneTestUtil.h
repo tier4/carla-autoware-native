@@ -2,9 +2,9 @@
 // Shared fixture and helpers of the scene tests (CarlaRGL.SceneAudit.*, CarlaRGL.SceneSync.*) on the game world of
 // EmptyMap. The scene manager of a world is shared by every test, so counts are compared as differences around each
 // step (Diff), and every test works around its own base point (BaseFor), 1 km from the others.
-// BaseFor slots in use: 0-9, 16, 20, 77, 81 (SceneAudit), 10-15, 17-19, 21-27, 31-38, 40, 46, 47, 60, 61-76, 78-80
-// (SceneSync; 12 by the two level-sync tests). Kept free: 28-30 (Task 6), 42-43 (Task 8), 44-45 and 48 (Task 10).
-// Give each new test a slot nobody else uses.
+// BaseFor slots in use: 0-9, 16, 20, 77, 81 (SceneAudit), 10-15, 17-19, 21-27, 31-38, 40, 44, 46, 47, 60, 61-76, 78-80,
+// 82-84 (SceneSync; 12 by the two level-sync tests, 44 by the sync-clock tests). Kept free: 28-30 (Task 6), 42-43
+// (Task 8), 45 and 48 (Task 10). Give each new test a slot nobody else uses.
 
 #pragma once
 
@@ -194,9 +194,11 @@ inline FRGLSceneAuditResult Diff(const FRGLSceneAuditResult& Before, const FRGLS
 /// The World Partition culling of non-Static parts for one test: the map is taken as a World Partition one (or not),
 /// the world dt is fixed, and every knob of the culling is put back when the test leaves. Declare it BEFORE the
 /// FAuditFixture, so that the fixture's clean-up sync still runs with it and the next test starts from the original rule.
-/// The defaults it sets: speed bounds 5 m/s, U 0.1 s, L_create 1 s, margin floor 20 m, budget 512 / 4 ms, so that with
-/// I = 1 s and dt = 0.05 s: T_sync_max = 2.1 s, H = 3.2 s, M = max(20, 10 * 3.2) = 32 m, R_load = 100 + 32 = 132 m
-/// (the fixture's sensor: R 120 m, range 100 m), R_unload = 132 + 20 = 152 m.
+/// The defaults it sets: speed bounds 5 m/s, U 0.1 s, L_create 1 s, margin floor 20 m, budget 512 / 4 ms, and the sync
+/// clock SyncClock (default 0, the Update clock, which the numbers below assume), so that with I = 1 s and dt = 0.05 s:
+/// T_sync_max = 2.1 s, H = 3.2 s, M = max(20, 10 * 3.2) = 32 m, R_load = 100 + 32 = 132 m (the fixture's sensor: R 120 m,
+/// range 100 m), R_unload = 132 + 20 = 152 m. With SyncClock = 1 (simulation time): T_sync_max = 1.1 s, H = 2.2 s,
+/// M = 22 m, R_load = 122 m, R_unload = 142 m.
 struct FWpTestScope
 {
     FRGLSceneManager& SM;
@@ -210,9 +212,13 @@ struct FWpTestScope
     FCVarGuard MaxChanges{TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate")};
     FFloatCVarGuard BudgetMs{TEXT("rgl.Scene.MovableEntityBudgetMs")};
     FFloatCVarGuard Unload{TEXT("rgl.Scene.UnloadDistanceFactor")};
-    FWpTestScope(UWorld* World, bool bWp, float Dt = 0.05f, float SpeedMps = 5.0f)
+    FCVarGuard Clock{TEXT("rgl.Scene.SyncClock")};
+    FFloatCVarGuard Interval{TEXT("rgl.Scene.SyncIntervalSeconds")};
+    FWpTestScope(UWorld* World, bool bWp, float Dt = 0.05f, float SpeedMps = 5.0f, int32 SyncClock = 0)
         : SM(FRGLSceneManager::GetInstance(World)), Scope(SM, bWp, Dt)
     {
+        SetCVar(TEXT("rgl.Scene.SyncClock"), SyncClock);
+        SetFloatCVar(TEXT("rgl.Scene.SyncIntervalSeconds"), 1.0f);
         SetCVar(TEXT("rgl.Scene.WpMovableCulling"), 1);
         SetFloatCVar(TEXT("rgl.Scene.MovableMinMarginM"), 20.0f);
         SetFloatCVar(TEXT("rgl.Scene.MovableSensorSpeedBoundMps"), SpeedMps);
@@ -253,8 +259,9 @@ inline void TestNoDefects(FAutomationTestBase& Test, const FString& What, const 
 }
 
 /// One sensor (R = 120 m, audit range 100 m) at SensorPos, scene time T; spawned actors are destroyed and the
-/// shared scene is synced clean again when the fixture goes. The sync interval is put back to its default
-/// (1 s) too: a test that stretches it must not leak the value into the tests that run after it.
+/// shared scene is synced clean again when the fixture goes. The sync clock and interval (rgl.Scene.SyncClock,
+/// rgl.Scene.SyncIntervalSeconds: process-wide CVars, SetSyncInterval writes the second) are put back to the values the
+/// fixture found, after its clean-up sync: a test that stretches the interval must not leak it into the tests after it.
 struct FAuditFixture
 {
     UWorld* World;
@@ -263,6 +270,8 @@ struct FAuditFixture
     FVector SensorPos;
     double T;
     TArray<AActor*> Spawned;
+    FCVarGuard ClockGuard{TEXT("rgl.Scene.SyncClock")};
+    FFloatCVarGuard IntervalGuard{TEXT("rgl.Scene.SyncIntervalSeconds")};
 
     FAuditFixture(UWorld* InWorld, const void* InSensor, const FVector& InSensorPos, double InT)
         : World(InWorld), SM(FRGLSceneManager::GetInstance(InWorld)), Sensor(InSensor), SensorPos(InSensorPos), T(InT)
@@ -273,7 +282,6 @@ struct FAuditFixture
     {
         for (AActor* A : Spawned) if (IsValid(A)) A->Destroy();
         SM.UnregisterSensor(Sensor);
-        SM.SetSyncInterval(1.0f);                    // the default
         SM.SyncStaticNow_ForTest(World, T + 0.05);   // drop this test's entities from the shared scene
     }
     void Refresh()
