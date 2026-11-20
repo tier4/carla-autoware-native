@@ -2,8 +2,8 @@
 // Shared fixture and helpers of the scene tests (CarlaRGL.SceneAudit.*, CarlaRGL.SceneSync.*) on the game world of
 // EmptyMap. The scene manager of a world is shared by every test, so counts are compared as differences around each
 // step (Diff), and every test works around its own base point (BaseFor), 1 km from the others.
-// BaseFor slots in use: 0-9, 16, 20 (SceneAudit), 10-15, 17-19, 21-27, 31-38, 40, 46, 47, 60 (SceneSync; 12 by the two
-// level-sync tests).
+// BaseFor slots in use: 0-9, 16, 20, 77, 81 (SceneAudit), 10-15, 17-19, 21-27, 31-38, 40, 46, 47, 60, 61-76, 78-80
+// (SceneSync; 12 by the two level-sync tests). Kept free: 28-30 (Task 6), 42-43 (Task 8), 44-45 and 48 (Task 10).
 // Give each new test a slot nobody else uses.
 
 #pragma once
@@ -141,13 +141,15 @@ inline AStaticMeshActor* SpawnMeshActor(UWorld* World, UStaticMesh* Mesh, const 
 }
 
 /// A Static ISMC (no collision: instance moves must not touch static bodies) at Loc with one instance per offset.
+/// Mobility: another mobility for the World Partition culling tests (Movable, Stationary).
 inline UInstancedStaticMeshComponent* SpawnIsm(UWorld* World, UStaticMesh* Mesh, const FVector& Loc,
-                                               const TArray<FVector>& LocalOffsets, AActor*& OutOwner)
+                                               const TArray<FVector>& LocalOffsets, AActor*& OutOwner,
+                                               EComponentMobility::Type Mobility = EComponentMobility::Static)
 {
     OutOwner = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity);
     if (!OutOwner) return nullptr;
     UInstancedStaticMeshComponent* Comp = NewObject<UInstancedStaticMeshComponent>(OutOwner);
-    Comp->SetMobility(EComponentMobility::Static);
+    Comp->SetMobility(Mobility);
     Comp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Comp->SetStaticMesh(Mesh);
     OutOwner->SetRootComponent(Comp);
@@ -184,7 +186,51 @@ inline FRGLSceneAuditResult Diff(const FRGLSceneAuditResult& Before, const FRGLS
     D.SplineRegistered  -= Before.SplineRegistered;
     D.CacheStale        -= Before.CacheStale;
     D.PendingIsm        -= Before.PendingIsm;
+    D.MissingWpCulledInRange -= Before.MissingWpCulledInRange;
+    D.WpPending         -= Before.WpPending;
     return D;
+}
+
+/// The World Partition culling of non-Static parts for one test: the map is taken as a World Partition one (or not),
+/// the world dt is fixed, and every knob of the culling is put back when the test leaves. Declare it BEFORE the
+/// FAuditFixture, so that the fixture's clean-up sync still runs with it and the next test starts from the original rule.
+/// The defaults it sets: speed bounds 5 m/s, U 0.1 s, L_create 1 s, margin floor 20 m, budget 512 / 4 ms, so that with
+/// I = 1 s and dt = 0.05 s: T_sync_max = 2.1 s, H = 3.2 s, M = max(20, 10 * 3.2) = 32 m, R_load = 100 + 32 = 132 m
+/// (the fixture's sensor: R 120 m, range 100 m), R_unload = 132 + 20 = 152 m.
+struct FWpTestScope
+{
+    FRGLSceneManager& SM;
+    FRGLSceneManager::FWpScope_ForTest Scope;
+    FCVarGuard Enable{TEXT("rgl.Scene.WpMovableCulling")};
+    FFloatCVarGuard MinMargin{TEXT("rgl.Scene.MovableMinMarginM")};
+    FFloatCVarGuard SensorSpeed{TEXT("rgl.Scene.MovableSensorSpeedBoundMps")};
+    FFloatCVarGuard ObjectSpeed{TEXT("rgl.Scene.MovableObjectSpeedBoundMps")};
+    FFloatCVarGuard Gap{TEXT("rgl.Scene.MovableMaxUpdateGapSeconds")};
+    FFloatCVarGuard Latency{TEXT("rgl.Scene.MovableCreateLatencySeconds")};
+    FCVarGuard MaxChanges{TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate")};
+    FFloatCVarGuard BudgetMs{TEXT("rgl.Scene.MovableEntityBudgetMs")};
+    FFloatCVarGuard Unload{TEXT("rgl.Scene.UnloadDistanceFactor")};
+    FWpTestScope(UWorld* World, bool bWp, float Dt = 0.05f, float SpeedMps = 5.0f)
+        : SM(FRGLSceneManager::GetInstance(World)), Scope(SM, bWp, Dt)
+    {
+        SetCVar(TEXT("rgl.Scene.WpMovableCulling"), 1);
+        SetFloatCVar(TEXT("rgl.Scene.MovableMinMarginM"), 20.0f);
+        SetFloatCVar(TEXT("rgl.Scene.MovableSensorSpeedBoundMps"), SpeedMps);
+        SetFloatCVar(TEXT("rgl.Scene.MovableObjectSpeedBoundMps"), SpeedMps);
+        SetFloatCVar(TEXT("rgl.Scene.MovableMaxUpdateGapSeconds"), 0.1f);
+        SetFloatCVar(TEXT("rgl.Scene.MovableCreateLatencySeconds"), 1.0f);
+        SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 512);
+        SetFloatCVar(TEXT("rgl.Scene.MovableEntityBudgetMs"), 4.0f);
+        SetFloatCVar(TEXT("rgl.Scene.UnloadDistanceFactor"), 1.0f);
+        SM.ResetWpUpdateClock_ForTest();   // the previous test's clock is no time going back
+    }
+};
+
+/// A Movable (or Stationary) static mesh actor for the culling tests (SpawnMeshActor with another mobility).
+inline AStaticMeshActor* SpawnPart(UWorld* World, UStaticMesh* Mesh, const FVector& Loc,
+                                   EComponentMobility::Type Mobility = EComponentMobility::Movable)
+{
+    return SpawnMeshActor(World, Mesh, Loc, Mobility);
 }
 
 /// Every defect counter of the difference D is 0.

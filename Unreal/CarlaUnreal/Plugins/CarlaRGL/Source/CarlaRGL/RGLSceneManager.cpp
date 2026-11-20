@@ -20,6 +20,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SplineMeshComponent.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/MovementComponent.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -169,12 +170,136 @@ static void EmitSceneLine(const FString& Line)
 #endif
 }
 
+// ---- World Partition culling of non-Static parts (7b; README_RGL "non-Static parts on World Partition maps") ----
+// Only a map with a World Partition uses these; on other maps every non-Static part is registered at any distance.
+static TAutoConsoleVariable<int32> CVarRGLSceneWpMovableCulling(TEXT("rgl.Scene.WpMovableCulling"), 1,
+    TEXT("World Partition maps only: 1 = non-Static static mesh parts that are not vehicle/walker/physics/sensor-carrier "
+         "parts and were not seen moving are chosen against the sensor spheres with a speed-dependent margin. 0 = the "
+         "original rule (every non-Static part at any distance). Maps without World Partition always use the original rule."),
+    ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneMovableMinMarginM(TEXT("rgl.Scene.MovableMinMarginM"), 20.0f,
+    TEXT("World Partition culling: smallest registration margin beyond a sensor's range (m, >= 20)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneMovableSensorSpeedBoundMps(TEXT("rgl.Scene.MovableSensorSpeedBoundMps"), 50.0f,
+    TEXT("World Partition culling: the speed a sensor is assumed to stay under (m/s, > 0); faster = a pose jump (logged, "
+         "forces a sync)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneMovableObjectSpeedBoundMps(TEXT("rgl.Scene.MovableObjectSpeedBoundMps"), 50.0f,
+    TEXT("World Partition culling: the speed a culled part that starts moving is assumed to stay under (m/s, > 0). Parts "
+         "seen moving are kept at any distance afterwards."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneMovableMaxUpdateGapSeconds(TEXT("rgl.Scene.MovableMaxUpdateGapSeconds"), 0.1f,
+    TEXT("World Partition culling: the longest sim time between two scene Updates and between two pose refreshes of a "
+         "sensor (s, > 0); longer gaps are logged as violations."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneMovableCreateLatencySeconds(TEXT("rgl.Scene.MovableCreateLatencySeconds"), 1.0f,
+    TEXT("World Partition culling: sim time within which a chosen part's entities must be created (s, > 0); a longer "
+         "wait is logged as a violation."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarRGLSceneMaxMovableEntityChangesPerUpdate(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 512,
+    TEXT("World Partition culling: most entities (a regular part or one ISM instance) added or removed per scene Update "
+         "(>= 0, 0 = no cap)."), ECVF_Default);
+static TAutoConsoleVariable<float> CVarRGLSceneMovableEntityBudgetMs(TEXT("rgl.Scene.MovableEntityBudgetMs"), 4.0f,
+    TEXT("World Partition culling: wall time (ms) for those changes per scene Update, checked between changes after the "
+         "first one (>= 0, 0 = no cap). At least one waiting change proceeds."), ECVF_Default);
+
+// A value outside its range (or NaN / Inf) is not used: one warning line per knob and value, and the default instead.
+static void WarnInvalidKnob(const TCHAR* Name, double Value, double Fallback)
+{
+    static TSet<FString> Warned;
+    const FString Key = FString::Printf(TEXT("%s=%g"), Name, Value);
+    if (Warned.Contains(Key))
+    {
+        return;
+    }
+    Warned.Add(Key);
+    EmitSceneLine(FString::Printf(TEXT("rgl_scene_config_warning knob=%s value=%g fallback=%g"), Name, Value, Fallback));
+}
+static float ValidFloatKnob(TAutoConsoleVariable<float>& CVar, const TCHAR* Name, float Default, float Min, bool bExclusiveMin)
+{
+    const float V = CVar.GetValueOnGameThread();
+    const bool bOk = FMath::IsFinite(V) && (bExclusiveMin ? V > Min : V >= Min);
+    if (!bOk)
+    {
+        WarnInvalidKnob(Name, V, Default);
+        return Default;
+    }
+    return V;
+}
+static int32 SceneWpMovableCulling()
+{
+    const int32 V = CVarRGLSceneWpMovableCulling.GetValueOnGameThread();
+    if (V != 0 && V != 1)
+    {
+        WarnInvalidKnob(TEXT("rgl.Scene.WpMovableCulling"), V, 1);
+        return 1;
+    }
+    return V;
+}
+static float SceneMovableMinMarginM()            { return ValidFloatKnob(CVarRGLSceneMovableMinMarginM, TEXT("rgl.Scene.MovableMinMarginM"), 20.0f, 20.0f, false); }
+static float SceneMovableSensorSpeedBoundMps()   { return ValidFloatKnob(CVarRGLSceneMovableSensorSpeedBoundMps, TEXT("rgl.Scene.MovableSensorSpeedBoundMps"), 50.0f, 0.0f, true); }
+static float SceneMovableObjectSpeedBoundMps()   { return ValidFloatKnob(CVarRGLSceneMovableObjectSpeedBoundMps, TEXT("rgl.Scene.MovableObjectSpeedBoundMps"), 50.0f, 0.0f, true); }
+static float SceneMovableMaxUpdateGapSeconds()   { return ValidFloatKnob(CVarRGLSceneMovableMaxUpdateGapSeconds, TEXT("rgl.Scene.MovableMaxUpdateGapSeconds"), 0.1f, 0.0f, true); }
+static float SceneMovableCreateLatencySeconds()  { return ValidFloatKnob(CVarRGLSceneMovableCreateLatencySeconds, TEXT("rgl.Scene.MovableCreateLatencySeconds"), 1.0f, 0.0f, true); }
+static float SceneMovableEntityBudgetMs()        { return ValidFloatKnob(CVarRGLSceneMovableEntityBudgetMs, TEXT("rgl.Scene.MovableEntityBudgetMs"), 4.0f, 0.0f, false); }
+static int32 SceneMaxMovableEntityChangesPerUpdate()
+{
+    const int32 V = CVarRGLSceneMaxMovableEntityChangesPerUpdate.GetValueOnGameThread();
+    if (V < 0)
+    {
+        WarnInvalidKnob(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), V, 512);   // never "no cap"
+        return 512;
+    }
+    return V;
+}
+
+// The first RGL call of the sync's measured interval is timed (wait_ms=); other calls pass straight through.
+#define RGL_PROBED(Api, Expr) WaitProbe.Call(TEXT(Api), [&]() { return (Expr); })
+
+void FRGLSceneManager::ApplyWpSceneSwitches(const TCHAR* CommandLine, EConsoleVariableFlags SetBy)
+{
+    if (!CommandLine)
+    {
+        return;
+    }
+    int32 I = 0;
+    float F = 0.0f;
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-wp-movable-culling="), I))
+    {
+        CVarRGLSceneWpMovableCulling->Set(I, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-movable-min-margin-m="), F))
+    {
+        CVarRGLSceneMovableMinMarginM->Set(F, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-movable-sensor-speed-bound-mps="), F))
+    {
+        CVarRGLSceneMovableSensorSpeedBoundMps->Set(F, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-movable-object-speed-bound-mps="), F))
+    {
+        CVarRGLSceneMovableObjectSpeedBoundMps->Set(F, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-movable-max-update-gap-seconds="), F))
+    {
+        CVarRGLSceneMovableMaxUpdateGapSeconds->Set(F, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-movable-create-latency-seconds="), F))
+    {
+        CVarRGLSceneMovableCreateLatencySeconds->Set(F, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-max-movable-entity-changes-per-update="), I))
+    {
+        CVarRGLSceneMaxMovableEntityChangesPerUpdate->Set(I, SetBy);
+    }
+    if (FParse::Value(CommandLine, TEXT("-rgl-scene-movable-entity-budget-ms="), F))
+    {
+        CVarRGLSceneMovableEntityBudgetMs->Set(F, SetBy);
+    }
+}
+
 // Shipping-safe command-line switches for the rgl.Scene.* CVars (same reasoning as the skeletal ones above).
 // Omitted switches keep the CVar defaults: 8 creates, 4 ms, unload factor 1.0, idle cache 0, 512 ISM instance changes,
-// audit off, hit dump off (every 10th scan once a directory is given).
+// audit off, hit dump off (every 10th scan once a directory is given); the World Partition culling's knobs (above).
 static void ApplySceneCommandLineOverrides()
 {
     static bool bApplied = false; if (bApplied) return; bApplied = true;
+    FRGLSceneManager::ApplyWpSceneSwitches(FCommandLine::Get(), ECVF_SetByCommandline);
     int32 I = 0;
     float F = 0.0f;
     if (FParse::Value(FCommandLine::Get(), TEXT("-rgl-scene-max-mesh-creates-per-update="), I))
@@ -371,6 +496,10 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
     LastFrameMs = (LastUpdateWallSeconds > 0.0) ? (UpdateWallSeconds - LastUpdateWallSeconds) * 1000.0 : 0.0;
     LastUpdateWallSeconds = UpdateWallSeconds;
 
+    // 7b: whether this world culls its non-Static parts by distance is known before the first scan, so that
+    // InitializeFromWorld leaves the parts the culling chooses to its queue (no far part is created to be removed later).
+    bWpActive = UsesWpNonStaticCulling(World);
+    const bool bStartupUpdate = !bInitialized;
     if (!bInitialized)
     {
         InitializeFromWorld(World);
@@ -387,7 +516,7 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
     // (Phase 1: high-speed safety).
     // The time, sensor and distance conditions are all evaluated (the sensor loop is a handful of entries) so the
     // telemetry can name the trigger; a sync happens when any of them, or the level condition below, holds.
-    TimeSinceLastSync += World->GetDeltaSeconds();
+    TimeSinceLastSync += WorldDeltaSeconds(World);
     const bool bTimeDue = (TimeSinceLastSync >= SyncIntervalSeconds);
     bool bNewSensor = false;   // a sensor without a previous sync (startup, newly spawned or re-registered sensor)
     bool bMoved = false;
@@ -408,20 +537,56 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
     // stream in between the periodic syncs). Looked at whenever no sensor is new, so the trigger name follows the
     // priority init > level > distance > time; the levels' actors only, at most once per 0.3 s (sim) (D5).
     const bool bLevel = !bNewSensor && ConsumeRelevantLevelAdds();
-    const bool bShouldSync = bTimeDue || bNewSensor || bMoved || bLevel;
-    const TCHAR* Trigger = bNewSensor ? TEXT("init") : (bLevel ? TEXT("level") : (bMoved ? TEXT("distance") : TEXT("time")));
+    // 7b (World Partition only; O(sensors), no candidate is read): the U / refresh / speed contracts, and a sync forced
+    // by the deadline (the sim time the last culling sync's margin assumed would pass before the next one) or by a
+    // reset (time going back, a sensor pose jump, a knob change).
+    bool bWpDeadline = false;
+    bool bWpReset = false;
+    bool bWpJump = false;
+    if (bWpActive)
+    {
+        WpCheckContracts(World, bWpDeadline, bWpReset, bWpJump);
+    }
+    bWpSyncDiscontinuous = bNewSensor || bWpJump;
+    const bool bShouldSync = bTimeDue || bNewSensor || bMoved || bLevel || bWpDeadline || bWpReset;
+    const TCHAR* Trigger = bNewSensor ? TEXT("init") : (bLevel ? TEXT("level") : (bMoved ? TEXT("distance") :
+        (bTimeDue ? TEXT("time") : (bWpReset ? TEXT("wp_reset") : TEXT("wp_deadline")))));
 
     const double StepStartSeconds = FPlatformTime::Seconds();
     FSceneSyncStats SyncStats;
     if (bShouldSync)
     {
+        // wait_ms=: the first RGL call from here to elapsed_ms is timed (nothing is called, reordered or added for it).
+        WaitProbe.Arm();
         SyncWorldComponents(World, SyncStats);
         TimeSinceLastSync = 0.0f;
         LastSyncSimTime = CurrentSimTime;
         for (auto& Pair : RegisteredSensors)
         {
-            Pair.Value.LastSyncPosition = Pair.Value.Position;
-            Pair.Value.bLastSyncValid = true;
+            FSensorRegistration& S = Pair.Value;
+            if (bWpActive && !S.bLastSyncValid)
+            {
+                S.WpInitSyncSimTime = CurrentSimTime;
+                S.WpInitPoseTime = S.LastUpdateTime;
+                S.bWpStartupPosePending = true;
+                S.bWpStartupUpdatePending = true;
+            }
+            S.LastSyncPosition = S.Position;
+            S.bLastSyncValid = true;
+        }
+        if (bWpActive)
+        {
+            // Snapshot the sensor set active at the interval start, before another Update can add sensors.
+            bWpStartupSceneIntervalPending = !RegisteredSensors.IsEmpty();
+            for (const auto& Pair : RegisteredSensors)
+            {
+                bWpStartupSceneIntervalPending &= Pair.Value.bWpStartupUpdatePending &&
+                    Pair.Value.WpInitSyncSimTime == CurrentSimTime;
+            }
+        }
+        if (!bNewSensor && !bLevel && !bMoved && !bTimeDue && !bWpReset && bWpDeadline)
+        {
+            ++WpDeadlineSyncs;
         }
 #if !UE_BUILD_SHIPPING
         ++SyncCount_ForTest;
@@ -448,6 +613,19 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         QueueEpisode.Dropped += Drain.Dropped;
     }
 
+    // 7b: prefetch work takes a budgeted step on every Update; R6 raw-range discovery jobs finish without a budget.
+    // A sync Update includes both in elapsed_ms; the Update that initialized the scene drains it in full (the start-up scene is complete, as above).
+#if !UE_BUILD_SHIPPING
+    WpAddedLastUpdate_ForTest = 0;
+    WpRemovedLastUpdate_ForTest = 0;
+#endif
+    WpInRangeAddedLastUpdate = 0;
+    WpInRangeMsLastUpdate = 0.0;
+    if (bWpActive && WpJobs.Num() > 0)
+    {
+        WpDrain(/*bUnlimited=*/bStartupUpdate);
+    }
+
     // P3 (D7): the Static ISM groups a sync queued are compared with the sensor spheres on the Updates without a sync,
     // so the frame of a sync does not also carry the instance changes; at most rgl.Scene.MaxIsmInstanceChangesPerUpdate
     // changes per Update. Its time is reported as ism_ms / ism_max_ms, not in the next sync's elapsed_ms.
@@ -465,7 +643,26 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
     {
         // The sync and this Update's create step (the ISM re-evaluation never runs in a sync's Update).
         const double ElapsedMs = (FPlatformTime::Seconds() - StepStartSeconds) * 1000.0;
-        const FString SyncLine = FString::Printf(
+        WaitProbe.Disarm();
+        // Totals for the scene size (outside elapsed_ms): every entity (ISM instances and live skeletal entities
+        // included, the ground plane not), and the non-Static static mesh ones.
+        int32 EntitiesTotal = 0;
+        int32 NonStaticRegistered = 0;
+        CountSceneEntities(EntitiesTotal, NonStaticRegistered);
+        double WpQueueAgeMax = 0.0;
+        for (const FWpJob& J : WpJobs)
+        {
+            if (J.bAdd)
+            {
+                WpQueueAgeMax = FMath::Max(WpQueueAgeMax, CurrentSimTime - J.SinceSimTime);
+            }
+        }
+        int32 WpPromoted = 0;
+        for (const auto& Pair : WpCandidates)
+        {
+            WpPromoted += Pair.Value.bMoved ? 1 : 0;
+        }
+        FString SyncLine = FString::Printf(
             TEXT("rgl_scene_sync t=%.3f trigger=%s scanned=%d added_cached=%d queued=%d created=%d removed=%d "
                  "idle_destroyed=%d pending=%d elapsed_ms=%.2f drain_ms=%.2f failed=%d drain_reused=%d dropped=%d "
                  "range_skipped=%d sensors=%d entities=%d ismc=%d meshes=%d idle=%d dead_ismc=%d "
@@ -477,10 +674,36 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
             EntityMap.Num(), ISMCEntityMap.Num(), MeshCache.Num(), IdleMeshLru.Num(), DeadIsmcSinceLog,
             IsmAddedSinceLog, IsmRemovedSinceLog, IsmPendingAtSync, IsmEmptySkippedSinceLog, IsmMsSinceLog, IsmMaxMsSinceLog,
             SyncStats.ScanMs, SyncStats.RegMs, SyncStats.RemoveMs, SyncStats.SkelMs);
+        // 7b keys (after every older key; the gate reads named keys only). wait_ms: the first RGL call of the measured
+        // interval (it carries the wait for the previous raytrace graph and its own work; 0.00 / none = no call).
+        // wp_* : wp = the culling applies; sync bound, create latency and margin of this sync; pending jobs and the age
+        // of the oldest waiting add (current values); check/entity counts and times since the previous line (max =
+        // the longest single sync's look); promoted = candidates seen moving (current); violations since the previous
+        // line; deadline syncs (whole run); entities_total / nonstatic_registered (current). wp_inrange_* count/time only
+        // this Update's raw-range discovery burst, including upload and the first API wait (not since the last line).
+        SyncLine += FString::Printf(
+            TEXT(" wait_ms=%.2f wait_api=%s wp=%d wp_sync_bound_s=%.2f wp_create_latency_s=%.2f wp_margin_m=%.1f "
+                 "wp_pending=%d wp_queue_age_max_s=%.2f wp_check_n=%d wp_check_instances=%d wp_check_ms=%.2f "
+                 "wp_check_max_ms=%.2f wp_entity_added=%d wp_entity_removed=%d wp_entity_ms=%.2f wp_promoted=%d "
+                 "wp_violations=%d wp_deadline_syncs=%d wp_entities_total=%d wp_nonstatic_registered=%d "
+                 "wp_inrange_added=%d wp_inrange_ms=%.2f"),
+            WaitProbe.Ms, WaitProbe.Api, bWpActive ? 1 : 0, bWpActive ? WpAssumedSyncSeconds : 0.0,
+            bWpActive ? static_cast<double>(WpSyncKnobs.CreateLatencyS) : 0.0, bWpActive ? WpMarginCm / 100.0 : 0.0,
+            WpJobs.Num(), WpQueueAgeMax, WpCheckN, WpCheckInstances, WpCheckMs, WpCheckMaxMs, WpEntityAdded,
+            WpEntityRemoved, WpEntityMs, WpPromoted, WpViolationsSinceLog, WpDeadlineSyncs,
+            EntitiesTotal, NonStaticRegistered, WpInRangeAddedLastUpdate, WpInRangeMsLastUpdate);
         EmitSceneLine(SyncLine);
 #if !UE_BUILD_SHIPPING
         LastSyncLine_ForTest = SyncLine;
 #endif
+        WpCheckN = 0;
+        WpCheckInstances = 0;
+        WpCheckMs = 0.0;
+        WpCheckMaxMs = 0.0;
+        WpEntityAdded = 0;
+        WpEntityRemoved = 0;
+        WpEntityMs = 0.0;
+        WpViolationsSinceLog = 0;
         IdleDestroyedSinceLog = 0;
         MeshFailuresSinceLog = 0;
         DeadIsmcSinceLog = 0;
@@ -513,6 +736,11 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
 
     // Update only dynamic entity transforms (static entities skip after first set)
     UpdateTransforms();
+    // 7b: the registered instances of ISM candidates seen moving follow their instance transforms.
+    if (bWpActive && WpMovedIsm.Num() > 0)
+    {
+        WpUpdateMovedInstanceTransforms();
+    }
 
     // Re-pose every registered skeletal entity for this scene time (no skip optimization).
     if (SkeletalEnabled())
@@ -1206,12 +1434,12 @@ rgl_mesh_t FRGLSceneManager::UploadMesh(UStaticMesh* StaticMesh)
 
     // Upload to RGL
     rgl_mesh_t RGLMesh = nullptr;
-    rgl_status_t Status = rgl_mesh_create(
+    rgl_status_t Status = RGL_PROBED("rgl_mesh_create", rgl_mesh_create(
         &RGLMesh,
         Vertices.GetData(),
         static_cast<int32_t>(Vertices.Num()),
         Indices.GetData(),
-        static_cast<int32_t>(Indices.Num()));
+        static_cast<int32_t>(Indices.Num())));
 
     if (Status != RGL_SUCCESS || !RGLMesh)
     {
@@ -1274,7 +1502,7 @@ void FRGLSceneManager::DestroyIdleMeshAt(int32 LruIndex)
     {
         if (Cached->Mesh)
         {
-            RglDestroyChecked(rgl_mesh_destroy(Cached->Mesh), TEXT("rgl_mesh_destroy"));
+            RglDestroyChecked(RGL_PROBED("rgl_mesh_destroy", rgl_mesh_destroy(Cached->Mesh)), TEXT("rgl_mesh_destroy"));
         }
         MeshCache.Remove(Key);
     }
@@ -1358,7 +1586,7 @@ void FRGLSceneManager::ReleaseMeshReference(const FObjectKey& MeshKey, int32 Cou
 
     if (Cached->Mesh)
     {
-        rgl_mesh_destroy(Cached->Mesh);
+        RGL_PROBED("rgl_mesh_destroy", rgl_mesh_destroy(Cached->Mesh));
     }
     MeshCache.Remove(MeshKey);
 }
@@ -1545,6 +1773,12 @@ bool FRGLSceneManager::ShouldRegisterComponent(UStaticMeshComponent* Component, 
     // Movable actors are kept even if no sensor has registered yet.
     if (Component->Mobility != EComponentMobility::Static)
     {
+        // 7b: on a World Partition map, a non-Static part the culling chooses (not protected) is registered by the
+        // culling's queue only, never on this path (no immediate cached registration, no unlimited first scan).
+        if (bWpActive && ClassifyWpProtection(Component) == EWpProtect::None)
+        {
+            return false;
+        }
         return true;
     }
 
@@ -1569,6 +1803,12 @@ bool FRGLSceneManager::ShouldKeepRegisteredComponent(UStaticMeshComponent* Compo
 {
     bool bOutOfRange = false;
     if (ShouldRegisterComponent(Component, bOutOfRange))
+    {
+        return true;
+    }
+    // 7b: a non-Static part the culling chooses stays until its queue removes it (distance) or the gate rejects it.
+    if (bWpActive && IsValid(Component) && Component->Mobility != EComponentMobility::Static &&
+        GateStaticComponent(Component) == EStaticGate::Pass)
     {
         return true;
     }
@@ -1616,7 +1856,7 @@ bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
     AddMeshReference(MeshKey);
 
     rgl_entity_t Entity = nullptr;
-    rgl_status_t Status = rgl_entity_create(&Entity, Scene, RGLMesh);
+    rgl_status_t Status = RGL_PROBED("rgl_entity_create", rgl_entity_create(&Entity, Scene, RGLMesh));
     if (Status != RGL_SUCCESS || !Entity)
     {
         ReleaseMeshReference(MeshKey);
@@ -1632,7 +1872,7 @@ bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
     // Set initial transform
     const FTransform WorldTransform = Component->GetComponentTransform();
     rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(WorldTransform);
-    RGL_CHECK(rgl_entity_set_transform(Entity, &RGLTransform));
+    RGL_CHECK(RGL_PROBED("rgl_entity_set_transform", rgl_entity_set_transform(Entity, &RGLTransform)));
 
 #if !UE_BUILD_SHIPPING
     // [DEBUG] Log first 3 entities' positions
@@ -1673,7 +1913,7 @@ void FRGLSceneManager::UnregisterComponent(UStaticMeshComponent* Component)
 
     if (Info->Entity)
     {
-        rgl_entity_destroy(Info->Entity);
+        RGL_PROBED("rgl_entity_destroy", rgl_entity_destroy(Info->Entity));
         Info->Entity = nullptr;
     }
     ReleaseMeshReference(Info->MeshKey);   // the stored key: the asset may be collected already
@@ -1758,14 +1998,14 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
     for (int32 k = 0; k < Chosen.Num(); ++k)
     {
         rgl_entity_t Entity = nullptr;
-        rgl_status_t Status = rgl_entity_create(&Entity, Scene, RGLMesh);
+        rgl_status_t Status = RGL_PROBED("rgl_entity_create", rgl_entity_create(&Entity, Scene, RGLMesh));
         if (Status != RGL_SUCCESS || !Entity)
         {
             continue;
         }
 
         rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(ChosenTransforms[k]);
-        RGL_CHECK(rgl_entity_set_transform(Entity, &RGLTransform));
+        RGL_CHECK(RGL_PROBED("rgl_entity_set_transform", rgl_entity_set_transform(Entity, &RGLTransform)));
 
         Group.Entities.Add(Entity);
         Group.InstanceIndices.Add(Chosen[k]);
@@ -1807,7 +2047,7 @@ void FRGLSceneManager::UnregisterISMComponent(UInstancedStaticMeshComponent* Com
     {
         if (Entity)
         {
-            rgl_entity_destroy(Entity);
+            RGL_PROBED("rgl_entity_destroy", rgl_entity_destroy(Entity));
         }
     }
     ReleaseMeshReference(Group->MeshKey, Group->MeshRefCount);   // the stored key: the asset may be collected already
@@ -1862,7 +2102,7 @@ void FRGLSceneManager::UpdateTransforms()
         }
 
         rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(WorldTransform);
-        RGL_CHECK(rgl_entity_set_transform(Info.Entity, &RGLTransform));
+        RGL_CHECK(RGL_PROBED("rgl_entity_set_transform", rgl_entity_set_transform(Info.Entity, &RGLTransform)));
 
         Info.LastTransform = WorldTransform;
         Info.bTransformInitialized = true;
@@ -1936,6 +2176,24 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
     // scan decides what is resident.
     PurgeIdleMeshes();
 
+    // 7b: a culling sync fixes its horizon and margin first; a world that no longer culls (rgl.Scene.WpMovableCulling
+    // switched off live) drops the culling's state here, and the scan below registers those parts the original way.
+    if (bWpActive)
+    {
+        WpBeginSync(WorldDeltaSeconds(World));
+    }
+    else if (WpCandidates.Num() > 0 || WpJobs.Num() > 0 || WpMovedIsm.Num() > 0)
+    {
+        WpTeardown();
+    }
+    for (auto It = WpStickyProtected.CreateIterator(); It; ++It)
+    {
+        if (!It.Key().ResolveObjectPtr())
+        {
+            It.RemoveCurrent();
+        }
+    }
+
     // P7: the scan's containers are members; Reset keeps their allocations from one sync to the next.
     TSet<UStaticMeshComponent*>& CurrentComponents = ScanCurrentComponents;
     TSet<UInstancedStaticMeshComponent*>& CurrentISMComponents = ScanCurrentIsmComponents;
@@ -1976,6 +2234,33 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
 
         for (UStaticMeshComponent* Comp : ScanComponents)
         {
+            // 7b: a non-Static part the World Partition culling chooses goes to the culling (its candidates and queue),
+            // never to the original path below. The sets keep the original removals away from it.
+            if (bWpActive && IsValid(Comp) && Comp->Mobility != EComponentMobility::Static &&
+                GateStaticComponent(Comp) == EStaticGate::Pass && ClassifyWpProtection(Comp) == EWpProtect::None)
+            {
+                UInstancedStaticMeshComponent* WpIsm = Cast<UInstancedStaticMeshComponent>(Comp);
+                bool bWpSeen = false;
+                if (WpIsm)
+                {
+                    CurrentISMComponents.Add(WpIsm, &bWpSeen);
+                }
+                else
+                {
+                    CurrentComponents.Add(Comp, &bWpSeen);
+                }
+                if (!bWpSeen)
+                {
+                    const double WpStart = FPlatformTime::Seconds();
+                    const double WpRegBefore = WpVisitRegSeconds;
+                    WpVisitCandidate(Comp, WpIsm);
+                    const double WpMs = (FPlatformTime::Seconds() - WpStart) * 1000.0;
+                    WpSyncCheckMs += WpMs;
+                    RegSeconds += WpVisitRegSeconds - WpRegBefore;   // its RGL calls (a rebuilt group) are reg_ms
+                }
+                continue;
+            }
+
             bool bOutOfRange = false;
             if (!ShouldRegisterComponent(Comp, bOutOfRange))
             {
@@ -2062,6 +2347,11 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
     OutStats.ScanMs = FMath::Max(0.0, (FPlatformTime::Seconds() - ScanStartSeconds - RegSeconds) * 1000.0);
     // The scan has seen every level added so far: none of them needs a level-triggered sync any more (P5).
     PendingAddedLevels.Reset();
+    // 7b: candidates the scan no longer saw are dropped; the new queue replaces the old one (the waits are kept).
+    if (bWpActive)
+    {
+        WpEndSync();
+    }
 
     // Remove regular entities for components that no longer exist or moved out
     // of the LiDAR-relevant window.
@@ -2332,12 +2622,12 @@ bool FRGLSceneManager::ReevaluateIsmGroup(UInstancedStaticMeshComponent* Compone
             continue;
         }
         rgl_entity_t Entity = nullptr;
-        if (rgl_entity_create(&Entity, Scene, Mesh) != RGL_SUCCESS || !Entity)
+        if (RGL_PROBED("rgl_entity_create", rgl_entity_create(&Entity, Scene, Mesh)) != RGL_SUCCESS || !Entity)
         {
             continue;   // tried again by the next sync's round
         }
         rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(InstanceTransform);
-        RGL_CHECK(rgl_entity_set_transform(Entity, &RGLTransform));
+        RGL_CHECK(RGL_PROBED("rgl_entity_set_transform", rgl_entity_set_transform(Entity, &RGLTransform)));
         Group.Entities.Add(Entity);
         Group.InstanceIndices.Add(i);
         Group.InstanceWorldTransforms.Add(InstanceTransform);
@@ -2366,7 +2656,7 @@ bool FRGLSceneManager::ReevaluateIsmGroup(UInstancedStaticMeshComponent* Compone
         }
         if (Group.Entities[k])
         {
-            rgl_entity_destroy(Group.Entities[k]);
+            RGL_PROBED("rgl_entity_destroy", rgl_entity_destroy(Group.Entities[k]));
         }
         Group.Entities.RemoveAtSwap(k, EAllowShrinking::No);
         Group.InstanceIndices.RemoveAtSwap(k, EAllowShrinking::No);
@@ -2387,8 +2677,13 @@ void FRGLSceneManager::LogSceneConfigIfChanged()
     const float UnloadFactor = SceneUnloadDistanceFactor();
     const int32 IdleMax = SceneIdleMeshCacheMax();
     const int32 MaxIsmChanges = SceneMaxIsmInstanceChangesPerUpdate();
+    const FWpKnobs WpKnobs = CurrentWpKnobs();
+    const int32 WpMaxChanges = SceneMaxMovableEntityChangesPerUpdate();
+    const float WpBudgetMs = SceneMovableEntityBudgetMs();
+    const int32 WpMap = bWpActive ? 1 : 0;
     if (MaxCreates == LoggedMaxCreates && BudgetMs == LoggedCreateBudgetMs &&
-        UnloadFactor == LoggedUnloadFactor && IdleMax == LoggedIdleMeshCacheMax && MaxIsmChanges == LoggedMaxIsmChanges)
+        UnloadFactor == LoggedUnloadFactor && IdleMax == LoggedIdleMeshCacheMax && MaxIsmChanges == LoggedMaxIsmChanges &&
+        WpKnobs == LoggedWpKnobs && WpMaxChanges == LoggedWpMaxChanges && WpBudgetMs == LoggedWpBudgetMs && WpMap == LoggedWpMap)
     {
         return;
     }
@@ -2397,11 +2692,1042 @@ void FRGLSceneManager::LogSceneConfigIfChanged()
     LoggedUnloadFactor = UnloadFactor;
     LoggedIdleMeshCacheMax = IdleMax;
     LoggedMaxIsmChanges = MaxIsmChanges;
-    EmitSceneLine(FString::Printf(
+    LoggedWpKnobs = WpKnobs;
+    LoggedWpMaxChanges = WpMaxChanges;
+    LoggedWpBudgetMs = WpBudgetMs;
+    LoggedWpMap = WpMap;
+    // 7b keys after the older ones: wp_culling = the culling applies to this world (World Partition and enabled).
+    const FString Line = FString::Printf(
         TEXT("rgl_scene_config t=%.3f max_mesh_creates_per_update=%d create_budget_ms=%.2f unload_distance_factor=%.2f "
-             "idle_mesh_cache_max=%d max_ism_instance_changes_per_update=%d unload_margin_cm=%.0f sync_interval_s=%.2f"),
+             "idle_mesh_cache_max=%d max_ism_instance_changes_per_update=%d unload_margin_cm=%.0f sync_interval_s=%.2f "
+             "wp_culling=%d wp_movable_culling=%d movable_min_margin_m=%.1f movable_sensor_speed_bound_mps=%.1f "
+             "movable_object_speed_bound_mps=%.1f movable_max_update_gap_seconds=%.3f movable_create_latency_seconds=%.3f "
+             "max_movable_entity_changes_per_update=%d movable_entity_budget_ms=%.2f"),
         CurrentSimTime, MaxCreates, BudgetMs, UnloadFactor, IdleMax, MaxIsmChanges, UnregistrationHysteresisCm,
-        SyncIntervalSeconds));
+        SyncIntervalSeconds, WpMap, WpKnobs.Enable, WpKnobs.MinMarginM, WpKnobs.SensorSpeedMps, WpKnobs.ObjectSpeedMps,
+        WpKnobs.MaxUpdateGapS, WpKnobs.CreateLatencyS, WpMaxChanges, WpBudgetMs);
+    EmitSceneLine(Line);
+#if !UE_BUILD_SHIPPING
+    LastConfigLine_ForTest = Line;
+#endif
+}
+
+// ============================================================================
+// World Partition culling of non-Static parts (7b)
+// ============================================================================
+// On a World Partition map (rgl.Scene.WpMovableCulling = 1), a non-Static static mesh part that is not protected
+// (ClassifyWpProtection) and has not been seen moving is registered only when its bounds (ISM: each instance's) reach
+// some sensor's load sphere: R_load = max(R, range + M), M = max(MinMargin, (V_sensor + V_object) * H), H = T_sync_max +
+// L_create + U (ComputeWpCullHorizon). It leaves beyond R_load * UnloadDistanceFactor + the unload margin, for every
+// sensor. Every sync looks at all candidates again (the full scan, as before); a part whose transform changed (or with
+// a velocity) is promoted and kept at any distance from then on. Adds and removals go through one queue: one entity per
+// change, under rgl.Scene.MaxMovableEntityChangesPerUpdate / MovableEntityBudgetMs and the mesh upload budget, nearest to
+// reach a range first. A culled part closes at most (V_sensor + V_object) * H on a sensor's range before the next sync
+// has looked at it and its entity exists, as long as U, the speed bounds and L_create hold; a deadline on the sim clock
+// forces that sync even when the world dt shrinks. Violations of the contracts are logged
+// (rgl_scene_wp_cull_violation); a teleport, a new sensor or time going back forces a sync but is not covered.
+
+namespace RGLWpCull
+{
+    /// Same tolerances as the audit's stale-instance test: 1 cm, ~0.01 deg, 0.1 % of scale.
+    static bool TransformChanged(const FTransform& Now, const FTransform& Before)
+    {
+        return !Now.GetLocation().Equals(Before.GetLocation(), 1.0) ||
+               !Now.GetRotation().Equals(Before.GetRotation(), 1.0e-4) ||
+               !Now.GetScale3D().Equals(Before.GetScale3D(), 1.0e-3);
+    }
+    static bool IsZeroScale(const FTransform& T)
+    {
+        const FVector S = T.GetScale3D();
+        return FMath::IsNearlyZero(S.X) || FMath::IsNearlyZero(S.Y) || FMath::IsNearlyZero(S.Z);
+    }
+    /// A velocity of the part or its owner above 1 cm/s.
+    static bool HasVelocity(const UStaticMeshComponent* Comp)
+    {
+        const AActor* Owner = Comp->GetOwner();
+        return Comp->GetComponentVelocity().SizeSquared() > 1.0 || (Owner && Owner->GetVelocity().SizeSquared() > 1.0);
+    }
+}
+
+FRGLSceneManager::FWpCullHorizon FRGLSceneManager::ComputeWpCullHorizon(EWpCullClock Clock, double IntervalSeconds,
+                                                                         double WorldDtSeconds, double MaxUpdateGapSeconds,
+                                                                         double CreateLatencySeconds)
+{
+    FWpCullHorizon H;
+    const double U = MaxUpdateGapSeconds;
+    const double D = (FMath::IsFinite(WorldDtSeconds) && WorldDtSeconds > 0.0) ? WorldDtSeconds : U;
+    if (Clock == EWpCullClock::SimClock)
+    {
+        H.SyncBoundSeconds = IntervalSeconds + U;
+    }
+    else
+    {
+        H.SyncBoundSeconds = FMath::CeilToDouble(IntervalSeconds / D) * FMath::Max(U, D) + U;
+    }
+    H.HorizonSeconds = H.SyncBoundSeconds + CreateLatencySeconds + U;
+    return H;
+}
+
+double FRGLSceneManager::ComputeWpMarginM(double HorizonSeconds, double SensorSpeedMps, double ObjectSpeedMps, double MinMarginM)
+{
+    return FMath::Max(MinMarginM, (SensorSpeedMps + ObjectSpeedMps) * HorizonSeconds);
+}
+
+bool FRGLSceneManager::UsesWpNonStaticCulling(const UWorld* World) const
+{
+    if (SceneWpMovableCulling() == 0)
+    {
+        return false;
+    }
+#if !UE_BUILD_SHIPPING
+    if (WpMapOverride_ForTest.IsSet())
+    {
+        return WpMapOverride_ForTest.GetValue();
+    }
+#endif
+    return World && World->GetWorldPartition() != nullptr;   // as CheckStreamCoverage and AuditScene decide
+}
+
+float FRGLSceneManager::WorldDeltaSeconds(const UWorld* World) const
+{
+#if !UE_BUILD_SHIPPING
+    if (WorldDtOverride_ForTest.IsSet())
+    {
+        return WorldDtOverride_ForTest.GetValue();
+    }
+#endif
+    return World ? World->GetDeltaSeconds() : 0.0f;
+}
+
+FRGLSceneManager::FWpKnobs FRGLSceneManager::CurrentWpKnobs() const
+{
+    FWpKnobs K;
+    K.Enable = SceneWpMovableCulling();
+    K.MinMarginM = SceneMovableMinMarginM();
+    K.SensorSpeedMps = SceneMovableSensorSpeedBoundMps();
+    K.ObjectSpeedMps = SceneMovableObjectSpeedBoundMps();
+    K.MaxUpdateGapS = SceneMovableMaxUpdateGapSeconds();
+    K.CreateLatencyS = SceneMovableCreateLatencySeconds();
+    K.IntervalS = SyncIntervalSeconds;
+    return K;
+}
+
+const TCHAR* FRGLSceneManager::WpProtectName(EWpProtect Reason)
+{
+    switch (Reason)
+    {
+    case EWpProtect::Pawn:              return TEXT("pawn");
+    case EWpProtect::MovementComponent: return TEXT("movement_component");
+    case EWpProtect::Skeletal:          return TEXT("skeletal");
+    case EWpProtect::Physics:           return TEXT("physics");
+    case EWpProtect::SensorParent:      return TEXT("sensor_parent");
+    default:                            return TEXT("none");
+    }
+}
+
+FRGLSceneManager::EWpProtect FRGLSceneManager::ClassifyWpProtection(const UStaticMeshComponent* Component, bool bRemember) const
+{
+    if (!Component)
+    {
+        return EWpProtect::None;
+    }
+    const FObjectKey Key(Component);
+    if (const EWpProtect* Sticky = WpStickyProtected.Find(Key))
+    {
+        return *Sticky;   // once protected, protected for the part's life
+    }
+    EWpProtect Reason = EWpProtect::None;
+    // The part and the components it is attached to (across actors): physics, or a skeletal mesh to ride on.
+    int32 Depth = 0;
+    for (const USceneComponent* S = Component; S && Reason == EWpProtect::None && Depth < 64; S = S->GetAttachParent(), ++Depth)
+    {
+        if (const UPrimitiveComponent* Prim = Cast<UPrimitiveComponent>(S))
+        {
+            if (Prim->IsSimulatingPhysics())
+            {
+                Reason = EWpProtect::Physics;
+                break;
+            }
+        }
+        if (S != Component && S->IsA<USkeletalMeshComponent>())
+        {
+            Reason = EWpProtect::Skeletal;
+        }
+    }
+    // The owner and the actors it is attached to: a Pawn (vehicles, walkers), an actor that moves itself (movement
+    // component) or carries a skeletal mesh, a sensor's carrier (self-cutout vehicle, audit parent). Cached per actor
+    // within one sync (the sync paths only).
+    const AActor* Owner = Component->GetOwner();
+    if (Reason == EWpProtect::None && Owner)
+    {
+        if (bRemember && WpCachedActor == Owner && WpCachedActorSerial == SceneSyncSerial)
+        {
+            Reason = WpCachedActorVerdict;
+        }
+        else
+        {
+            EWpProtect ActorReason = EWpProtect::None;
+            int32 ActorDepth = 0;
+            for (const AActor* A = Owner; A && ActorReason == EWpProtect::None && ActorDepth < 64; A = A->GetAttachParentActor(), ++ActorDepth)
+            {
+                if (A->IsA<APawn>())
+                {
+                    ActorReason = EWpProtect::Pawn;
+                }
+                else if (A->FindComponentByClass<UMovementComponent>())
+                {
+                    ActorReason = EWpProtect::MovementComponent;
+                }
+                else if (A->FindComponentByClass<USkeletalMeshComponent>())
+                {
+                    ActorReason = EWpProtect::Skeletal;
+                }
+                else
+                {
+                    for (const auto& Pair : RegisteredSensors)
+                    {
+                        if (Pair.Value.CutoutVehicle.Get() == A || Pair.Value.AuditParent.Get() == A)
+                        {
+                            ActorReason = EWpProtect::SensorParent;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (bRemember)
+            {
+                WpCachedActor = Owner;
+                WpCachedActorSerial = SceneSyncSerial;
+                WpCachedActorVerdict = ActorReason;
+            }
+            Reason = ActorReason;
+        }
+    }
+    if (Reason != EWpProtect::None && bRemember)
+    {
+        WpStickyProtected.Add(Key, Reason);
+    }
+    return Reason;
+}
+
+void FRGLSceneManager::WpViolation(const TCHAR* Kind, double Value, double Bound)
+{
+    ++WpViolationsSinceLog;
+    int32& N = WpViolationCounts.FindOrAdd(FString(Kind));
+    ++N;
+    if (N <= 20 || (N % 1000) == 0)   // the first ones of each kind, then one in 1000 (the sync line counts them all)
+    {
+        EmitSceneLine(FString::Printf(TEXT("rgl_scene_wp_cull_violation t=%.3f kind=%s value=%.3f bound=%.3f n=%d"),
+                                      CurrentSimTime, Kind, Value, Bound, N));
+    }
+}
+
+void FRGLSceneManager::WpCheckContracts(const UWorld* World, bool& bOutDeadline, bool& bOutReset, bool& bOutJump)
+{
+    const FWpKnobs K = CurrentWpKnobs();
+    const double U = K.MaxUpdateGapS;
+    const double Tol = U * 1.0e-3 + 1.0e-6;
+    // R10: this interval was classified at its START, after that Update's init sync. Sensors joining now must
+    // neither invalidate its exemption nor excuse an existing sensor's later gap. Consume the snapshot once.
+    const bool bStartupUpdateInterval = bWpStartupSceneIntervalPending;
+    bWpStartupSceneIntervalPending = false;
+    const double Dt = FMath::Max(0.0f, WorldDeltaSeconds(World));
+    auto StartupGap = [this, U, Dt](const TCHAR* Kind, double Gap, const void* Sensor, double InitSync)
+    {
+        EmitSceneLine(FString::Printf(TEXT("rgl_scene_wp_cull_startup_gap t=%.3f kind=%s value=%.6f limit=%.6f world_dt=%.6f sensor=%p init_sync=%.3f"),
+                                      CurrentSimTime, Kind, Gap, U, Dt, Sensor, InitSync));
+    };
+    if (WpPrevUpdateSimTime >= 0.0)
+    {
+        if (CurrentSimTime < WpPrevUpdateSimTime)
+        {
+            bOutReset = true;   // time went back: no continuity to rely on
+            bOutJump = true;
+        }
+        else if (CurrentSimTime - WpPrevUpdateSimTime > U + Tol)
+        {
+            const double Gap = CurrentSimTime - WpPrevUpdateSimTime;
+            if (bStartupUpdateInterval && Gap <= U + Dt + Tol)
+            {
+                StartupGap(TEXT("update_gap"), Gap, nullptr, WpPrevUpdateSimTime);
+            }
+            else
+            {
+                WpViolation(TEXT("update_gap"), Gap, U);
+            }
+        }
+    }
+    WpPrevUpdateSimTime = CurrentSimTime;
+    for (auto& Pair : RegisteredSensors)
+    {
+        FSensorRegistration& S = Pair.Value;
+        S.bWpStartupUpdatePending = false; // consumed even after a normal, oversized or rewound first interval
+        if (S.bTimeRewound)
+        {
+            S.bTimeRewound = false;
+            S.bWpStartupPosePending = false;
+            bOutReset = true;
+            bOutJump = true;
+        }
+        if (!S.bRefreshed)
+        {
+            continue;
+        }
+        S.bRefreshed = false;
+        const bool bStartupPoseInterval = S.bWpStartupPosePending && S.LastUpdateTime > S.WpInitPoseTime;
+        if (S.LastRefreshGapSeconds > U + Tol)
+        {
+            if (bStartupPoseInterval && S.LastRefreshGapSeconds <= U + Dt + Tol)
+            {
+                StartupGap(TEXT("pose_gap"), S.LastRefreshGapSeconds, Pair.Key, S.WpInitSyncSimTime);
+            }
+            else
+            {
+                WpViolation(TEXT("pose_gap"), S.LastRefreshGapSeconds, U);
+            }
+        }
+        // Consume even a normal first refresh; only the first interval can use the exemption.
+        if (bStartupPoseInterval)
+        {
+            S.bWpStartupPosePending = false;
+        }
+        // Faster than the bound: a pose jump (teleport) rather than motion the margin covers. Looked at again now.
+        if (S.ObservedSpeedCmps > K.SensorSpeedMps * 100.0f * (1.0f + 1.0e-3f))
+        {
+            WpViolation(TEXT("sensor_speed"), S.ObservedSpeedCmps / 100.0, K.SensorSpeedMps);
+            bOutReset = true;
+            bOutJump = true;
+        }
+    }
+    if (!bWpSyncValid)
+    {
+        return;
+    }
+    if (K != WpSyncKnobs)
+    {
+        bOutReset = true;   // the margin was worked out with other inputs
+    }
+    if (CurrentSimTime < WpLastSyncSimTime)
+    {
+        bOutReset = true;
+        bOutJump = true;
+    }
+    // The next Update may come up to U later: sync now if that would pass the time the last culling sync assumed. With a
+    // fixed dt the periodic sync comes first (T_sync_max holds its rounding), so this fires only when the dt shrank.
+    else if (CurrentSimTime - WpLastSyncSimTime + U > WpAssumedSyncSeconds + 1.0e-6)
+    {
+        bOutDeadline = true;
+    }
+}
+
+void FRGLSceneManager::WpBeginSync(float Dt)
+{
+    const FWpKnobs K = CurrentWpKnobs();
+    const FWpCullHorizon H = ComputeWpCullHorizon(EWpCullClock::UpdateClock, SyncIntervalSeconds, Dt, K.MaxUpdateGapS,
+                                                  K.CreateLatencyS);
+    WpAssumedSyncSeconds = H.SyncBoundSeconds;
+    WpHorizonSeconds = H.HorizonSeconds;
+    WpMarginCm = ComputeWpMarginM(H.HorizonSeconds, K.SensorSpeedMps, K.ObjectSpeedMps, K.MinMarginM) * 100.0;
+    WpLastSyncSimTime = CurrentSimTime;
+    WpSyncKnobs = K;
+    bWpSyncValid = true;
+    ScanWpJobs.Reset();
+    WpSyncCheckMs = 0.0;
+}
+
+float FRGLSceneManager::WpLoadRadiusCm(const FSensorRegistration& S) const
+{
+    return FMath::Max(S.RegistrationDistanceCm, SensorRangeCm(S) + static_cast<float>(WpMarginCm));
+}
+
+bool FRGLSceneManager::WpInAnyLoadSphere(const FVector& CenterCm, float RadiusCm) const
+{
+    for (const auto& Pair : RegisteredSensors)
+    {
+        const double R = WpLoadRadiusCm(Pair.Value) + RadiusCm;
+        if (FVector::DistSquared(CenterCm, Pair.Value.Position) <= R * R)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FRGLSceneManager::WpInAnyUnloadSphere(const FVector& CenterCm, float RadiusCm) const
+{
+    const float Factor = SceneUnloadDistanceFactor();
+    for (const auto& Pair : RegisteredSensors)
+    {
+        const double R = WpLoadRadiusCm(Pair.Value) * Factor + UnregistrationHysteresisCm + RadiusCm;
+        if (FVector::DistSquared(CenterCm, Pair.Value.Position) <= R * R)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+double FRGLSceneManager::WpReachSimTime(const FVector& CenterCm, float RadiusCm) const
+{
+    const double ClosingCmps = FMath::Max(1.0, (static_cast<double>(WpSyncKnobs.SensorSpeedMps) + WpSyncKnobs.ObjectSpeedMps) * 100.0);
+    double Best = TNumericLimits<double>::Max();
+    for (const auto& Pair : RegisteredSensors)
+    {
+        const double GapCm = FVector::Dist(CenterCm, Pair.Value.Position) - RadiusCm - SensorRangeCm(Pair.Value);
+        Best = FMath::Min(Best, CurrentSimTime + FMath::Max(0.0, GapCm) / ClosingCmps);
+    }
+    return Best;
+}
+
+FSphere FRGLSceneManager::WpInstanceSphere(const UStaticMesh* Mesh, const FTransform& InstanceTransform)
+{
+    const FBoxSphereBounds B = Mesh ? Mesh->GetBounds() : FBoxSphereBounds(ForceInit);
+    const FVector S = InstanceTransform.GetScale3D();
+    const double MaxScale = FMath::Max3(FMath::Abs(S.X), FMath::Abs(S.Y), FMath::Abs(S.Z));
+    return FSphere(InstanceTransform.TransformPosition(B.Origin), B.SphereRadius * MaxScale);
+}
+
+void FRGLSceneManager::WpVisitCandidate(UStaticMeshComponent* Comp, UInstancedStaticMeshComponent* Ism)
+{
+    const FObjectKey Key(Comp);
+    FWpCandidate* Found = WpCandidates.Find(Key);
+    const bool bNew = (Found == nullptr);
+    FWpCandidate& C = bNew ? WpCandidates.Add(Key) : *Found;
+    if (bNew)
+    {
+        C.Component = Comp;
+        C.bIsm = (Ism != nullptr);
+    }
+    UStaticMesh* Mesh = Comp->GetStaticMesh();
+    const FObjectKey MeshKey(Mesh);
+    // A mesh whose extraction failed waits for its retry without a job (as the original scan; the audit counts it as
+    // unextractable, not missing).
+    const bool bMeshDeferred = IsMeshRetryDeferred(Mesh);
+    const double Elapsed = CurrentSimTime - C.SeenSimTime;
+    const double ObjectBoundCmps = WpSyncKnobs.ObjectSpeedMps * 100.0;
+    ++WpCheckN;
+
+    auto Promote = [this, &C, &Key]()
+    {
+        if (!C.bMoved)
+        {
+            C.bMoved = true;
+            if (C.bIsm)
+            {
+                WpMovedIsm.AddUnique(Key);
+            }
+        }
+    };
+    auto CheckSpeed = [this, Elapsed, ObjectBoundCmps](const FSphere& Before, const FSphere& Now)
+    {
+        // The bounds' surface: the center's move plus the radius' change (turns and scale included through both).
+        if (Elapsed > 0.0)
+        {
+            const double Speed = (FVector::Dist(Before.Center, Now.Center) + FMath::Abs(Now.W - Before.W)) / Elapsed;
+            if (Speed > ObjectBoundCmps * (1.0 + 1.0e-3))
+            {
+                WpViolation(TEXT("object_speed"), Speed / 100.0, ObjectBoundCmps / 100.0);
+            }
+        }
+    };
+    // The contract covers a job when the part was known before this sync with the same layout (set below for ISMs),
+    // and this sync does not follow a discontinuity.
+    bool bKnown = !bNew && C.MeshKey == MeshKey;
+    auto AddJob = [this, Comp, &Key, &C, &bKnown](int32 Instance, bool bAdd, const FVector& Center, float Radius, double Since,
+                                                   bool bWasCulled)
+    {
+        FWpJob& J = ScanWpJobs.AddDefaulted_GetRef();
+        J.bCovered = bKnown && !bWpSyncDiscontinuous;
+        J.bLateCovered = J.bCovered && bWasCulled;
+        J.Component = Comp;
+        J.Key = Key;
+        J.Instance = Instance;
+        J.Generation = C.Generation;
+        J.bAdd = bAdd;
+        J.SinceSimTime = Since;
+        J.ReachSimTime = bAdd ? WpReachSimTime(Center, Radius) : TNumericLimits<double>::Max();
+        // Reach time is now exactly when bounds intersect ANY sensor's raw range. The same sphere helper supplies
+        // offset-pivot/scale-aware ISM bounds; neither registration radius nor prefetch margin makes this urgent.
+        J.bInRangeAtDiscovery = bAdd && J.ReachSimTime <= CurrentSimTime;
+        J.GapCm = NearestSensorGapCm(Center, Radius);
+    };
+
+    if (!Ism)
+    {
+        // ---- a regular part ----
+        const FTransform T = Comp->GetComponentTransform();
+        if (!bNew && C.MeshKey == MeshKey && RGLWpCull::TransformChanged(T, C.Transform))
+        {
+            CheckSpeed(WpInstanceSphere(Mesh, C.Transform), WpInstanceSphere(Mesh, T));
+            Promote();
+        }
+        if (!C.bMoved && RGLWpCull::HasVelocity(Comp))
+        {
+            Promote();
+        }
+        if (!bNew && C.MeshKey != MeshKey)
+        {
+            ++C.Generation;   // another mesh: the old jobs drop out
+        }
+        // An entity built from another mesh (swapped) leaves now; the queue builds the new one.
+        if (const FEntityInfo* Info = EntityMap.Find(Comp))
+        {
+            if (Info->MeshKey != MeshKey)
+            {
+                const double R0 = FPlatformTime::Seconds();
+                UnregisterComponent(Comp);
+                WpVisitRegSeconds += FPlatformTime::Seconds() - R0;
+            }
+        }
+        C.MeshKey = MeshKey;
+        C.Transform = T;
+        C.SeenSimTime = CurrentSimTime;
+        C.SeenSyncSerial = SceneSyncSerial;
+
+        const FVector Origin = Comp->Bounds.Origin;
+        const float Radius = static_cast<float>(Comp->Bounds.SphereRadius);
+        const bool bRegistered = EntityMap.Contains(Comp);
+        const bool bWanted = C.bMoved || WpInAnyLoadSphere(Origin, Radius);
+        const bool bWasCulled = bKnown && C.bCulledAtSync;
+        if (bWanted && !bRegistered && !bMeshDeferred)
+        {
+            if (C.WantSince < 0.0)
+            {
+                C.WantSince = CurrentSimTime;
+            }
+            AddJob(INDEX_NONE, true, Origin, Radius, C.WantSince, bWasCulled);
+        }
+        else
+        {
+            C.WantSince = -1.0;
+        }
+        if (!bWanted && bRegistered && !WpInAnyUnloadSphere(Origin, Radius))
+        {
+            AddJob(INDEX_NONE, false, Origin, Radius, CurrentSimTime, false);
+        }
+        C.bCulledAtSync = !bWanted && !bRegistered;
+        return;
+    }
+
+    // ---- an ISM: every instance on its own ----
+    const int32 NumInstances = Ism->GetInstanceCount();
+    FISMCEntityGroup* Group = ISMCEntityMap.Find(Ism);
+    // A group of another component at a reused address, or built for another mesh / instance count (also one the
+    // original path built before this part was a candidate): it leaves now; the queue builds the instances again.
+    if (Group && (Group->Component.Get() != Ism || Group->MeshKey != MeshKey || Group->OriginalInstanceCount != NumInstances))
+    {
+        const double R0 = FPlatformTime::Seconds();
+        UnregisterISMComponent(Ism);
+        WpVisitRegSeconds += FPlatformTime::Seconds() - R0;
+        Group = nullptr;
+    }
+    const bool bLayoutChanged = !bNew && (C.InstanceCount != NumInstances || C.MeshKey != MeshKey);
+    bKnown = !bNew && !bLayoutChanged;
+    if (bLayoutChanged)
+    {
+        ++C.Generation;   // old instance indices may name other instances now: their jobs drop out
+        C.InstanceLocal.Reset();
+        C.InstanceSpheres.Reset();
+        C.InstanceWantSince.Reset();
+        C.InstanceCulled.Empty();
+    }
+    const bool bHistory = bKnown && C.InstanceLocal.Num() == NumInstances && C.InstanceSpheres.Num() == NumInstances;
+    const int32 OldWant = C.InstanceWantSince.Num();
+    C.InstanceLocal.SetNum(NumInstances);
+    C.InstanceSpheres.SetNum(NumInstances);
+    C.InstanceWantSince.SetNum(NumInstances);
+    for (int32 i = OldWant; i < NumInstances; ++i)
+    {
+        C.InstanceWantSince[i] = -1.0;
+    }
+    if (C.InstanceCulled.Num() != NumInstances)
+    {
+        C.InstanceCulled.Init(false, NumInstances);   // no history of being culled (new part or new layout)
+    }
+    WpCheckInstances += NumInstances;
+
+    // Pass 1: which instances changed since the last sync (their local matrix, or the component's transform), and their
+    // spheres. An unchanged instance keeps its recorded sphere (nothing is decomposed); a changed one is read again,
+    // and with a history it moved (the whole component is promoted; its speed is checked).
+    const FTransform CompTransform = Comp->GetComponentTransform();
+    const bool bCompSame = bHistory && CompTransform.Equals(C.Transform, 0.0);
+    const TArray<FInstancedStaticMeshInstanceData>& Data = Ism->PerInstanceSMData;
+    const int32 NumData = FMath::Min(NumInstances, Data.Num());
+    bool bMovedNow = false;
+    for (int32 i = 0; i < NumInstances; ++i)
+    {
+        const bool bHasData = i < NumData;
+        if (bCompSame && bHasData && FMemory::Memcmp(&Data[i].Transform, &C.InstanceLocal[i], sizeof(Data[i].Transform)) == 0)
+        {
+            continue;   // unchanged: the recorded sphere stands
+        }
+        FTransform T;
+        const bool bOk = Ism->GetInstanceTransform(i, T, /*bWorldSpace=*/true) && !RGLWpCull::IsZeroScale(T);
+        const FSphere NewSphere = bOk ? WpInstanceSphere(Mesh, T) : FSphere(FVector::ZeroVector, -1.0);
+        if (bHistory)
+        {
+            const FTransform Before = FTransform(FMatrix(C.InstanceLocal[i])) * C.Transform;
+            if (!bOk || RGLWpCull::TransformChanged(T, Before))
+            {
+                bMovedNow = true;
+                const FSphere3f& Old = C.InstanceSpheres[i];
+                if (bOk && Old.W >= 0.0f)
+                {
+                    CheckSpeed(FSphere(FVector(Old.Center), Old.W), NewSphere);
+                }
+            }
+        }
+        if (bHasData)
+        {
+            C.InstanceLocal[i] = Data[i].Transform;
+        }
+        C.InstanceSpheres[i] = FSphere3f(FVector3f(NewSphere.Center), static_cast<float>(NewSphere.W));
+    }
+    if (bMovedNow || (!C.bMoved && RGLWpCull::HasVelocity(Comp)))
+    {
+        Promote();   // one moving instance keeps the whole component
+    }
+    C.Transform = CompTransform;
+    C.MeshKey = MeshKey;
+    C.InstanceCount = NumInstances;
+    C.SeenSimTime = CurrentSimTime;
+    C.SeenSyncSerial = SceneSyncSerial;
+
+    // Pass 2: choose the instances.
+    for (int32 i = 0; i < NumInstances; ++i)
+    {
+        const FSphere3f& Sphere = C.InstanceSpheres[i];
+        const FVector Center(Sphere.Center);
+        const bool bValid = Sphere.W >= 0.0f;
+        const bool bRegistered = Group && Group->RegisteredMask.IsValidIndex(i) && Group->RegisteredMask[i];
+        const bool bWanted = bValid && (C.bMoved || WpInAnyLoadSphere(Center, Sphere.W));
+        const bool bWasCulled = bKnown && C.InstanceCulled[i];
+        if (bWanted && !bRegistered && !bMeshDeferred)
+        {
+            if (C.InstanceWantSince[i] < 0.0)
+            {
+                C.InstanceWantSince[i] = CurrentSimTime;
+            }
+            AddJob(i, true, Center, Sphere.W, C.InstanceWantSince[i], bWasCulled);
+        }
+        else
+        {
+            C.InstanceWantSince[i] = -1.0;
+        }
+        if (bRegistered && (!bValid || (!bWanted && !WpInAnyUnloadSphere(Center, Sphere.W))))
+        {
+            AddJob(i, false, Center, FMath::Max(0.0f, Sphere.W), CurrentSimTime, false);
+        }
+        C.InstanceCulled[i] = bValid && !bWanted && !bRegistered;
+    }
+}
+
+void FRGLSceneManager::WpEndSync()
+{
+    // Candidates the scan no longer saw (gone, hidden, unregistered, now protected or Static): their state goes; the
+    // original rules handle their entities (the gate and the removal loops, or the original registration).
+    for (auto It = WpCandidates.CreateIterator(); It; ++It)
+    {
+        const FWpCandidate& C = It.Value();
+        if (C.SeenSyncSerial == SceneSyncSerial)
+        {
+            continue;
+        }
+        // Protected now (attached to a vehicle, physics on, ...) with a partial group: the original path keeps a
+        // registered group as it is, so this one leaves the scene and the next sync registers it whole.
+        if (UInstancedStaticMeshComponent* Ism = Cast<UInstancedStaticMeshComponent>(C.Component.Get()))
+        {
+            if (const FISMCEntityGroup* Group = ISMCEntityMap.Find(Ism))
+            {
+                if (Group->Component.Get() == Ism && Ism->Mobility != EComponentMobility::Static &&
+                    Group->Entities.Num() < Ism->GetInstanceCount())
+                {
+                    UnregisterISMComponent(Ism);
+                }
+            }
+        }
+        It.RemoveCurrent();
+    }
+    for (int32 m = WpMovedIsm.Num() - 1; m >= 0; --m)
+    {
+        if (!WpCandidates.Contains(WpMovedIsm[m]))
+        {
+            WpMovedIsm.RemoveAtSwap(m, EAllowShrinking::No);
+        }
+    }
+    // Adds first, the soonest to reach a range first (then the nearest, then a stable order); removals after them.
+    ScanWpJobs.Sort([](const FWpJob& A, const FWpJob& B)
+    {
+        if (A.bAdd != B.bAdd)
+        {
+            return A.bAdd;
+        }
+        if (A.bAdd && A.ReachSimTime != B.ReachSimTime)
+        {
+            return A.ReachSimTime < B.ReachSimTime;
+        }
+        if (A.GapCm != B.GapCm)
+        {
+            return A.bAdd ? (A.GapCm < B.GapCm) : (A.GapCm > B.GapCm);
+        }
+        if (A.Key != B.Key)
+        {
+            return A.Key < B.Key;
+        }
+        return A.Instance < B.Instance;
+    });
+    Swap(WpJobs, ScanWpJobs);
+    ScanWpJobs.Reset();
+    WpCheckMs += WpSyncCheckMs;
+    WpCheckMaxMs = FMath::Max(WpCheckMaxMs, WpSyncCheckMs);
+}
+
+void FRGLSceneManager::WpTeardown()
+{
+    // Groups the culling built (possibly partial) leave the scene; the original rule registers those ISMs whole at this
+    // sync's scan. Regular entities stay: the original rule keeps every non-Static part.
+    for (const auto& Pair : WpCandidates)
+    {
+        if (UInstancedStaticMeshComponent* Ism = Cast<UInstancedStaticMeshComponent>(Pair.Value.Component.Get()))
+        {
+            if (const FISMCEntityGroup* Group = ISMCEntityMap.Find(Ism))
+            {
+                if (Group->Component.Get() == Ism)
+                {
+                    UnregisterISMComponent(Ism);
+                }
+            }
+        }
+    }
+    WpCandidates.Empty();
+    WpJobs.Empty();
+    ScanWpJobs.Empty();
+    WpMovedIsm.Empty();
+    bWpSyncValid = false;
+    WpPrevUpdateSimTime = -1.0;
+    bWpStartupSceneIntervalPending = false;
+}
+
+bool FRGLSceneManager::WpAddRegular(UStaticMeshComponent* Comp)
+{
+    return !EntityMap.Contains(Comp) && RegisterComponent(Comp);   // the original registration of one entity
+}
+
+bool FRGLSceneManager::WpAddInstance(UInstancedStaticMeshComponent* Comp, int32 Instance, const FTransform& InstanceTransform)
+{
+    UStaticMesh* Mesh = Comp->GetStaticMesh();
+    if (!Mesh)
+    {
+        return false;
+    }
+    const FObjectKey MeshKey(Mesh);
+    const int32 NumInstances = Comp->GetInstanceCount();
+    FISMCEntityGroup* Group = ISMCEntityMap.Find(Comp);
+    if (Group && (Group->Component.Get() != Comp || Group->MeshKey != MeshKey || Group->OriginalInstanceCount != NumInstances))
+    {
+        UnregisterISMComponent(Comp);   // built for another layout
+        Group = nullptr;
+    }
+    if (Group && Group->RegisteredMask.IsValidIndex(Instance) && Group->RegisteredMask[Instance])
+    {
+        return true;
+    }
+    rgl_mesh_t RGLMesh = UploadMesh(Mesh);
+    if (!RGLMesh)
+    {
+        return false;
+    }
+    AddMeshReference(MeshKey);   // held by the new entity (released again if it cannot be made)
+    rgl_entity_t Entity = nullptr;
+    if (RGL_PROBED("rgl_entity_create", rgl_entity_create(&Entity, Scene, RGLMesh)) != RGL_SUCCESS || !Entity)
+    {
+        ReleaseMeshReference(MeshKey);
+        return false;
+    }
+    rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(InstanceTransform);
+    RGL_CHECK(RGL_PROBED("rgl_entity_set_transform", rgl_entity_set_transform(Entity, &RGLTransform)));
+    if (!Group)
+    {
+        FISMCEntityGroup NewGroup;
+        NewGroup.Component = Comp;
+        NewGroup.MeshKey = MeshKey;
+        NewGroup.OriginalInstanceCount = NumInstances;
+        NewGroup.RegisteredMask.Init(false, NumInstances);
+        Group = &ISMCEntityMap.Add(Comp, MoveTemp(NewGroup));
+    }
+    Group->Entities.Add(Entity);
+    Group->InstanceIndices.Add(Instance);
+    Group->InstanceWorldTransforms.Add(InstanceTransform);
+    Group->RegisteredMask[Instance] = true;
+    ++Group->MeshRefCount;
+    return true;
+}
+
+bool FRGLSceneManager::WpRemoveInstance(UInstancedStaticMeshComponent* Comp, int32 Instance)
+{
+    FISMCEntityGroup* Group = ISMCEntityMap.Find(Comp);
+    if (!Group || !Group->RegisteredMask.IsValidIndex(Instance) || !Group->RegisteredMask[Instance])
+    {
+        return false;
+    }
+    for (int32 k = Group->Entities.Num() - 1; k >= 0; --k)
+    {
+        if (Group->InstanceIndices[k] != Instance)
+        {
+            continue;
+        }
+        if (Group->Entities[k])
+        {
+            RGL_PROBED("rgl_entity_destroy", rgl_entity_destroy(Group->Entities[k]));
+        }
+        Group->Entities.RemoveAtSwap(k, EAllowShrinking::No);
+        Group->InstanceIndices.RemoveAtSwap(k, EAllowShrinking::No);
+        Group->InstanceWorldTransforms.RemoveAtSwap(k, EAllowShrinking::No);
+        Group->RegisteredMask[Instance] = false;
+        --Group->MeshRefCount;
+        ReleaseMeshReference(Group->MeshKey);
+        if (Group->Entities.Num() == 0)
+        {
+            UnregisterISMComponent(Comp);   // no entity left: the group goes (its references are released already)
+        }
+        return true;
+    }
+    return false;
+}
+
+void FRGLSceneManager::WpDrain(bool bUnlimited)
+{
+    const double StartSeconds = FPlatformTime::Seconds();
+    const int32 MaxChanges = bUnlimited ? 0 : SceneMaxMovableEntityChangesPerUpdate();
+    const double BudgetSeconds = bUnlimited ? 0.0 : static_cast<double>(SceneMovableEntityBudgetMs()) / 1000.0;
+    const int32 MaxUploads = bUnlimited ? 0 : SceneMaxMeshCreatesPerUpdate();
+    const double UploadBudgetSeconds = bUnlimited ? 0.0 : static_cast<double>(SceneCreateBudgetMs()) / 1000.0;
+    const double Latency = CurrentWpKnobs().CreateLatencyS;
+    int32 Changes = 0;
+    int32 Uploads = 0;
+    double UploadSeconds = 0.0;
+    double ClockStart = -1.0;   // the ms budget runs from the end of the first change (that call may carry the graph wait)
+    bool bStop = false;
+    int32 Write = 0;
+    for (int32 Read = 0; Read < WpJobs.Num(); ++Read)
+    {
+        FWpJob& J = WpJobs[Read];
+        auto Keep = [this, &Write, Read]()
+        {
+            if (Write != Read)
+            {
+                WpJobs[Write] = MoveTemp(WpJobs[Read]);
+            }
+            ++Write;
+        };
+        if (bStop && !J.bInRangeAtDiscovery)
+        {
+            Keep();
+            continue;
+        }
+        UStaticMeshComponent* Comp = J.Component.Get();
+        const FWpCandidate* C = WpCandidates.Find(J.Key);
+        if (!Comp || !C || C->Generation != J.Generation || !Comp->IsRegistered() || !Comp->GetStaticMesh())
+        {
+            continue;   // gone, or the layout changed: the next sync queues what is needed
+        }
+        if (!J.bInRangeAtDiscovery && Changes > 0 && ((MaxChanges > 0 && Changes >= MaxChanges) ||
+                            (BudgetSeconds > 0.0 && ClockStart >= 0.0 && FPlatformTime::Seconds() - ClockStart >= BudgetSeconds)))
+        {
+            bStop = true;
+            Keep();
+            continue;
+        }
+        UInstancedStaticMeshComponent* Ism = Cast<UInstancedStaticMeshComponent>(Comp);
+        bool bDone = false;
+        if (J.bAdd)
+        {
+            UStaticMesh* Mesh = Comp->GetStaticMesh();
+            if (IsMeshRetryDeferred(Mesh))
+            {
+                continue;   // a failed mesh waits for its retry; a later sync queues it again
+            }
+            const bool bNeedsUpload = !FindCachedMesh(Mesh) || MeshRefCounts.FindRef(FObjectKey(Mesh)) <= 0;
+            if (!J.bInRangeAtDiscovery && bNeedsUpload && Uploads > 0 && ((MaxUploads > 0 && Uploads >= MaxUploads) ||
+                                                (UploadBudgetSeconds > 0.0 && UploadSeconds >= UploadBudgetSeconds)))
+            {
+                Keep();   // the mesh upload budget (rgl.Scene.MaxMeshCreatesPerUpdate / CreateBudgetMs) is spent
+                continue;
+            }
+            const double U0 = FPlatformTime::Seconds();
+            FVector Center = FVector::ZeroVector;
+            float Radius = 0.0f;
+            if (Ism)
+            {
+                FTransform T;
+                if (J.Instance < 0 || J.Instance >= Ism->GetInstanceCount() ||
+                    !Ism->GetInstanceTransform(J.Instance, T, /*bWorldSpace=*/true) || RGLWpCull::IsZeroScale(T))
+                {
+                    continue;
+                }
+                const FSphere S = WpInstanceSphere(Mesh, T);
+                Center = S.Center;
+                Radius = static_cast<float>(S.W);
+                bDone = WpAddInstance(Ism, J.Instance, T);
+            }
+            else
+            {
+                Center = Comp->Bounds.Origin;
+                Radius = static_cast<float>(Comp->Bounds.SphereRadius);
+                bDone = WpAddRegular(Comp);
+            }
+            if (bNeedsUpload && !J.bInRangeAtDiscovery)
+            {
+                ++Uploads;
+                UploadSeconds += FPlatformTime::Seconds() - U0;
+            }
+            if (!bDone)
+            {
+                if (EntityMap.Contains(Comp) && !Ism)
+                {
+                    continue;   // registered already
+                }
+                Keep();   // could not be made now (a failed upload is deferred): tried again
+                continue;
+            }
+            // Contracts: made after its bounds already reached a sensor's range (a part culled at the previous sync), or
+            // later than L_create (a part known at the previous sync).
+            if (J.bLateCovered)
+            {
+                for (const auto& Pair : RegisteredSensors)
+                {
+                    const double R = SensorRangeCm(Pair.Value) + Radius;
+                    if (FVector::DistSquared(Center, Pair.Value.Position) <= R * R)
+                    {
+                        WpViolation(TEXT("late_create"), CurrentSimTime - J.SinceSimTime, Latency);
+                        break;
+                    }
+                }
+            }
+            if (J.bCovered)
+            {
+                if (!J.bAgeReported && CurrentSimTime - J.SinceSimTime > Latency + 1.0e-6)
+                {
+                    WpViolation(TEXT("queue_age"), CurrentSimTime - J.SinceSimTime, Latency);
+                }
+            }
+            if (FWpCandidate* MutableC = WpCandidates.Find(J.Key))
+            {
+                if (Ism && MutableC->InstanceWantSince.IsValidIndex(J.Instance))
+                {
+                    MutableC->InstanceWantSince[J.Instance] = -1.0;
+                }
+                else if (!Ism)
+                {
+                    MutableC->WantSince = -1.0;
+                }
+            }
+            ++WpEntityAdded;
+            if (J.bInRangeAtDiscovery)
+            {
+                ++WpInRangeAddedLastUpdate;
+                WpInRangeMsLastUpdate += (FPlatformTime::Seconds() - U0) * 1000.0;
+            }
+#if !UE_BUILD_SHIPPING
+            ++WpAddedLastUpdate_ForTest;
+#endif
+        }
+        else
+        {
+            if (Ism)
+            {
+                bDone = WpRemoveInstance(Ism, J.Instance);
+            }
+            else if (EntityMap.Contains(Comp))
+            {
+                UnregisterComponent(Comp);
+                bDone = true;
+            }
+            if (!bDone)
+            {
+                continue;   // nothing registered any more
+            }
+            ++WpEntityRemoved;
+#if !UE_BUILD_SHIPPING
+            ++WpRemovedLastUpdate_ForTest;
+#endif
+        }
+        if (!J.bInRangeAtDiscovery)
+        {
+            ++Changes;
+            if (ClockStart < 0.0)
+            {
+                ClockStart = FPlatformTime::Seconds();
+            }
+        }
+    }
+    WpJobs.SetNum(Write);
+    // The waits that already passed L_create (one line per job and sync; the sync line counts all).
+    for (FWpJob& J : WpJobs)
+    {
+        if (J.bAdd && J.bCovered && !J.bAgeReported && CurrentSimTime - J.SinceSimTime > Latency + 1.0e-6)
+        {
+            J.bAgeReported = true;
+            WpViolation(TEXT("queue_age"), CurrentSimTime - J.SinceSimTime, Latency);
+        }
+    }
+    WpEntityMs += (FPlatformTime::Seconds() - StartSeconds) * 1000.0;
+}
+
+void FRGLSceneManager::WpUpdateMovedInstanceTransforms()
+{
+    for (int32 m = WpMovedIsm.Num() - 1; m >= 0; --m)
+    {
+        const FWpCandidate* C = WpCandidates.Find(WpMovedIsm[m]);
+        UInstancedStaticMeshComponent* Ism = C ? Cast<UInstancedStaticMeshComponent>(C->Component.Get()) : nullptr;
+        if (!Ism)
+        {
+            continue;
+        }
+        FISMCEntityGroup* Group = ISMCEntityMap.Find(Ism);
+        if (!Group || Group->Component.Get() != Ism || !Ism->IsRegistered())
+        {
+            continue;
+        }
+        const int32 NumInstances = Ism->GetInstanceCount();
+        for (int32 k = 0; k < Group->Entities.Num(); ++k)
+        {
+            const int32 Index = Group->InstanceIndices[k];
+            FTransform T;
+            if (Index < 0 || Index >= NumInstances || !Ism->GetInstanceTransform(Index, T, /*bWorldSpace=*/true) ||
+                RGLWpCull::IsZeroScale(T) || !RGLWpCull::TransformChanged(T, Group->InstanceWorldTransforms[k]))
+            {
+                continue;
+            }
+            rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(T);
+            RGL_CHECK(RGL_PROBED("rgl_entity_set_transform", rgl_entity_set_transform(Group->Entities[k], &RGLTransform)));
+            Group->InstanceWorldTransforms[k] = T;
+        }
+    }
+}
+
+void FRGLSceneManager::CountSceneEntities(int32& OutTotal, int32& OutNonStatic) const
+{
+    OutTotal = EntityMap.Num();
+    OutNonStatic = 0;
+    for (const auto& Pair : EntityMap)
+    {
+        OutNonStatic += Pair.Value.bIsStatic ? 0 : 1;
+    }
+    for (const auto& Pair : ISMCEntityMap)
+    {
+        const int32 N = Pair.Value.Entities.Num();
+        OutTotal += N;
+        const UInstancedStaticMeshComponent* Comp = Pair.Value.Component.Get();
+        if (Comp && Comp->Mobility != EComponentMobility::Static)
+        {
+            OutNonStatic += N;
+        }
+    }
+    for (const auto& Pair : SkeletalEntityMap)
+    {
+        OutTotal += Pair.Value.Entity ? 1 : 0;
+    }
 }
 
 // ============================================================================
@@ -2574,7 +3900,7 @@ rgl_mesh_t FRGLSceneManager::GetOrUploadSkeletalMesh(USkeletalMesh* Mesh, int32&
     if (Data.LODIndex != LOD) { OutReason = FString::Printf(TEXT("LOD mismatch: SelectReadableLOD=%d ExtractSkeletalMesh=%d"), LOD, Data.LODIndex); return nullptr; }
     OutRawBoneNum = Data.RawBoneNum;
     rgl_mesh_t M = nullptr;
-    if (rgl_mesh_create(&M, Data.Vertices.GetData(), Data.Vertices.Num(), Data.Indices.GetData(), Data.Indices.Num()) != RGL_SUCCESS || !M) { OutReason = TEXT("rgl_mesh_create failed"); return nullptr; }
+    if (RGL_PROBED("rgl_mesh_create", rgl_mesh_create(&M, Data.Vertices.GetData(), Data.Vertices.Num(), Data.Indices.GetData(), Data.Indices.Num())) != RGL_SUCCESS || !M) { OutReason = TEXT("rgl_mesh_create failed"); return nullptr; }
     if (rgl_mesh_set_bone_weights(M, Data.Weights.GetData(), Data.Weights.Num()) != RGL_SUCCESS) { RglDestroyChecked(rgl_mesh_destroy(M), TEXT("rgl_mesh_destroy")); OutReason = TEXT("rgl_mesh_set_bone_weights failed"); return nullptr; }
     if (rgl_mesh_set_restposes(M, Data.RestposesInv.GetData(), Data.RestposesInv.Num()) != RGL_SUCCESS) { RglDestroyChecked(rgl_mesh_destroy(M), TEXT("rgl_mesh_destroy")); OutReason = TEXT("rgl_mesh_set_restposes failed"); return nullptr; }
     SkeletalMeshCache.Add(Key, M);
@@ -2596,7 +3922,7 @@ void FRGLSceneManager::ReleaseSkeletalMeshReference(const FSkeletalMeshKey& Key)
     int32* Count = SkeletalMeshRefCounts.Find(Key); if (!Count) return;
     if (--(*Count) <= 0)
     {
-        if (rgl_mesh_t* M = SkeletalMeshCache.Find(Key)) { if (*M) RglDestroyChecked(rgl_mesh_destroy(*M), TEXT("rgl_mesh_destroy")); SkeletalMeshCache.Remove(Key); }
+        if (rgl_mesh_t* M = SkeletalMeshCache.Find(Key)) { if (*M) RglDestroyChecked(RGL_PROBED("rgl_mesh_destroy", rgl_mesh_destroy(*M)), TEXT("rgl_mesh_destroy")); SkeletalMeshCache.Remove(Key); }
         SkeletalMeshRefCounts.Remove(Key);
     }
 }
@@ -2659,7 +3985,7 @@ void FRGLSceneManager::UnregisterSkeletalComponent(USkeletalMeshComponent* Key)
         SkeletalEntityMap.Remove(Key);
         return;
     }
-    if (Info->Entity) { RglDestroyChecked(rgl_entity_destroy(Info->Entity), TEXT("rgl_entity_destroy")); Info->Entity = nullptr; }
+    if (Info->Entity) { RglDestroyChecked(RGL_PROBED("rgl_entity_destroy", rgl_entity_destroy(Info->Entity)), TEXT("rgl_entity_destroy")); Info->Entity = nullptr; }
     ReleaseSkeletalMeshReference(FSkeletalMeshKey{ Info->SkeletalMesh, Info->LODIndex });
     if (USkeletalMeshComponent* Live = Info->Component.Get()) ApplyTickPolicy(Live, *Info, false);   // never through the raw key
     SkeletalEntityMap.Remove(Key);
@@ -2669,7 +3995,7 @@ void FRGLSceneManager::TeardownSkeletal()
 {
     TArray<USkeletalMeshComponent*> Keys; SkeletalEntityMap.GetKeys(Keys);
     for (USkeletalMeshComponent* K : Keys) UnregisterSkeletalComponent(K);
-    for (auto& P : SkeletalMeshCache) if (P.Value) RglDestroyChecked(rgl_mesh_destroy(P.Value), TEXT("rgl_mesh_destroy"));
+    for (auto& P : SkeletalMeshCache) if (P.Value) RglDestroyChecked(RGL_PROBED("rgl_mesh_destroy", rgl_mesh_destroy(P.Value)), TEXT("rgl_mesh_destroy"));
     SkeletalMeshCache.Empty(); SkeletalMeshRefCounts.Empty();
     SkeletalSkipped.Empty(); SkeletalWarned.Empty();
 }
@@ -2903,8 +4229,8 @@ bool FRGLSceneManager::RegisterSkeletalCutoutComponent(USkeletalMeshComponent* C
 
 void FRGLSceneManager::DestroyCutout(FSkeletalEntityInfo& Info)
 {
-    if (Info.Entity) { RglDestroyChecked(rgl_entity_destroy(Info.Entity), TEXT("rgl_entity_destroy")); Info.Entity = nullptr; }   // entity before its mesh
-    if (Info.CutoutMesh) { RglDestroyChecked(rgl_mesh_destroy(Info.CutoutMesh), TEXT("rgl_mesh_destroy")); Info.CutoutMesh = nullptr; }
+    if (Info.Entity) { RglDestroyChecked(RGL_PROBED("rgl_entity_destroy", rgl_entity_destroy(Info.Entity)), TEXT("rgl_entity_destroy")); Info.Entity = nullptr; }   // entity before its mesh
+    if (Info.CutoutMesh) { RglDestroyChecked(RGL_PROBED("rgl_mesh_destroy", rgl_mesh_destroy(Info.CutoutMesh)), TEXT("rgl_mesh_destroy")); Info.CutoutMesh = nullptr; }
     Info.CutoutConfig.Reset();
     Info.CutoutKeptTriangles = 0;
     Info.CutoutRemovedTriangles = 0;
@@ -2995,7 +4321,7 @@ bool FRGLSceneManager::BuildCutoutMesh(USkeletalMeshComponent* Comp, FSkeletalEn
     rgl_mesh_t M = nullptr;
     if (Kept > 0)
     {
-        bool bOk = rgl_mesh_create(&M, KeptVertices.GetData(), KeptVertices.Num(), KeptIndices.GetData(), KeptIndices.Num()) == RGL_SUCCESS && M;
+        bool bOk = RGL_PROBED("rgl_mesh_create", rgl_mesh_create(&M, KeptVertices.GetData(), KeptVertices.Num(), KeptIndices.GetData(), KeptIndices.Num())) == RGL_SUCCESS && M;
         if (!bOk) M = nullptr;
         bOk = bOk && rgl_mesh_set_bone_weights(M, KeptWeights.GetData(), KeptWeights.Num()) == RGL_SUCCESS;
         bOk = bOk && rgl_mesh_set_restposes(M, Src->RestposesInv.GetData(), Src->RestposesInv.Num()) == RGL_SUCCESS;
@@ -3278,9 +4604,14 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
     }
     R.Pending = PendingCreates.Num();
     R.PendingIsm = PendingIsmReevals.Num();
+    R.WpPending = WpJobs.Num();
     R.LevelsAdded = LevelsAddedSinceAudit;
     R.SecondsSinceSync = (LastSyncSimTime >= 0.0) ? FMath::Max(0.0, CurrentSimTime - LastSyncSimTime) : -1.0;
     R.FrameMs = LastFrameMs;
+    // 7b: on a world that culls its non-Static parts, an ISM instance of the new path is placed with the same geometry
+    // as the culling uses (the mesh bounds' origin through the instance transform); a known candidate in range without
+    // an entity is counted again as missing_wp_culled_in_range. Other worlds: unchanged.
+    const bool bWpAudit = UsesWpNonStaticCulling(World);
 
     // missing_sync: R around each sensor where the last sync saw it (what the registration rule used).
     // missing_in_range / ghost_in_range: the range the rays reach, around the current position.
@@ -3534,6 +4865,11 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
             R.MissingSync += bCompInSync ? 1 : 0;
             R.MissingInRange += bCompInRange ? 1 : 0;
             R.MissingSteady += (bCompInSync && RA::InAnySphere(CurrentRSpheres, Bounds.Origin, Bounds.SphereRadius)) ? 1 : 0;
+            if (bCompInRange && bWpAudit && SMC->Mobility != EComponentMobility::Static)
+            {
+                const FWpCandidate* WpC = WpCandidates.Find(FObjectKey(SMC));
+                R.MissingWpCulledInRange += (WpC && WpC->MeshKey == FObjectKey(Mesh)) ? 1 : 0;
+            }
             return;
         }
 
@@ -3560,6 +4896,15 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
         }
         const bool bDeferred = !Group && IsMeshRetryDeferred(Mesh);
         const double MeshRadius = Mesh->GetBounds().SphereRadius;
+        // 7b: the new path's instances (non-Static, not protected, on a world that culls) are placed as the culling
+        // places them; a candidate whose layout the last scan recorded counts its unregistered in-range instances.
+        const bool bWpGeometry = bWpAudit && ISM->Mobility != EComponentMobility::Static &&
+                                 ClassifyWpProtection(ISM, /*bRemember=*/false) == EWpProtect::None;
+        const FWpCandidate* WpC = bWpGeometry ? WpCandidates.Find(FObjectKey(ISM)) : nullptr;
+        if (WpC && (WpC->InstanceCount != NumInstances || WpC->MeshKey != FObjectKey(Mesh)))
+        {
+            WpC = nullptr;   // the layout changed since: the old history is void
+        }
         for (int32 i = 0; i < NumInstances; ++i)
         {
             FTransform T;
@@ -3568,8 +4913,9 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
                 continue;
             }
             const double RadiusCm = MeshRadius * RA::MaxAbsScale(T);
-            const bool bInSync = RA::InAnySphere(SyncSpheres, T.GetLocation(), RadiusCm);
-            const bool bInRange = RA::InAnySphere(RangeSpheres, T.GetLocation(), RadiusCm);
+            const FVector CenterCm = bWpGeometry ? WpInstanceSphere(Mesh, T).Center : T.GetLocation();
+            const bool bInSync = RA::InAnySphere(SyncSpheres, CenterCm, RadiusCm);
+            const bool bInRange = RA::InAnySphere(RangeSpheres, CenterCm, RadiusCm);
             if (!bInSync && !bInRange)
             {
                 continue;
@@ -3592,7 +4938,8 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
             R.MissingInRange += bInRange ? 1 : 0;
             R.MissingIsmSync += bInSync ? 1 : 0;
             R.MissingIsmInRange += bInRange ? 1 : 0;
-            R.MissingSteady += (bInSync && RA::InAnySphere(CurrentRSpheres, T.GetLocation(), RadiusCm)) ? 1 : 0;
+            R.MissingSteady += (bInSync && RA::InAnySphere(CurrentRSpheres, CenterCm, RadiusCm)) ? 1 : 0;
+            R.MissingWpCulledInRange += (bInRange && WpC) ? 1 : 0;
         }
     };
 
@@ -3647,13 +4994,13 @@ FString FRGLSceneManager::FormatAuditLine(uint64 Frame, double SimTime, const FR
              "hlod_registered=%d registered=%d pending=%d movable_registered=%d levels_added=%d since_sync_s=%.2f "
              "stream_covered=%d parent_stream_radius_m=%.1f frame_ms=%.2f audit_ms=%.3f "
              "missing_ism_sync=%d missing_ism_in_range=%d ghost_ism=%d ghost_ism_in_range=%d missing_steady=%d "
-             "spline_registered=%d cache_stale=%d pending_ism=%d"),
+             "spline_registered=%d cache_stale=%d pending_ism=%d missing_wp_culled_in_range=%d wp_pending=%d"),
         static_cast<unsigned long long>(Frame), SimTime, R.Ghost, R.GhostInRange, R.MissingSync, R.MissingInRange,
         R.MeshMismatch, R.StaleInstance, R.ExcludedByName, R.Unextractable, R.NonSmCollision,
         R.HlodRegistered, R.Registered, R.Pending, R.MovableRegistered, R.LevelsAdded, R.SecondsSinceSync,
         R.StreamCovered, static_cast<double>(R.ParentStreamRadiusM), R.FrameMs, R.AuditMs,
         R.MissingIsmSync, R.MissingIsmInRange, R.GhostIsm, R.GhostIsmInRange, R.MissingSteady,
-        R.SplineRegistered, R.CacheStale, R.PendingIsm);
+        R.SplineRegistered, R.CacheStale, R.PendingIsm, R.MissingWpCulledInRange, R.WpPending);
 }
 
 // ============================================================================
@@ -3822,6 +5169,8 @@ void FRGLSceneManager::SyncStaticNow_ForTest(UWorld* World, double Now)
 {
     // What Update() does on a sync step, without the per-frame guard, the triggers or the create budget.
     CurrentSimTime = Now;
+    bWpActive = UsesWpNonStaticCulling(World);
+    bWpSyncDiscontinuous = false;
     FSceneSyncStats SyncStats;
     SyncWorldComponents(World, SyncStats);
     TimeSinceLastSync = 0.0f;
@@ -3833,6 +5182,11 @@ void FRGLSceneManager::SyncStaticNow_ForTest(UWorld* World, double Now)
     }
     FDrainStats Drain;
     DrainPendingCreates(/*bUnlimited=*/true, Drain);
+    // 7b: the culling's queue, in full.
+    if (bWpActive && WpJobs.Num() > 0)
+    {
+        WpDrain(/*bUnlimited=*/true);
+    }
     // The ISM re-evaluation the sync queued, in full (Update() runs it on the following Updates, capped).
     FIsmReevalStats Ism;
     DrainIsmReevaluations(/*MaxChanges=*/0, Ism);
@@ -3879,6 +5233,57 @@ void FRGLSceneManager::AddIdleMeshEntry_ForTest(const UStaticMesh* Asset)
 int32 FRGLSceneManager::GetSkyVerdictCount_ForTest() const
 {
     return SkyVerdictByMesh.Num();
+}
+double FRGLSceneManager::GetWpQueueAgeMax_ForTest() const
+{
+    double Age = 0.0;
+    for (const FWpJob& J : WpJobs)
+    {
+        if (J.bAdd)
+        {
+            Age = FMath::Max(Age, CurrentSimTime - J.SinceSimTime);
+        }
+    }
+    return Age;
+}
+bool FRGLSceneManager::IsWpPromoted_ForTest(const UStaticMeshComponent* Comp) const
+{
+    const FWpCandidate* C = WpCandidates.Find(FObjectKey(Comp));
+    return C && C->bMoved;
+}
+bool FRGLSceneManager::IsIsmGroupConsistent_ForTest(const UInstancedStaticMeshComponent* Comp) const
+{
+    const FISMCEntityGroup* G = ISMCEntityMap.Find(const_cast<UInstancedStaticMeshComponent*>(Comp));
+    if (!G)
+    {
+        return true;   // no group: nothing to disagree
+    }
+    const int32 N = G->Entities.Num();
+    if (G->InstanceIndices.Num() != N || G->InstanceWorldTransforms.Num() != N || G->MeshRefCount != N)
+    {
+        return false;
+    }
+    TSet<int32> Seen;
+    for (const int32 Index : G->InstanceIndices)
+    {
+        bool bDup = false;
+        Seen.Add(Index, &bDup);
+        if (bDup || !G->RegisteredMask.IsValidIndex(Index) || !G->RegisteredMask[Index])
+        {
+            return false;
+        }
+    }
+    int32 MaskBits = 0;
+    for (int32 i = 0; i < G->RegisteredMask.Num(); ++i)
+    {
+        MaskBits += G->RegisteredMask[i] ? 1 : 0;
+    }
+    return MaskBits == N;
+}
+float FRGLSceneManager::GetWpLoadRadiusCm_ForTest(const void* SensorId) const
+{
+    const FSensorRegistration* S = RegisteredSensors.Find(SensorId);
+    return (S && bWpSyncValid) ? WpLoadRadiusCm(*S) : -1.0f;
 }
 int32 FRGLSceneManager::GetIsmEntityCount_ForTest(const UInstancedStaticMeshComponent* Comp) const
 {

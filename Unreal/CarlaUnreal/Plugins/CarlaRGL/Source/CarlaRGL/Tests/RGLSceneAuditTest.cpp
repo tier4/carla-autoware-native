@@ -343,13 +343,16 @@ bool FSceneAuditFormatLineTest::RunTest(const FString& Parameters)
     R.Ghost = 1;
     R.StreamCovered = -1;
     R.ParentStreamRadiusM = -1.0f;
+    R.MissingWpCulledInRange = 3;
+    R.WpPending = 4;
     const FString Line = FRGLSceneManager::FormatAuditLine(42, 1.5, R);
     const FString Expected = TEXT(
         "rgl_scene_audit frame=42 sim_t=1.500 ghost=1 ghost_in_range=0 missing_sync=0 missing_in_range=0 "
         "mesh_mismatch=0 stale_instance=0 excluded_by_name=0 unextractable=0 non_sm_collision=0 hlod_registered=0 "
         "registered=0 pending=0 movable_registered=0 levels_added=0 since_sync_s=0.00 stream_covered=-1 "
         "parent_stream_radius_m=-1.0 frame_ms=0.00 audit_ms=0.000 missing_ism_sync=0 missing_ism_in_range=0 "
-        "ghost_ism=0 ghost_ism_in_range=0 missing_steady=0 spline_registered=0 cache_stale=0 pending_ism=0");
+        "ghost_ism=0 ghost_ism_in_range=0 missing_steady=0 spline_registered=0 cache_stale=0 pending_ism=0 "
+        "missing_wp_culled_in_range=3 wp_pending=4");
     // Exact (string TestEqual ignores case).
     if (!TestTrue(TEXT("rgl_scene_audit line, exactly"), Line.Equals(Expected, ESearchCase::CaseSensitive)))
     {
@@ -600,6 +603,116 @@ bool FSceneAuditHitDumpRoundTripTest::RunTest(const FString& Parameters)
         }
     }
     IFileManager::Get().DeleteDirectory(*Dir, /*RequireExists=*/false, /*Tree=*/true);
+    return true;
+}
+
+// ============================================================================
+// 7b: a known culled part that comes into range is not hidden by a waiting queue
+// ============================================================================
+
+// World Partition culling (the seam): a part found far away (300 m) by a sync is culled; three parts in R_load but out of
+// range wait in the queue (one change per Update). The far part is put 50 m from the sensor with no Update: the audit
+// counts it as missing_wp_culled_in_range and missing_in_range although jobs are pending, and changes nothing. A sync with
+// its drain registers it (both back to 0). The same for one instance of an ISM; its other far instance is not counted.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditWpLateApproachIsNotMaskedByPendingTest, "CarlaRGL.SceneAudit.WpLateApproachIsNotMaskedByPending",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneAuditWpLateApproachIsNotMaskedByPendingTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(77);
+    FWpTestScope W(World, true);
+    SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 1);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0920), Base, 14200.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+    AStaticMeshActor* Late = F.Keep(SpawnMeshActor(World, Cube, Base + FVector(30000.f, 0.f, 0.f), EComponentMobility::Movable));
+    for (int32 i = 0; i < 3; ++i)
+    {
+        F.Keep(SpawnMeshActor(World, Cube, Base + FVector(11000.f + 500.f * i, 2000.f * (i - 1), 0.f), EComponentMobility::Movable));
+    }
+    AActor* O = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base, { FVector(30000.f, 3000.f, 0.f), FVector(32000.f, 3000.f, 0.f) }, O,
+                                                  EComponentMobility::Movable);
+    F.Keep(O);
+    if (!TestTrue(TEXT("parts"), Late && Ism)) return false;
+    // Updates until the interval's sync has found them (budgeted: 1 change per Update).
+    for (int32 k = 0; k < 21; ++k)
+    {
+        F.T += 0.1;
+        F.Refresh();
+        F.SM.Update_ForTest(World, F.T);
+    }
+    TestTrue(TEXT("jobs are pending"), F.SM.GetWpPendingJobs_ForTest() > 0);
+    TestTrue(TEXT("the far part is a known candidate"), F.SM.IsWpCandidate_ForTest(Late->GetStaticMeshComponent()));
+    TestFalse(TEXT("the far part is culled"), F.SM.IsEntityRegistered_ForTest(Late->GetStaticMeshComponent()));
+
+    Late->SetActorLocation(Base + FVector(5000.f, 0.f, 0.f));   // into the range, no Update
+    const FRGLSceneManager::FSceneCounts C0 = F.SM.GetSceneCounts_ForTest();
+    const int32 Jobs0 = F.SM.GetWpPendingJobs_ForTest();
+    const FRGLSceneAuditResult D1 = Diff(R0, F.Audit());
+    AddInfo(FRGLSceneManager::FormatAuditLine(77, F.T, F.Audit()));
+    TestEqual(TEXT("missing_wp_culled_in_range +1"), D1.MissingWpCulledInRange, 1);
+    TestEqual(TEXT("missing_in_range +1"), D1.MissingInRange, 1);
+    const FRGLSceneManager::FSceneCounts C1 = F.SM.GetSceneCounts_ForTest();
+    TestEqual(TEXT("the audit changed no entity"), C1.Entities, C0.Entities);
+    TestEqual(TEXT("the audit changed no mesh"), C1.CachedMeshes, C0.CachedMeshes);
+    TestEqual(TEXT("the audit changed no job"), F.SM.GetWpPendingJobs_ForTest(), Jobs0);
+    F.Sync();
+    const FRGLSceneAuditResult D2 = Diff(R0, F.Audit());
+    TestEqual(TEXT("after the sync: missing_wp_culled_in_range 0"), D2.MissingWpCulledInRange, 0);
+    TestEqual(TEXT("after the sync: missing_in_range 0"), D2.MissingInRange, 0);
+
+    // One ISM instance moved into the range (the component does not move); the other stays 320 m away.
+    FTransform T;
+    Ism->GetInstanceTransform(0, T, /*bWorldSpace=*/true);
+    T.SetLocation(Base + FVector(5000.f, 3000.f, 0.f));
+    Ism->UpdateInstanceTransform(0, T, /*bWorldSpace=*/true, /*bMarkRenderStateDirty=*/true, /*bTeleport=*/true);
+    Ism->UpdateBounds();   // what the end of the frame does (the render state update); the test stays in one frame
+    const FRGLSceneAuditResult D3 = Diff(R0, F.Audit());
+    TestEqual(TEXT("ISM: missing_wp_culled_in_range +1 (the far instance is not counted)"), D3.MissingWpCulledInRange, 1);
+    TestEqual(TEXT("ISM: missing_in_range +1"), D3.MissingInRange, 1);
+    F.Sync();
+    const FRGLSceneAuditResult D4 = Diff(R0, F.Audit());
+    TestEqual(TEXT("ISM after the sync: missing_wp_culled_in_range 0"), D4.MissingWpCulledInRange, 0);
+    TestEqual(TEXT("ISM after the sync: missing_in_range 0"), D4.MissingInRange, 0);
+    return true;
+}
+
+// 7b: the audit line shows the culling's queue (wp_pending, current jobs), so that a line whose queue is not done is not
+// counted as steady (summarize). Three parts in R_load but out of range, one change per Update: after the sync that found
+// them, jobs wait; after a full drain, none.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditWpPendingShownTest, "CarlaRGL.SceneAudit.WpPendingShown",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneAuditWpPendingShownTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(81);
+    FWpTestScope W(World, true);
+    SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 1);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0921), Base, 14300.0);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+    TestEqual(TEXT("nothing waits at first"), R0.WpPending, 0);
+    for (int32 i = 0; i < 3; ++i)
+    {
+        F.Keep(SpawnMeshActor(World, Cube, Base + FVector(11000.f + 500.f * i, 2000.f * (i - 1), 0.f), EComponentMobility::Movable));
+    }
+    for (int32 k = 0; k < 20 && F.SM.GetWpPendingJobs_ForTest() == 0; ++k)
+    {
+        F.T += 0.1;
+        F.Refresh();
+        F.SM.Update_ForTest(World, F.T);
+    }
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(81, F.T, R1));
+    TestEqual(TEXT("wp_pending = the jobs waiting"), R1.WpPending, F.SM.GetWpPendingJobs_ForTest());
+    TestTrue(TEXT("jobs wait"), R1.WpPending > 0);
+    TestTrue(TEXT("the line carries wp_pending"), FRGLSceneManager::FormatAuditLine(81, F.T, R1).Contains(
+        FString::Printf(TEXT(" wp_pending=%d"), R1.WpPending)));
+    F.Sync();
+    TestEqual(TEXT("drained: wp_pending 0"), F.Audit().WpPending, 0);
     return true;
 }
 }

@@ -1,5 +1,7 @@
 ## LATEST Changes
 
+* Reduced non-Static RGL scene entities on World Partition maps with sensor-distance culling and speed-dependent margins; non-World-Partition registration is unchanged.
+
 * Reduced RGL scene-sync CPU work by caching sky-name verdicts per mesh and reusing scan buffers; added scan, registration, removal and skeletal timing fields to the sync log.
 
 ### New features

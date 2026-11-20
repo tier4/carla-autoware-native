@@ -240,3 +240,45 @@ def test_fingerprint_rows(tmp_path):
     assert rows[1].split(",")[:3] == ["0", "1", "0.500"]
     assert out_b.read_text() == out_c.read_text()      # ids, frames and absolute sim_t do not enter the row
     assert len(rows[0].split(",")[4]) == 40
+
+
+# ---- 7b: the keys added to the sync line (wait_ms, wait_api, wp_*) do not change what the gate compares ----
+WP_TAIL = (" scan_ms=1.00 reg_ms=0.00 remove_ms=0.00 skel_ms=0.00 wait_ms=61.20 wait_api=rgl_entity_destroy wp=1 "
+           "wp_sync_bound_s=2.10 wp_create_latency_s=1.00 wp_margin_m=320.0 wp_pending=7 wp_queue_age_max_s=0.40 "
+           "wp_check_n=12 wp_check_instances=900 wp_check_ms=3.10 wp_check_max_ms=3.10 wp_entity_added=5 "
+           "wp_entity_removed=2 wp_entity_ms=0.80 wp_promoted=1 wp_violations=0 wp_deadline_syncs=0 "
+           "wp_entities_total=12345 wp_nonstatic_registered=2345")
+
+
+def test_wp_keys_do_not_change_the_sync_sequence():
+    plain = [SYNC % (2.4, "init", 11, 0, 3, 0, 40, 9), SYNC % (3.5, "time", 12, 1, 0, 2, 41, 9)]
+    tailed = [ln + WP_TAIL for ln in plain]
+    assert compare_hits.sync_sequence(tailed) == compare_hits.sync_sequence(plain)
+    assert compare_hits.sync_sequences_equal(compare_hits.sync_sequence(plain), compare_hits.sync_sequence(tailed))
+
+
+def test_each_compared_key_still_fails_with_wp_keys():
+    base = [SYNC % (2.4, "init", 11, 0, 3, 0, 40, 9) + WP_TAIL]
+    variants = {
+        "trigger": SYNC % (2.4, "time", 11, 0, 3, 0, 40, 9),
+        "scanned": SYNC % (2.4, "init", 12, 0, 3, 0, 40, 9),
+        "queued": SYNC % (2.4, "init", 11, 1, 3, 0, 40, 9),
+        "created": SYNC % (2.4, "init", 11, 0, 4, 0, 40, 9),
+        "removed": SYNC % (2.4, "init", 11, 0, 3, 1, 40, 9),
+        "entities": SYNC % (2.4, "init", 11, 0, 3, 0, 41, 9),
+        "meshes": SYNC % (2.4, "init", 11, 0, 3, 0, 40, 8),
+    }
+    b = compare_hits.sync_sequence(base)
+    for key, line in variants.items():
+        c = compare_hits.sync_sequence([line + WP_TAIL])
+        assert not compare_hits.sync_sequences_equal(b, c), key
+
+
+def test_unknown_keys_do_not_widen_what_is_ignored():
+    # wp_entities_total is not entities: a change of entities still fails, a change of wp_entities_total alone does not
+    base = [SYNC % (2.4, "init", 11, 0, 3, 0, 40, 9) + WP_TAIL]
+    other_total = [base[0].replace("wp_entities_total=12345", "wp_entities_total=999")]
+    other_entities = [(SYNC % (2.4, "init", 11, 0, 3, 0, 41, 9)) + WP_TAIL]
+    b = compare_hits.sync_sequence(base)
+    assert compare_hits.sync_sequences_equal(b, compare_hits.sync_sequence(other_total))
+    assert not compare_hits.sync_sequences_equal(b, compare_hits.sync_sequence(other_entities))

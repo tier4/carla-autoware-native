@@ -29,6 +29,8 @@ SYNC_TRIGGERS = ("init", "time", "distance", "level")
 # stream_covered is not used: the audit counts only components of loaded levels, and a
 # map that never reports full coverage (S3) would otherwise have no steady line at all.
 # steady_valid = steady_rows >= 0.2 * frames. Keys missing from a line count as 0.
+# Task 7b adds the culling's queue: a line with wp_pending > 0 (jobs of the World Partition culling of non-Static parts
+# not done yet) is not steady either.
 
 
 def parse_kv(text):
@@ -97,11 +99,18 @@ def steady_lines(audits):
         sim_t = _num(a, "sim_t")
         if _num(a, "levels_added") > 0:
             t_add = sim_t
-        if _num(a, "pending") != 0 or _num(a, "pending_ism") != 0:
+        if _num(a, "pending") != 0 or _num(a, "pending_ism") != 0 or _num(a, "wp_pending") != 0:
             continue
         if t_add is None or sim_t - _num(a, "since_sync_s") >= t_add - 0.01:
             out.append(a)
     return out
+
+
+def _present(rows, key):
+    """The numeric values of key in rows, or None when no row has the key (an older build: na, not 0)."""
+    if not any(key in r for r in rows):
+        return None
+    return [_num(r, key) for r in rows if key in r]
 
 
 def longest_run(flags):
@@ -135,6 +144,12 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None, 
     missing_no_pending = [_num(a, "missing_in_range") for a in no_pending if _num(a, "missing_in_range") > 0]
     triggers = [s.get("trigger") for s in syncs]
     warnings = sum(1 for ln in lines if STREAM_WARNING_TAG in ln)
+    wp_culled = _present(audits, "missing_wp_culled_in_range") if audit and audits else None
+    wp_age = _present(syncs, "wp_queue_age_max_s")
+    wp_viol = _present(syncs, "wp_violations")
+    wait_ms = _present(syncs, "wait_ms")
+    wp_total = _present(syncs, "wp_entities_total")
+    wp_nonstatic = _present(syncs, "wp_nonstatic_registered")
 
     return {
         "scenario": scenario,
@@ -183,6 +198,19 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None, 
         "spline_registered_max": int(max(g("spline_registered"), default=0)),
         "sync_triggers": ",".join("%s:%d" % (t, triggers.count(t)) for t in SYNC_TRIGGERS),
         "stream_warnings": warnings,
+        # 7b (World Partition culling of non-Static parts). Audit keys: na without audit lines or without the key.
+        # missing_wp_culled_in_range is counted on every audit line, pending or not (a known part in range).
+        "missing_wp_culled_in_range_frames": (None if wp_culled is None else sum(1 for v in wp_culled if v > 0)),
+        "missing_wp_culled_in_range_max": (None if wp_culled is None else int(max(wp_culled, default=0))),
+        # sync keys: queue age = the largest current value seen; violations = the sum of the per-line counts;
+        # deadline / reset syncs = lines with that trigger; wait_ms p95; scene totals p50 (current values per line)
+        "wp_queue_age_max_s": (None if wp_age is None else max(wp_age, default=0.0)),
+        "wp_violations_total": (None if wp_viol is None else int(sum(wp_viol))),
+        "wp_deadline_syncs": triggers.count("wp_deadline"),
+        "wp_reset_syncs": triggers.count("wp_reset"),
+        "wait_ms_p95": (None if wait_ms is None else percentile(wait_ms, 95)),
+        "wp_entities_total_p50": (None if wp_total is None else int(percentile(wp_total, 50))),
+        "wp_nonstatic_registered_p50": (None if wp_nonstatic is None else int(percentile(wp_nonstatic, 50))),
     }
 
 
@@ -204,6 +232,10 @@ _ORDER = [
     ("ghost_ism_max", "%d"), ("ghost_nonism_max", "%d"), ("cache_stale_max", "%d"),
     ("pending_ism_max", "%d"), ("pending_ism_run_max", "%d"), ("spline_registered_max", "%d"),
     ("sync_triggers", "%s"), ("stream_warnings", "%d"),
+    ("missing_wp_culled_in_range_frames", "%d"), ("missing_wp_culled_in_range_max", "%d"),
+    ("wp_queue_age_max_s", "%.2f"), ("wp_violations_total", "%d"), ("wp_deadline_syncs", "%d"),
+    ("wp_reset_syncs", "%d"), ("wait_ms_p95", "%.2f"), ("wp_entities_total_p50", "%d"),
+    ("wp_nonstatic_registered_p50", "%d"),
 ]
 
 

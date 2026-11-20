@@ -92,7 +92,10 @@ def test_line_order_and_keys():
         "sync_elapsed_ms_p50", "sync_elapsed_ms_p95", "tick_over_100ms", "tick_ms_p99", "tick_ms_max",
         "missing_steady_max", "steady_rows", "steady_valid", "missing_rows_no_pending", "missing_max_no_pending",
         "missing_ism_p95_no_pending_ism", "ghost_ism_max", "ghost_nonism_max", "cache_stale_max",
-        "pending_ism_max", "pending_ism_run_max", "spline_registered_max", "sync_triggers", "stream_warnings"]
+        "pending_ism_max", "pending_ism_run_max", "spline_registered_max", "sync_triggers", "stream_warnings",
+        "missing_wp_culled_in_range_frames", "missing_wp_culled_in_range_max", "wp_queue_age_max_s",
+        "wp_violations_total", "wp_deadline_syncs", "wp_reset_syncs", "wait_ms_p95", "wp_entities_total_p50",
+        "wp_nonstatic_registered_p50"]
 
 
 def _sync(elapsed_ms, trigger="time"):
@@ -231,3 +234,70 @@ def test_audit_run_without_audit_lines_stays_invalid(tmp_path, capsys):
     assert summarize.summarize_dir(d)["radius_mismatch"] == 1
     summarize.main([d])
     assert "status=invalid reason=radius_mismatch" in capsys.readouterr().out
+
+
+# ---- 7b: the World Partition culling of non-Static parts ----
+def test_missing_wp_culled_counted_while_pending():
+    # a known culled part in range is a miss even while jobs are pending: never dropped by the pending filters
+    lines = [_audit(1, pending=2, pending_ism=1, missing_in_range=1, missing_wp_culled_in_range=1),
+             _audit(2, missing_wp_culled_in_range=0)]
+    r = summarize.summarize_lines(lines, "S1", "Town15", 200.0)
+    assert r["missing_wp_culled_in_range_frames"] == 1
+    assert r["missing_wp_culled_in_range_max"] == 1
+    out = summarize.format_summary(r)
+    assert "missing_wp_culled_in_range_frames=1" in out and "missing_wp_culled_in_range_max=1" in out
+
+
+def test_missing_wp_culled_absent_key_is_na():
+    # audit lines from a build without the key: na, not 0
+    r = summarize.summarize_lines([_audit(1), _audit(2)], "S1", "Town15", 200.0)
+    out = summarize.format_summary(r)
+    assert "missing_wp_culled_in_range_frames=na" in out and "missing_wp_culled_in_range_max=na" in out
+
+
+def test_missing_wp_culled_without_audit_frames_is_na():
+    # audit on but no audit line: no all-zero success (and the run stays invalid through radius_mismatch)
+    r = summarize.summarize_lines([_sync(5.0, "init")], "S1", "Town15", 200.0)
+    assert r["frames"] == 0 and r["radius_mismatch"] == 1
+    assert r["missing_wp_culled_in_range_frames"] is None and r["missing_wp_culled_in_range_max"] is None
+
+
+def _wp_sync(elapsed_ms, trigger="time", age=0.4, viol=0, wait=60.0, total=1000, nonstatic=200):
+    return ("LogCarlaRGL: rgl_scene_sync t=1.000 trigger=%s scanned=5 elapsed_ms=%.2f entities=10 meshes=3 "
+            "skel_ms=0.00 wait_ms=%.2f wait_api=rgl_entity_create wp=1 wp_queue_age_max_s=%.2f wp_violations=%d "
+            "wp_entities_total=%d wp_nonstatic_registered=%d" % (trigger, elapsed_ms, wait, age, viol, total, nonstatic))
+
+
+def test_wp_sync_keys():
+    lines = [_wp_sync(5.0, "init", age=0.0, viol=0, wait=1.0, total=900, nonstatic=100),
+             _wp_sync(6.0, "time", age=0.7, viol=2, wait=60.0, total=1000, nonstatic=200),
+             _wp_sync(7.0, "wp_deadline", age=0.2, viol=1, wait=70.0, total=1100, nonstatic=300),
+             _wp_sync(8.0, "wp_reset", age=0.1, viol=0, wait=65.0, total=1200, nonstatic=400)]
+    r = summarize.summarize_lines(lines, "S1", "Town15", 200.0, audit=False)
+    assert r["wp_queue_age_max_s"] == 0.7
+    assert r["wp_violations_total"] == 3
+    assert r["wp_deadline_syncs"] == 1 and r["wp_reset_syncs"] == 1
+    assert r["wait_ms_p95"] == 70.0
+    assert r["wp_entities_total_p50"] == 1000 and r["wp_nonstatic_registered_p50"] == 200
+    assert r["sync_triggers"] == "init:1,time:1,distance:0,level:0"   # the older key is unchanged
+    assert r["missing_wp_culled_in_range_frames"] is None              # no audit (--no-audit run)
+
+
+def test_wp_sync_keys_absent_are_na_and_counts_zero():
+    r = summarize.summarize_lines([_sync(5.0, "init"), _sync(6.0)], "S1", "Town15", 200.0, audit=False)
+    out = summarize.format_summary(r)
+    for k in ("wp_queue_age_max_s", "wp_violations_total", "wait_ms_p95", "wp_entities_total_p50", "wp_nonstatic_registered_p50"):
+        assert "%s=na" % k in out
+    assert "wp_deadline_syncs=0" in out and "wp_reset_syncs=0" in out
+
+
+def test_steady_excludes_rows_with_the_wp_queue_waiting():
+    # 7b: the culling's queue not yet empty (wp_pending > 0) is no steady row, like pending / pending_ism
+    lines = [_audit(1, wp_pending=1441, missing_steady=1448, missing_in_range=1441),
+             _audit(2, wp_pending=0, missing_steady=0)]
+    r = summarize.summarize_lines(lines, "S1p", "Town15", 200.0)
+    assert r["steady_rows"] == 1
+    assert r["missing_steady_max"] == 0
+    # older lines without the key count as 0 (still steady)
+    r2 = summarize.summarize_lines([_audit(1, missing_steady=2)], "S1p", "Town15", 200.0)
+    assert r2["steady_rows"] == 1 and r2["missing_steady_max"] == 2

@@ -18,6 +18,10 @@
 //     (on the following Updates, capped per Update), instead of choosing them once at registration
 //   - On World Partition maps, warns once per sensor whose range stays not streamed in (the scene follows the
 //     loaded world; what is not loaded is not in it)
+//   - On World Partition maps only (rgl.Scene.WpMovableCulling), non-Static static mesh parts that are not vehicle,
+//     walker, physics or sensor-carrier parts and have not been seen moving are chosen against the union of the sensor
+//     spheres with a speed-dependent margin, per ISM instance, and created through a budgeted queue with a deadline.
+//     Other maps keep the original rule (every non-Static part is registered at any distance).
 
 #pragma once
 
@@ -37,6 +41,8 @@
 #include "Components/SkinnedMeshComponent.h"   // EVisibilityBasedAnimTickOption
 #include "Containers/BitArray.h"
 #include "Math/Sphere.h"
+#include "HAL/IConsoleManager.h"               // EConsoleVariableFlags (ApplyWpSceneSwitches)
+#include "Misc/Optional.h"
 #include <util/ue-header-guard-end.h>
 
 #include "RGLSelfCutout.h"
@@ -82,6 +88,10 @@ struct FRGLSceneAuditResult
     int32 SplineRegistered = 0;  // registered entities whose component is a USplineMeshComponent (uploaded undeformed)
     int32 CacheStale = 0;        // MeshCache entries whose key no longer resolves (the asset was collected or is garbage)
     int32 PendingIsm = 0;        // Static ISM groups waiting for their instances to be re-evaluated against the sensor spheres
+    int32 MissingWpCulledInRange = 0; // World Partition culling of non-Static parts: a part (ISM: instance) that an earlier
+                                 // sync already looked at with the distance rule, inside some sensor's range now, without
+                                 // an entity (pending, partial or being promoted counts too); part of MissingInRange
+    int32 WpPending = 0;         // jobs in the culling's queue (current); a line with jobs waiting is not steady (D13)
 };
 
 /// Optional output of FRGLSceneManager::AuditScene: the name rule over the whole loaded world (every registered static
@@ -135,6 +145,23 @@ public:
     void RegisterSensor(const void* SensorId, const FVector& Position, float DistanceCm, double Now)
     {
         FSensorRegistration& S = RegisteredSensors.FindOrAdd(SensorId);
+        // Pose history (read only by the World Partition culling of non-Static parts: refresh gap and speed).
+        if (S.bPoseValid)
+        {
+            const double Gap = Now - S.LastUpdateTime;
+            if (Gap > 0.0)
+            {
+                S.LastRefreshGapSeconds = Gap;
+                S.ObservedSpeedCmps = static_cast<float>(FVector::Dist(Position, S.Position) / Gap);
+                S.bRefreshed = true;
+            }
+            else if (Gap < 0.0)
+            {
+                S.bTimeRewound = true;
+                S.ObservedSpeedCmps = 0.0f;
+            }
+        }
+        S.bPoseValid = true;
         S.Position = Position;
         S.RegistrationDistanceCm = FMath::Max(5000.0f, DistanceCm);
         S.LastUpdateTime = Now;
@@ -157,6 +184,67 @@ public:
 
     /// Remove a sensor when its session is destroyed (defined in .cpp; tears skeletal state down when none remain).
     void UnregisterSensor(const void* SensorId);
+
+    // ---- World Partition culling of non-Static parts (rgl.Scene.WpMovableCulling; README_RGL "non-Static parts") ----
+
+    /// The clock the periodic sync runs on: the Update clock adds the world dt once per scene Update (the original
+    /// timer), the simulation clock follows the simulation time.
+    enum class EWpCullClock : uint8 { UpdateClock, SimClock };
+    /// How long a part chosen out by distance may go without being looked at again and registered (seconds, sim).
+    struct FWpCullHorizon
+    {
+        double SyncBoundSeconds = 0.0;   // T_sync_max: the latest next sync after a culling sync
+        double HorizonSeconds = 0.0;     // H = T_sync_max + L_create + U
+    };
+    /// Update clock: T_sync_max = ceil(I / d) * max(U, d) + U; simulation clock: I + U. H = T_sync_max + L_create + U.
+    /// I = the sync interval the trigger uses, d = the world dt, U = rgl.Scene.MovableMaxUpdateGapSeconds,
+    /// L_create = rgl.Scene.MovableCreateLatencySeconds. A dt that is not positive and finite is taken as U.
+    static FWpCullHorizon ComputeWpCullHorizon(EWpCullClock Clock, double IntervalSeconds, double WorldDtSeconds,
+                                               double MaxUpdateGapSeconds, double CreateLatencySeconds);
+    /// M = max(MinMarginM, (V_sensor + V_object) * H), metres.
+    static double ComputeWpMarginM(double HorizonSeconds, double SensorSpeedMps, double ObjectSpeedMps, double MinMarginM);
+
+    /// The culling applies: rgl.Scene.WpMovableCulling = 1 and World has a World Partition (the test seam
+    /// WpMapOverride_ForTest replaces the second part only).
+    bool UsesWpNonStaticCulling(const UWorld* World) const;
+
+    /// Why a non-Static static mesh component keeps its original registration (any distance) on a World Partition map.
+    /// None = the distance rule chooses it. Looked up through the owner and attachment chain: a Pawn, an actor with a
+    /// movement component or a skeletal mesh component, a part (or parent) simulating physics, a sensor's carrier.
+    enum class EWpProtect : uint8 { None, Pawn, MovementComponent, Skeletal, Physics, SensorParent };
+    /// bRemember = false (the read-only audit): a verdict is not added to the sticky set (a part once protected stays so).
+    EWpProtect ClassifyWpProtection(const UStaticMeshComponent* Component, bool bRemember = true) const;
+    static const TCHAR* WpProtectName(EWpProtect Reason);
+
+    /// The -rgl-scene-<knob>= switches of the World Partition culling, read from CommandLine (the scene switches call it
+    /// once with the process command line and ECVF_SetByCommandline). Sets the rgl.Scene.* CVars with SetBy.
+    static void ApplyWpSceneSwitches(const TCHAR* CommandLine, EConsoleVariableFlags SetBy);
+
+    /// Wall time of the first RGL API call made between Arm and Disarm (wait_ms= / wait_api= of the sync line): the
+    /// call that waits for the previous raytrace graph, plus its own work. Later calls are not timed.
+    struct FRGLFirstCallProbe
+    {
+        double (*Clock)() = &FPlatformTime::Seconds;
+        bool bArmed = false;
+        double Ms = 0.0;
+        const TCHAR* Api = TEXT("none");
+        void Arm() { bArmed = true; Ms = 0.0; Api = TEXT("none"); }
+        void Disarm() { bArmed = false; }
+        template <class TFn>
+        auto Call(const TCHAR* InApi, TFn&& Fn) -> decltype(Fn())
+        {
+            if (!bArmed)
+            {
+                return Fn();
+            }
+            bArmed = false;
+            const double T0 = Clock();
+            auto Result = Fn();
+            Ms = (Clock() - T0) * 1000.0;
+            Api = InApi;
+            return Result;
+        }
+    };
 
     // ---- Scene audit (read-only) ----
 
@@ -257,6 +345,42 @@ public:
     int32 GetSkeletalCutoutRemovedTriangles_ForTest(const USkeletalMeshComponent* Comp) const;
     /// Number of cutout meshes built since this instance was created.
     int32 GetSkeletalCutoutBuildCount_ForTest() const { return CutoutBuildCount; }
+
+    // ---- World Partition culling of non-Static parts ----
+    /// Replaces "World has a World Partition" in UsesWpNonStaticCulling (unset = ask the world).
+    TOptional<bool> WpMapOverride_ForTest;
+    /// Replaces World->GetDeltaSeconds() in UpdateStep (the sync timer and the horizon); unset = the world's dt.
+    TOptional<float> WorldDtOverride_ForTest;
+    struct FWpScope_ForTest
+    {
+        FRGLSceneManager& SM; TOptional<bool> OldMap; TOptional<float> OldDt;
+        FWpScope_ForTest(FRGLSceneManager& InSM, bool bWp, float Dt) : SM(InSM), OldMap(InSM.WpMapOverride_ForTest), OldDt(InSM.WorldDtOverride_ForTest)
+        { SM.WpMapOverride_ForTest = bWp; SM.WorldDtOverride_ForTest = Dt; }
+        ~FWpScope_ForTest() { SM.WpMapOverride_ForTest = OldMap; SM.WorldDtOverride_ForTest = OldDt; }
+    };
+    int32 GetWpCandidateCount_ForTest() const { return WpCandidates.Num(); }
+    int32 GetWpPendingJobs_ForTest() const { return WpJobs.Num(); }
+    double GetWpQueueAgeMax_ForTest() const;
+    bool IsWpCandidate_ForTest(const UStaticMeshComponent* Comp) const { return WpCandidates.Contains(FObjectKey(Comp)); }
+    bool IsWpPromoted_ForTest(const UStaticMeshComponent* Comp) const;
+    bool IsEntityRegistered_ForTest(const UStaticMeshComponent* Comp) const { return EntityMap.Contains(const_cast<UStaticMeshComponent*>(Comp)); }
+    /// The ISM group's entities, indices, mask and mesh references agree (no duplicate index, mask = indices).
+    bool IsIsmGroupConsistent_ForTest(const UInstancedStaticMeshComponent* Comp) const;
+    int32 GetMeshRefCount_ForTest(const UStaticMesh* Mesh) const { return MeshRefCounts.FindRef(FObjectKey(Mesh)); }
+    /// rgl_scene_wp_cull_violation lines by kind (update_gap, pose_gap, sensor_speed, object_speed, queue_age, late_create).
+    int32 GetWpViolations_ForTest(const TCHAR* Kind) const { return WpViolationCounts.FindRef(FString(Kind)); }
+    int32 WpDeadlineSyncs_ForTest() const { return WpDeadlineSyncs; }
+    /// Forget the previous Update's sim time (the tests' clocks do not continue one another).
+    void ResetWpUpdateClock_ForTest() { WpPrevUpdateSimTime = -1.0; bWpStartupSceneIntervalPending = false; }
+    /// The load radius (cm) the culling uses for Sensor at the last culling sync (-1 = no such sensor or no sync yet).
+    float GetWpLoadRadiusCm_ForTest(const void* SensorId) const;
+    /// The last rgl_scene_config line printed by this instance.
+    FString LastConfigLine_ForTest;
+    /// Entities added / removed by the WP queue in the last Update.
+    int32 WpAddedLastUpdate_ForTest = 0;
+    int32 WpRemovedLastUpdate_ForTest = 0;
+    /// The wait probe of this instance (its clock can be replaced).
+    FRGLFirstCallProbe& GetWaitProbe_ForTest() { return WaitProbe; }
 #endif
 
 private:
@@ -642,6 +766,17 @@ private:
         float      CutoutMinElevationDeg = 0.0f;
         float      CutoutMaxElevationDeg = 0.0f;
         FTransform CutoutSensorToVehicle = FTransform::Identity;   // taken in the same tick as the vehicle pose
+        // Pose history (RegisterSensor), read by the World Partition culling of non-Static parts only.
+        bool    bPoseValid = false;                // a pose was registered before
+        bool    bRefreshed = false;                // a refresh with a later time since the culling last looked
+        bool    bTimeRewound = false;              // a refresh with an earlier time since the culling last looked
+        // R7: armed exactly once by this sensor's first WP init sync. Later syncs never re-arm it.
+        double  WpInitSyncSimTime = -1.0;
+        double  WpInitPoseTime = -1.0;
+        bool    bWpStartupPosePending = false;
+        bool    bWpStartupUpdatePending = false;
+        double  LastRefreshGapSeconds = 0.0;       // sim time between the last two refreshes
+        float   ObservedSpeedCmps = 0.0f;          // distance / time between the last two refreshes
     };
     /// Key = sensor id (session handle). Pointer key uses pointer hashing.
     TMap<const void*, FSensorRegistration> RegisteredSensors;
@@ -722,6 +857,148 @@ private:
     /// ConsumeRelevantLevelAdds once the interval allows a look.
     TArray<TWeakObjectPtr<ULevel>> PendingAddedLevels;
     TArray<UStaticMeshComponent*> LevelScanComponents;   // ConsumeRelevantLevelAdds' component array, reused
+
+    // ---- World Partition culling of non-Static parts (7b) ----
+    /// UsesWpNonStaticCulling of the Update's world, decided at the start of each Update (before the first scan).
+    bool bWpActive = false;
+    /// A non-Static part the distance rule chooses (not protected). Kept from one sync to the next (FObjectKey + weak
+    /// pointer) so that an ISM with no entity stays known; dropped when a sync no longer sees it.
+    struct FWpCandidate
+    {
+        TWeakObjectPtr<UStaticMeshComponent> Component;
+        bool   bIsm = false;
+        bool   bMoved = false;              // seen moving (transform or velocity): never chosen out by distance again
+        uint32 Generation = 0;              // bumped when the mesh or the instance layout changes (old jobs drop out)
+        FObjectKey MeshKey;                 // the mesh when the transforms below were recorded
+        int32  InstanceCount = 0;           // ISM: instances when the transforms were recorded
+        double SeenSimTime = 0.0;           // sim time of the sync that recorded the transforms
+        uint64 SeenSyncSerial = 0;          // that sync
+        FTransform Transform;               // the component transform at that sync
+        double WantSince = -1.0;            // regular: since when it is wanted without an entity (-1 = not waiting)
+        bool   bCulledAtSync = false;       // regular: outside every load sphere without an entity at that sync
+        /// ISM, per instance: its local matrix at that sync (an instance whose matrix and component transform are
+        /// unchanged has not moved; only changed ones are read again), its sphere (W < 0 = never gets an entity), and
+        /// since when it is wanted without an entity.
+        TArray<decltype(FInstancedStaticMeshInstanceData::Transform)> InstanceLocal;
+        TArray<FSphere3f> InstanceSpheres;
+        TArray<double> InstanceWantSince;
+        TBitArray<> InstanceCulled;         // ISM, per instance: as bCulledAtSync
+    };
+    TMap<FObjectKey, FWpCandidate> WpCandidates;
+    /// One entity to add or remove (a regular component, or one ISM instance). Rebuilt by every culling sync from
+    /// WpCandidates (the wait is kept in the candidate, not reset by a sync); drained by every Update under
+    /// rgl.Scene.MaxMovableEntityChangesPerUpdate / MovableEntityBudgetMs, except R6 raw-range discovery creates.
+    struct FWpJob
+    {
+        TWeakObjectPtr<UStaticMeshComponent> Component;
+        FObjectKey Key;
+        int32  Instance = INDEX_NONE;       // ISM instance; INDEX_NONE = the regular component
+        uint32 Generation = 0;
+        bool   bAdd = true;
+        bool   bInRangeAtDiscovery = false; // R6: raw-range creates finish this Update without either budget
+        double SinceSimTime = 0.0;          // adds: wanted since (sim)
+        double ReachSimTime = 0.0;          // adds: earliest time its bounds could reach some sensor's range (order)
+        float  GapCm = 0.0f;                // distance of its bounds to the nearest sensor
+        bool   bAgeReported = false;
+        /// The contract covers it: the part was known at an earlier sync (same layout) and this queue was not built by
+        /// a sync after a discontinuity (a new sensor, a pose jump, time going back). Only covered jobs can break
+        /// the L_create and late-creation contracts (a part found in range for the first time is the audit's miss).
+        bool   bCovered = false;
+        /// The late-creation contract: the part was outside every load sphere without an entity at the previous sync
+        /// (the margin protects exactly those); a part first seen inside a range (a cell streamed in) is the audit's miss.
+        bool   bLateCovered = false;
+    };
+    TArray<FWpJob> WpJobs;
+    TArray<FWpJob> ScanWpJobs;              // the next queue (swapped with WpJobs), allocation kept
+    double WpVisitRegSeconds = 0.0;         // RGL calls inside the candidate visits (a rebuilt group), summed
+    double WpSyncCheckMs = 0.0;             // this sync's candidate visits
+    /// One-entry cache of the actor part of ClassifyWpProtection within one sync (components of an actor come together).
+    mutable const AActor* WpCachedActor = nullptr;
+    mutable uint64 WpCachedActorSerial = 0;
+    mutable EWpProtect WpCachedActorVerdict = EWpProtect::None;
+    /// Parts once protected stay protected (moved to the original path for good), with the first reason.
+    mutable TMap<FObjectKey, EWpProtect> WpStickyProtected;
+    /// ISM candidates seen moving: their registered instances follow the instance transforms every Update.
+    TArray<FObjectKey> WpMovedIsm;
+    // Contract bookkeeping
+    bool   bWpSyncDiscontinuous = false;    // the running sync follows a new sensor, a pose jump or time going back
+    bool   bWpSyncValid = false;            // a culling sync ran (the deadline below is armed)
+    double WpLastSyncSimTime = 0.0;         // sim time of the last culling sync
+    double WpAssumedSyncSeconds = 0.0;      // T_sync_max that sync assumed (the deadline)
+    double WpHorizonSeconds = 0.0;          // H of that sync
+    double WpMarginCm = 0.0;                // M of that sync
+    double WpPrevUpdateSimTime = -1.0;      // sim time of the previous Update (U check)
+    bool bWpStartupSceneIntervalPending = false; // R10: every sensor at the preceding interval start was newly initialized
+    struct FWpKnobs
+    {
+        int32 Enable = 1; float MinMarginM = 20.f; float SensorSpeedMps = 50.f; float ObjectSpeedMps = 50.f;
+        float MaxUpdateGapS = 0.1f; float CreateLatencyS = 1.0f; float IntervalS = 1.0f;
+        bool operator==(const FWpKnobs& O) const
+        {
+            return Enable == O.Enable && MinMarginM == O.MinMarginM && SensorSpeedMps == O.SensorSpeedMps &&
+                   ObjectSpeedMps == O.ObjectSpeedMps && MaxUpdateGapS == O.MaxUpdateGapS &&
+                   CreateLatencyS == O.CreateLatencyS && IntervalS == O.IntervalS;
+        }
+        bool operator!=(const FWpKnobs& O) const { return !(*this == O); }
+    };
+    FWpKnobs CurrentWpKnobs() const;
+    FWpKnobs WpSyncKnobs;                   // the knobs of the last culling sync (a live change forces a sync)
+    // Telemetry since the last rgl_scene_sync line (wp_* keys)
+    int32  WpCheckN = 0;                    // candidates looked at by the syncs
+    int32  WpCheckInstances = 0;            // ISM instances among them
+    double WpCheckMs = 0.0;                 // their time, summed
+    double WpCheckMaxMs = 0.0;              // the longest single sync's look
+    int32  WpEntityAdded = 0;
+    int32  WpEntityRemoved = 0;
+    double WpEntityMs = 0.0;
+    // R6: this Update only, including mesh upload/API wait; unlike wp_entity_* these are not interval sums.
+    int32  WpInRangeAddedLastUpdate = 0;
+    double WpInRangeMsLastUpdate = 0.0;
+    int32  WpViolationsSinceLog = 0;
+    int32  WpDeadlineSyncs = 0;             // syncs forced by the deadline (whole life of the instance)
+    TMap<FString, int32> WpViolationCounts; // by kind (whole life)
+    /// The wait probe of the sync's measured interval (wait_ms=).
+    FRGLFirstCallProbe WaitProbe;
+    /// Logged values of the WP knobs (rgl_scene_config).
+    FWpKnobs LoggedWpKnobs;
+    int32 LoggedWpMaxChanges = -2;
+    float LoggedWpBudgetMs = -2.0f;
+    int32 LoggedWpMap = -1;
+
+    /// World dt of this Update (the test seam may replace it).
+    float WorldDeltaSeconds(const UWorld* World) const;
+    /// Per Update (O(sensors)): the U, refresh and speed contracts, and whether a WP sync is due now (deadline, or a
+    /// reset: time going back, a pose jump, a knob change). bOutJump: a pose jump or time going back (a discontinuity).
+    void WpCheckContracts(const UWorld* World, bool& bOutDeadline, bool& bOutReset, bool& bOutJump);
+    void WpViolation(const TCHAR* Kind, double Value, double Bound);
+    /// Start of a culling sync: horizon, margin, deadline (Dt = this Update's world dt).
+    void WpBeginSync(float Dt);
+    /// The scan met a candidate: record, check for motion, choose its entities, queue the changes.
+    void WpVisitCandidate(UStaticMeshComponent* Comp, UInstancedStaticMeshComponent* Ism);
+    /// End of the culling sync's scan: candidates not seen are dropped, the queue is sorted.
+    void WpEndSync();
+    /// Drop every WP state (a live switch to the original rule, a world that no longer culls). Partial ISM groups leave
+    /// the scene so that the original rule registers them whole.
+    void WpTeardown();
+    /// One budgeted step of the queue (bUnlimited: everything).
+    void WpDrain(bool bUnlimited);
+    /// Registered instances of moved ISM candidates follow their instance transforms (every Update, after the time).
+    void WpUpdateMovedInstanceTransforms();
+    /// The load / unload radius (cm) of a sensor for the culling.
+    float WpLoadRadiusCm(const FSensorRegistration& S) const;
+    bool WpInAnyLoadSphere(const FVector& CenterCm, float RadiusCm) const;
+    bool WpInAnyUnloadSphere(const FVector& CenterCm, float RadiusCm) const;
+    /// Earliest sim time the sphere could touch some sensor's range at the bounded closing speed.
+    double WpReachSimTime(const FVector& CenterCm, float RadiusCm) const;
+    /// The sphere of an ISM instance on the new path: the mesh bounds' origin through the instance transform, and the
+    /// mesh's bounds radius times the instance's largest absolute scale.
+    static FSphere WpInstanceSphere(const UStaticMesh* Mesh, const FTransform& InstanceTransform);
+    /// Add / remove one entity of the queue. False = not done (already done, or could not be done now).
+    bool WpAddRegular(UStaticMeshComponent* Comp);
+    bool WpAddInstance(UInstancedStaticMeshComponent* Comp, int32 Instance, const FTransform& InstanceTransform);
+    bool WpRemoveInstance(UInstancedStaticMeshComponent* Comp, int32 Instance);
+    /// Totals for the sync line: entities of every kind (regular + ISM instances + live skeletal), non-Static ones.
+    void CountSceneEntities(int32& OutTotal, int32& OutNonStatic) const;
 
     // ---- Static singleton storage ----
     static TMap<UWorld*, FRGLSceneManager*> Instances;
