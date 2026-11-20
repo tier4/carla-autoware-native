@@ -92,7 +92,7 @@ struct FRGLSceneAuditResult
     int32 MissingWpCulledInRange = 0; // World Partition culling of non-Static parts: a part (ISM: instance) that an earlier
                                  // sync already looked at with the distance rule, inside some sensor's range now, without
                                  // an entity (pending, partial or being promoted counts too); part of MissingInRange
-    int32 WpPending = 0;         // jobs in the culling's queue (current); a line with jobs waiting is not steady (D13)
+    int32 WpPending = 0;         // jobs in the culling's queue (current); a line with jobs waiting does not count as steady
 };
 
 /// Optional output of FRGLSceneManager::AuditScene: the name rule over the whole loaded world (every registered static
@@ -209,7 +209,9 @@ public:
         /// Every member compared (a member added later cannot be left out of the comparison).
         bool operator==(const FSceneKnobs& O) const = default;
     };
-    /// The rgl.Scene.* CVars through their range checks (an invalid value: its default, with one warning line).
+    /// The rgl.Scene.* CVars through their range checks. An invalid value of the sync, range-edge and World Partition
+    /// knobs gives one warning line and its default (rgl.Scene.SyncIntervalSeconds below 0.1: 0.1); the five older
+    /// create/unload/idle/ISM knobs are clamped to their range without a warning.
     static FSceneKnobs ReadSceneKnobs();
     /// The rgl_scene_config line (one grep-friendly key=value line): the knobs at SimTime; sync_clock=sim|update.
     static FString FormatSceneConfigLine(double SimTime, const FSceneKnobs& K);
@@ -290,7 +292,7 @@ public:
     /// OutExtras (optional) gets the name rule's world-wide counts and mesh lists (see FRGLSceneAuditExtras).
     FRGLSceneAuditResult AuditScene(UWorld* World, FRGLSceneAuditExtras* OutExtras = nullptr) const;
 
-    // ---- The name rule (N1) ----
+    // ---- The name rule ----
 
     /// Components whose bounds radius exceeds this (2 km) are left out when the old rule's names match (size guard).
     static constexpr float HugeSkyRadiusCm = 200000.0f;
@@ -306,7 +308,8 @@ public:
     /// Never set (or negative): RegistrationDistanceCm minus the 20 m unload margin.
     void SetSensorAuditRange(const void* SensorId, float RangeCm);
 
-    /// Root actor of the sensor's attach chain (nullptr = not attached), for parent_stream_radius_m.
+    /// Root actor of the sensor's attach chain (nullptr = not attached): parent_stream_radius_m and the stream warning,
+    /// and, on World Partition maps, the sensor carrier whose parts keep their registration at any distance.
     /// Call after RegisterSensor().
     void SetSensorAuditParent(const void* SensorId, AActor* RootParent);
 
@@ -350,9 +353,9 @@ public:
     /// Static syncs run by Update() / Update_ForTest(), and the trigger name of the last one.
     int32 SyncCount_ForTest = 0;
     FString LastSyncTrigger_ForTest;
-    /// The last rgl_scene_sync line printed by Update() / Update_ForTest() (P7: the tests read its keys).
+    /// The last rgl_scene_sync line printed by Update() / Update_ForTest() (the tests read its keys).
     FString LastSyncLine_ForTest;
-    /// Entries of the per-mesh memo of the sky-name verdict (P7).
+    /// Entries of the per-mesh memo of the sky-name verdict.
     int32 GetSkyVerdictCount_ForTest() const;
     /// Static meshes uploaded to RGL (rgl_mesh_create) by this instance.
     int32 MeshUploads_ForTest = 0;
@@ -361,9 +364,9 @@ public:
     void AddIdleMeshEntry_ForTest(const UStaticMesh* Asset);
     /// RGL entities of Comp's ISM group (0 = no group).
     int32 GetIsmEntityCount_ForTest(const UInstancedStaticMeshComponent* Comp) const;
-    /// Levels waiting in the level-added list (P5).
+    /// Levels waiting in the level-added list.
     int32 GetPendingAddedLevelCount_ForTest() const { return PendingAddedLevels.Num(); }
-    /// rgl_scene_stream_warning lines printed by this instance (P4).
+    /// rgl_scene_stream_warning lines printed by this instance.
     int32 StreamWarnings_ForTest = 0;
     /// CheckStreamCoverage at SimTime with the World Partition answer given instead of asked: bIsWp = false is a map
     /// without World Partition (nothing is counted), bCovered = every sensor's range sphere is streamed in. The rest
@@ -453,7 +456,7 @@ private:
     /// is not registered (its level is being streamed out, or its owner unregistered it) is no candidate.
     /// The name rule leaves out a component whose mesh name is a sky dome's (IsSkyDomeMeshName), or whose bounds
     /// radius exceeds HugeSkyRadiusCm and whose names the old rule matches (IsLegacySkyName).
-    /// P7: the dome-word verdict belongs to the mesh and is remembered per mesh (SkyVerdictByMesh), so a sync builds no
+    /// The dome-word verdict belongs to the mesh and is remembered per mesh (SkyVerdictByMesh), so a sync builds no
     /// name string per component; the size guard is still judged per component (its names are built only for a
     /// component wider than 2 km). bRememberVerdict = false (the read-only audit): a verdict not remembered yet is
     /// worked out without adding it.
@@ -515,7 +518,7 @@ private:
         int32 Queued = 0;         // components waiting for a new mesh or idle reactivation
         int32 Removed = 0;        // regular + ISMC components unregistered
         int32 RangeSkipped = 0;   // components outside every sensor's registration sphere
-        // P7: where the sync's wall time goes (scan_ms, reg_ms, remove_ms, skel_ms on the line).
+        // Where the sync's wall time goes (scan_ms, reg_ms, remove_ms, skel_ms on the line).
         double ScanMs = 0.0;      // the actor scan (static candidates, and the skeletal candidates of the same actors),
                                   // without the RGL calls it makes (RegMs)
         double RegMs = 0.0;       // RGL registrations during the scan (meshes with live entities, rebuilt ISM groups)
@@ -546,7 +549,7 @@ private:
     /// ms do not count the in-range creations. Removal is never deferred; only creation is.
     void DrainPendingCreates(bool bUnlimited, FDrainStats& OutStats);
 
-    /// Per-Update counters of one step of the ISM re-evaluation (P3).
+    /// Per-Update counters of one step of the ISM re-evaluation.
     struct FIsmReevalStats
     {
         int32 Added = 0;     // instance entities created
@@ -554,11 +557,12 @@ private:
         double Ms = 0.0;     // wall time of the step
     };
 
-    /// P3: work through PendingIsmReevals (nearest group first). Per group: add the entities of instances that reach R
+    /// Work through PendingIsmReevals (nearest group first). Per group: add the entities of instances that reach R
     /// and have none, then remove those of instances beyond R x rgl.Scene.UnloadDistanceFactor + the unload margin; the
     /// group's InstanceSpheres decide, an instance's transform is read only to create its entity. At most MaxChanges
     /// additions plus removals (0 = unlimited); a group the cap stops inside stays at the head for the next call. A group
-    /// left without entities leaves the scene. Update() calls it on the Updates without a sync (D7).
+    /// left without entities leaves the scene. Update() calls it on the Updates without a sync, and, when the previous
+    /// Update synced too (every Update syncs), on a sync Update after its sync line (see bIsmTurnSinceSync).
     void DrainIsmReevaluations(int32 MaxChanges, FIsmReevalStats& OutStats);
 
     /// Distance from the nearest registered sensor to a bounding sphere's surface (cm). Sort key of the queue.
@@ -634,7 +638,7 @@ private:
     /// The skeletal sync with its own actor scan (initialization, the test seam).
     void  SyncSkeletalComponents(UWorld* World);
     /// The skeletal sync on Candidates: every skeletal mesh component of the scanned actors, in scan order.
-    /// SyncWorldComponents gathers them in its own actor scan (P7: one scan of the world per sync, not two).
+    /// SyncWorldComponents gathers them in its own actor scan (one scan of the world per sync, not two).
     void  SyncSkeletalCandidates(const TArray<USkeletalMeshComponent*>& Candidates);
     void  TeardownSkeletal();
     void  ApplyTickPolicy(USkeletalMeshComponent* Comp, FSkeletalEntityInfo& Info, bool bEnable);
@@ -664,7 +668,7 @@ private:
     /// RGL scene handle (nullptr = default scene).
     rgl_scene_t Scene = nullptr;
 
-    /// Cache: static mesh asset -> rgl_mesh_t (avoids duplicate uploads), keyed by FObjectKey (P2): an asset that takes
+    /// Cache: static mesh asset -> rgl_mesh_t (avoids duplicate uploads), keyed by FObjectKey: an asset that takes
     /// the address of a collected one has another key (GC serial), so it never gets that one's geometry. The mesh
     /// cache, the reference counts and the idle list all use the key; nothing rebuilds it from an address.
     /// Invariant: every entry is either referenced (MeshRefCounts > 0) or listed in IdleMeshLru.
@@ -743,7 +747,7 @@ private:
         TArray<FTransform> InstanceWorldTransforms; // Per entity: the instance's world transform when its entity was made
         /// Static groups only: one sphere per instance of the component (index = instance index), taken at registration:
         /// the instance's location and the mesh's bounds radius times its largest absolute scale. W < 0 = never gets an
-        /// entity (zero scale, or no transform). The re-evaluation (P3) decides with these.
+        /// entity (zero scale, or no transform). The re-evaluation (DrainIsmReevaluations) decides with these.
         TArray<FSphere3f> InstanceSpheres;
         /// Per instance of the component: true while the instance has an entity in Entities.
         TBitArray<> RegisteredMask;
@@ -754,7 +758,7 @@ private:
     bool ReevaluateIsmGroup(UInstancedStaticMeshComponent* Component, FISMCEntityGroup& Group, int32 MaxChanges,
                             int32& InOutChanges, FIsmReevalStats& OutStats);
 
-    /// P3: Static ISM groups waiting to be re-evaluated against the sensor spheres, nearest to any sensor first. Every
+    /// Static ISM groups waiting to be re-evaluated against the sensor spheres, nearest to any sensor first. Every
     /// sync queues all registered Static groups again (rebuilt, like PendingCreates); DrainIsmReevaluations empties it.
     struct FPendingIsmReeval
     {
@@ -763,8 +767,12 @@ private:
     };
     TArray<FPendingIsmReeval> PendingIsmReevals;
     TArray<int32> IsmScanIndices;   // CollectInRangeInstances' output in the sync's scan, reused
+    /// The re-evaluation had its turn since the last sync: an Update without a sync ran (or the test seam drained it in
+    /// full). A sync Update that finds it false (the previous Update synced too) takes the capped step itself, so that
+    /// the re-evaluation also progresses when every Update syncs (an Update period at or above the sync interval).
+    bool bIsmTurnSinceSync = true;
 
-    // ---- P7: the sync's scan, kept between syncs so that a sync allocates nothing in steady state ----
+    // ---- The sync's scan, kept between syncs so that a sync allocates nothing in steady state ----
     /// Name-rule verdict per static mesh (true = a sky dome's mesh name), worked out once per mesh. Entries whose key no
     /// longer resolves are dropped at each sync. Filled by the sync paths only (the audit reads it).
     mutable TMap<FObjectKey, bool> SkyVerdictByMesh;
@@ -804,7 +812,7 @@ private:
         float   AuditRangeCm = -1.0f;              // < 0 = RegistrationDistanceCm - UnregistrationHysteresisCm
         // Scene audit (SetSensorAuditParent).
         TWeakObjectPtr<AActor> AuditParent;        // root of the sensor's attach chain; null = not attached
-        // Stream coverage warning (P4, CheckStreamCoverage).
+        // Stream coverage warning (CheckStreamCoverage).
         double  UncoveredSinceSimTime = -1.0;      // sim time of the first check of the current not-streamed-in run; -1 = none
         bool    bStreamWarned = false;             // the rgl_scene_stream_warning line was printed for this sensor
         // Self cutout (SetSensorSelfCutout); CutoutRadiusCm <= 0 = off.
@@ -817,7 +825,8 @@ private:
         bool    bPoseValid = false;                // a pose was registered before
         bool    bRefreshed = false;                // a refresh with a later time since the culling last looked
         bool    bTimeRewound = false;              // a refresh with an earlier time since the culling last looked
-        // R7: armed exactly once by this sensor's first WP init sync. Later syncs never re-arm it.
+        // Start-up exemption of the U contract: armed exactly once by this sensor's first World Partition init sync.
+        // Later syncs never re-arm it.
         double  WpInitSyncSimTime = -1.0;
         double  WpInitPoseTime = -1.0;
         bool    bWpStartupPosePending = false;
@@ -843,7 +852,7 @@ private:
     /// source on spawned vehicles and walkers (UCarlaEpisode::SpawnActorWithInfo). Shared with AuditScene.
     static float StreamSourceRadiusCm(const AActor* RootParent);
 
-    // ---- Stream coverage warning (P4) ----
+    // ---- Stream coverage warning ----
     /// World Partition maps only (other maps: nothing). Runs after each static sync (Update). Per sensor not warned yet:
     /// is its range sphere (position, SensorRangeCm) streamed in (Activated)? The same query as AuditScene's
     /// stream_covered, one sensor at a time. A sensor whose sphere stays not streamed in for StreamWarningSeconds (sim,
@@ -893,7 +902,7 @@ private:
     bool   bExcludedLineLogged = false;   // the rgl_scene_audit_excluded line was printed (with the first audit line)
     uint64 AuditUpdateCount = 0;          // distinct frames seen while the audit is on
 
-    // ---- Level-added sync (P5) ----
+    // ---- Level-added sync ----
     /// Remember the instance's world and bind FWorldDelegates::LevelAddedToWorld for the instance's whole life
     /// (GetInstance calls it once, when it creates the instance; the destructor removes the binding).
     void BindWorld(UWorld* World);
@@ -902,7 +911,7 @@ private:
     /// True when a level added since the last sync holds a registered static mesh component whose bounds reach some
     /// sensor's registration sphere (R) and that passes GateStaticComponent (what a sync would register); the list
     /// is emptied either way. Within LevelSyncMinIntervalSeconds (sim) of the last sync: false, and the list is kept
-    /// for a later Update (D5). Looks at the levels' own actors only.
+    /// for a later Update. Looks at the levels' own actors only.
     bool ConsumeRelevantLevelAdds();
     static constexpr double LevelSyncMinIntervalSeconds = 0.3;
     FDelegateHandle LevelAddedHandle;     // FWorldDelegates::LevelAddedToWorld, bound for the instance's life
@@ -912,7 +921,7 @@ private:
     TArray<TWeakObjectPtr<ULevel>> PendingAddedLevels;
     TArray<UStaticMeshComponent*> LevelScanComponents;   // ConsumeRelevantLevelAdds' component array, reused
 
-    // ---- World Partition culling of non-Static parts (7b) ----
+    // ---- World Partition culling of non-Static parts ----
     /// UsesWpNonStaticCulling of the Update's world, decided at the start of each Update (before the first scan).
     bool bWpActive = false;
     /// A non-Static part the distance rule chooses (not protected). Kept from one sync to the next (FObjectKey + weak
@@ -941,7 +950,8 @@ private:
     TMap<FObjectKey, FWpCandidate> WpCandidates;
     /// One entity to add or remove (a regular component, or one ISM instance). Rebuilt by every culling sync from
     /// WpCandidates (the wait is kept in the candidate, not reset by a sync); drained by every Update under
-    /// rgl.Scene.MaxMovableEntityChangesPerUpdate / MovableEntityBudgetMs, except R6 raw-range discovery creates.
+    /// rgl.Scene.MaxMovableEntityChangesPerUpdate / MovableEntityBudgetMs, except the adds of parts already inside some
+    /// sensor's range when the queue is built (bInRangeAtDiscovery).
     struct FWpJob
     {
         TWeakObjectPtr<UStaticMeshComponent> Component;
@@ -949,7 +959,8 @@ private:
         int32  Instance = INDEX_NONE;       // ISM instance; INDEX_NONE = the regular component
         uint32 Generation = 0;
         bool   bAdd = true;
-        bool   bInRangeAtDiscovery = false; // R6: raw-range creates finish this Update without either budget
+        bool   bInRangeAtDiscovery = false; // inside some sensor's range at the sync: the sync Update's drain step
+                                            // creates it without either budget
         double SinceSimTime = 0.0;          // adds: wanted since (sim)
         double ReachSimTime = 0.0;          // adds: earliest time its bounds could reach some sensor's range (order)
         float  GapCm = 0.0f;                // distance of its bounds to the nearest sensor
@@ -982,7 +993,8 @@ private:
     double WpHorizonSeconds = 0.0;          // H of that sync
     double WpMarginCm = 0.0;                // M of that sync
     double WpPrevUpdateSimTime = -1.0;      // sim time of the previous Update (U check)
-    bool bWpStartupSceneIntervalPending = false; // R10: every sensor at the preceding interval start was newly initialized
+    bool bWpStartupSceneIntervalPending = false; // start-up exemption: every sensor at the preceding interval start was
+                                                 // newly initialized
     /// The inputs of the horizon and margin (the sync clock and interval included: rgl.Scene.SyncClock, SyncIntervalSeconds).
     struct FWpKnobs
     {
@@ -1006,7 +1018,8 @@ private:
     int32  WpEntityAdded = 0;
     int32  WpEntityRemoved = 0;
     double WpEntityMs = 0.0;
-    // R6: this Update only, including mesh upload/API wait; unlike wp_entity_* these are not interval sums.
+    // Adds of parts inside some sensor's range (bInRangeAtDiscovery), this Update only, including mesh upload/API wait;
+    // unlike wp_entity_* these are not interval sums.
     int32  WpInRangeAddedLastUpdate = 0;
     double WpInRangeMsLastUpdate = 0.0;
     int32  WpViolationsSinceLog = 0;

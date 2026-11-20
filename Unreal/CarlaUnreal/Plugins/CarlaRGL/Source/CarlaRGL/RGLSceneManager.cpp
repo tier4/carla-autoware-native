@@ -134,13 +134,13 @@ static TAutoConsoleVariable<int32> CVarRGLSceneIdleMeshCacheMax(TEXT("rgl.Scene.
          "is destroyed first. 0 = destroy at once (original behaviour)."), ECVF_Default);
 static TAutoConsoleVariable<int32> CVarRGLSceneMaxIsmInstanceChangesPerUpdate(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"), 512,
     TEXT("Most Static ISM instances added to or removed from the RGL scene per scene Update when a sync re-evaluates "
-         "the registered ISM groups against the sensor spheres (on the Updates without a sync); the rest wait for the "
-         "next Update. 0 = unlimited."), ECVF_Default);
+         "the registered ISM groups against the sensor spheres (on the Updates without a sync, and on a sync Update that "
+         "follows another sync Update); the rest wait for the next Update. 0 = unlimited."), ECVF_Default);
 
 // ---- The periodic static sync: its clock and interval ----
 // The sync's time trigger. The original timer added the world dt once per scene Update, so the time between Updates that
 // the dt does not cover (a 0.1 s LiDAR at a 0.025 s world dt: 0.075 s per Update) was not counted, and a 1 s interval took
-// about 4 s of simulation time. rgl.Scene.SyncClock = 0 restores it (the A/B and the old-value runs).
+// about 4 s of simulation time. rgl.Scene.SyncClock = 0 restores it.
 static TAutoConsoleVariable<int32> CVarRGLSceneSyncClock(TEXT("rgl.Scene.SyncClock"), 1,
     TEXT("Clock of the periodic static sync: 1 = simulation time (a sync once rgl.Scene.SyncIntervalSeconds of simulation "
          "time have passed since the last sync), 0 = the world dt of the scene Updates only (the original timer; with Updates "
@@ -154,7 +154,7 @@ static TAutoConsoleVariable<float> CVarRGLSceneSyncIntervalSeconds(TEXT("rgl.Sce
 // of more than 20 m between syncs brought parts that were outside R at the last sync inside the range, unregistered, until
 // the next sync (and then the create budget could hold them in the queue for a few more Updates). The cap keeps the trigger
 // below that 20 m margin, and the in-range priority creates such parts in the Update that queues them. The legacy values
-// (ratio 0.2, slack -1, in-range creates 0) restore the original behaviour (the A/B and the old-value runs).
+// (ratio 0.2, slack -1, in-range creates 0) restore the original behaviour.
 static TAutoConsoleVariable<float> CVarRGLSceneSyncTriggerRatio(TEXT("rgl.Scene.SyncTriggerRatio"), 0.2f,
     TEXT("Distance trigger of the static sync: a sensor that moved more than this ratio x its registration radius R since the "
          "last sync syncs now (capped by rgl.Scene.SyncTriggerMarginSlackM). > 0."), ECVF_Default);
@@ -203,7 +203,7 @@ static void EmitSceneLine(const FString& Line)
 #endif
 }
 
-// ---- World Partition culling of non-Static parts (7b; README_RGL "non-Static parts on World Partition maps") ----
+// ---- World Partition culling of non-Static parts (README_RGL "non-Static parts on World Partition maps") ----
 // Only a map with a World Partition uses these; on other maps every non-Static part is registered at any distance.
 static TAutoConsoleVariable<int32> CVarRGLSceneWpMovableCulling(TEXT("rgl.Scene.WpMovableCulling"), 1,
     TEXT("World Partition maps only: 1 = non-Static static mesh parts that are not vehicle/walker/physics/sensor-carrier "
@@ -401,7 +401,7 @@ void FRGLSceneManager::ApplySceneSwitches(const TCHAR* CommandLine, EConsoleVari
     {
         CVarRGLSceneInRangeCreateBudgetMs->Set(F, SetBy);
     }
-    // The World Partition culling of non-Static parts (7b).
+    // The World Partition culling of non-Static parts.
     if (FParse::Value(CommandLine, TEXT("-rgl-scene-wp-movable-culling="), I))
     {
         CVarRGLSceneWpMovableCulling->Set(I, SetBy);
@@ -475,8 +475,8 @@ FRGLSceneManager::FSceneKnobs FRGLSceneManager::ReadSceneKnobs()
 
 FString FRGLSceneManager::FormatSceneConfigLine(double SimTime, const FSceneKnobs& K)
 {
-    // The sync's knobs (clock, interval, the range-edge ones) together after the older keys, then the 7b keys;
-    // wp_culling = the culling applies to this world (World Partition and enabled).
+    // The sync's knobs (clock, interval, the range-edge ones) together after the older keys, then the World Partition
+    // culling's keys; wp_culling = the culling applies to this world (World Partition and enabled).
     return FString::Printf(
         TEXT("rgl_scene_config t=%.3f max_mesh_creates_per_update=%d create_budget_ms=%.2f unload_distance_factor=%.2f "
              "idle_mesh_cache_max=%d max_ism_instance_changes_per_update=%d unload_margin_cm=%.0f sync_clock=%s "
@@ -651,7 +651,7 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
     LastFrameMs = (LastUpdateWallSeconds > 0.0) ? (UpdateWallSeconds - LastUpdateWallSeconds) * 1000.0 : 0.0;
     LastUpdateWallSeconds = UpdateWallSeconds;
 
-    // 7b: whether this world culls its non-Static parts by distance is known before the first scan, so that
+    // Whether this world culls its non-Static parts by distance is known before the first scan, so that
     // InitializeFromWorld leaves the parts the culling chooses to its queue (no far part is created to be removed later).
     bWpActive = UsesWpNonStaticCulling(World);
     const bool bStartupUpdate = !bInitialized;
@@ -668,7 +668,7 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
 
     // Sync on a time interval OR when any sensor has moved far enough that newly
     // relevant geometry could be missed before the next periodic sync
-    // (Phase 1: high-speed safety; P8: the distance trigger stays below the margin between R and the range).
+    // (high-speed safety; the distance trigger stays below the margin between R and the range).
     // The time, sensor and distance conditions are all evaluated (the sensor loop is a handful of entries) so the
     // telemetry can name the trigger; a sync happens when any of them, or the level condition below, holds.
     // The time condition's clock (rgl.Scene.SyncClock): simulation time since the last sync (1, the default; time going
@@ -693,11 +693,11 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
             bMoved = true;
         }
     }
-    // P5: a level added since the last sync whose static geometry reaches some sensor's R (World Partition cells
+    // A level added since the last sync whose static geometry reaches some sensor's R (World Partition cells
     // stream in between the periodic syncs). Looked at whenever no sensor is new, so the trigger name follows the
-    // priority init > level > distance > time; the levels' actors only, at most once per 0.3 s (sim) (D5).
+    // priority init > level > distance > time; the levels' actors only, at most once per 0.3 s (sim).
     const bool bLevel = !bNewSensor && ConsumeRelevantLevelAdds();
-    // 7b (World Partition only; O(sensors), no candidate is read): the U / refresh / speed contracts, and a sync forced
+    // World Partition only (O(sensors), no candidate is read): the U / refresh / speed contracts, and a sync forced
     // by the deadline (the sim time the last culling sync's margin assumed would pass before the next one) or by a
     // reset (time going back, a sensor pose jump, a knob change).
     bool bWpDeadline = false;
@@ -763,7 +763,7 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
     // Time-sliced creation of the meshes queued by this or an earlier sync: a step on every Update, sync
     // due or not. A sensor's first sync (startup, or a sensor spawned later) is drained in full, as before:
     // that is not the driving stall, and localization start-up should see the complete scene. Otherwise the queued parts
-    // already inside some sensor's range go first, outside the budget (up to the in-range caps, P8).
+    // already inside some sensor's range go first, outside the budget (up to the in-range caps).
     if (!QueueEpisode.bActive && PendingCreates.Num() > 0)
     {
         QueueEpisode = FQueueEpisode();
@@ -780,7 +780,8 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         QueueEpisode.Dropped += Drain.Dropped;
     }
 
-    // 7b: prefetch work takes a budgeted step on every Update; R6 raw-range discovery jobs finish without a budget.
+    // The World Partition culling's queue takes a budgeted step on every Update; the adds of parts already inside some
+    // sensor's range when the queue was built finish without a budget.
     // A sync Update includes both in elapsed_ms; the Update that initialized the scene drains it in full (the start-up scene is complete, as above).
 #if !UE_BUILD_SHIPPING
     WpAddedLastUpdate_ForTest = 0;
@@ -793,10 +794,10 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         WpDrain(/*bUnlimited=*/bStartupUpdate);
     }
 
-    // P3 (D7): the Static ISM groups a sync queued are compared with the sensor spheres on the Updates without a sync,
+    // The Static ISM groups a sync queued are compared with the sensor spheres on the Updates without a sync,
     // so the frame of a sync does not also carry the instance changes; at most rgl.Scene.MaxIsmInstanceChangesPerUpdate
     // changes per Update. Its time is reported as ism_ms / ism_max_ms, not in the next sync's elapsed_ms.
-    if (!bShouldSync)
+    auto IsmReevaluationStep = [this]()
     {
         FIsmReevalStats Ism;
         DrainIsmReevaluations(SceneMaxIsmInstanceChangesPerUpdate(), Ism);
@@ -804,11 +805,16 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         IsmRemovedSinceLog += Ism.Removed;
         IsmMsSinceLog += Ism.Ms;
         IsmMaxMsSinceLog = FMath::Max(IsmMaxMsSinceLog, Ism.Ms);
+    };
+    if (!bShouldSync)
+    {
+        IsmReevaluationStep();
+        bIsmTurnSinceSync = true;
     }
 
     if (bShouldSync)
     {
-        // The sync and this Update's create step (the ISM re-evaluation never runs in a sync's Update).
+        // The sync and this Update's create step (a re-evaluation step this Update takes comes after the line).
         const double ElapsedMs = (FPlatformTime::Seconds() - StepStartSeconds) * 1000.0;
         WaitProbe.Disarm();
         // Totals for the scene size (outside elapsed_ms): every entity (ISM instances and live skeletal entities
@@ -841,15 +847,15 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
             EntityMap.Num(), ISMCEntityMap.Num(), MeshCache.Num(), IdleMeshLru.Num(), DeadIsmcSinceLog,
             IsmAddedSinceLog, IsmRemovedSinceLog, IsmPendingAtSync, IsmEmptySkippedSinceLog, IsmMsSinceLog, IsmMaxMsSinceLog,
             SyncStats.ScanMs, SyncStats.RegMs, SyncStats.RemoveMs, SyncStats.SkelMs);
-        // 7b keys (after every older key; the gate reads named keys only). wait_ms: the first RGL call of the measured
-        // interval (it carries the wait for the previous raytrace graph and its own work; 0.00 / none = no call).
-        // wp_* : wp = the culling applies; sync bound, create latency and margin of this sync; pending jobs and the age
+        // The World Partition keys (after every older key, so that tools reading named keys are not affected). wait_ms:
+        // the first RGL call of the measured interval (it carries the wait for the previous raytrace graph and its own
+        // work; 0.00 / none = no call). wp_* : wp = the culling applies; sync bound, create latency and margin of this sync; pending jobs and the age
         // of the oldest waiting add (current values); check/entity counts and times since the previous line (max =
         // the longest single sync's look); promoted = candidates seen moving (current); violations since the previous
         // line; deadline syncs (whole run); entities_total / nonstatic_registered (current). wp_inrange_* count/time only
-        // this Update's raw-range discovery burst, including upload and the first API wait (not since the last line).
-        // P8 keys last: in_range_creates / in_range_ms = this Update's drain step, as created= / drain_ms= (the queued
-        // parts inside a range created outside the create budget, and their wall time).
+        // this Update's adds of parts already inside some sensor's range, including upload and the first API wait (not
+        // since the last line). The range-edge keys last: in_range_creates / in_range_ms = this Update's drain step, as
+        // created= / drain_ms= (the queued parts inside a range created outside the create budget, and their wall time).
         SyncLine += FString::Printf(
             TEXT(" wait_ms=%.2f wait_api=%s wp=%d wp_sync_bound_s=%.2f wp_create_latency_s=%.2f wp_margin_m=%.1f "
                  "wp_pending=%d wp_queue_age_max_s=%.2f wp_check_n=%d wp_check_instances=%d wp_check_ms=%.2f "
@@ -900,9 +906,20 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
         IsmMsSinceLog = 0.0;
         IsmMaxMsSinceLog = 0.0;
 
-        // P4: after the sync line, so its elapsed_ms does not include the streaming queries. Returns at once on a map
-        // without World Partition.
+        // The stream coverage warning: after the sync line, so its elapsed_ms does not include the streaming queries.
+        // Returns at once on a map without World Partition.
         CheckStreamCoverage(World);
+
+        // When the previous Update synced too, no Update without a sync came between (an Update period at or above the
+        // sync interval, a distance trigger on every Update, ...): every sync rebuilds the re-evaluation's queue, and it
+        // would never be worked through. This sync Update then takes the same capped step on the queue it rebuilt, after
+        // its line (elapsed_ms leaves it out; the next line's ism_* keys count it). With an Update without a sync in
+        // between, nothing changes here.
+        if (!bIsmTurnSinceSync)
+        {
+            IsmReevaluationStep();
+        }
+        bIsmTurnSinceSync = false;
     }
 
     if (QueueEpisode.bActive && PendingCreates.Num() == 0)
@@ -923,7 +940,7 @@ void FRGLSceneManager::UpdateStep(UWorld* World, double SimulationTime)
 
     // Update only dynamic entity transforms (static entities skip after first set)
     UpdateTransforms();
-    // 7b: the registered instances of ISM candidates seen moving follow their instance transforms.
+    // World Partition culling: the registered instances of ISM candidates seen moving follow their instance transforms.
     if (bWpActive && WpMovedIsm.Num() > 0)
     {
         WpUpdateMovedInstanceTransforms();
@@ -1021,7 +1038,7 @@ void FRGLSceneManager::InitializeFromWorld(UWorld* World)
         }
         ++ActorCount;
 
-        ScanComponents.Reset();   // one array for every actor (P7)
+        ScanComponents.Reset();   // one array for every actor
         Actor->GetComponents<UStaticMeshComponent>(ScanComponents);
 
         for (UStaticMeshComponent* Comp : ScanComponents)
@@ -1671,7 +1688,7 @@ rgl_mesh_t FRGLSceneManager::FindCachedMesh(const UStaticMesh* StaticMesh) const
     // A cache entry (live or idle) can outlive its asset: an idle one outlives the entities that kept the asset alive,
     // and a live one lasts until the next Update removes the entities of a destroyed component. If the asset was
     // collected and its address handed to another UStaticMesh, that mesh has another FObjectKey (GC serial) and misses
-    // here, so the old geometry is never served for it (P2). A stale entry leaves with its last reference, or, kept as
+    // here, so the old geometry is never served for it. A stale entry leaves with its last reference, or, kept as
     // idle (rgl.Scene.IdleMeshCacheMax > 0), at the next sync's PurgeIdleMeshes.
     const FCachedMesh* Found = StaticMesh ? MeshCache.Find(FObjectKey(StaticMesh)) : nullptr;
     return Found ? Found->Mesh : nullptr;
@@ -1889,7 +1906,7 @@ FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStati
                                                                     bool bRememberVerdict) const
 {
     // An unregistered component is not part of the loaded world (its level is being streamed out, or the owner
-    // unregistered it): registering it would put a ghost into the scene (P1).
+    // unregistered it): registering it would put a ghost into the scene.
     const UStaticMesh* Mesh = IsValid(Component) ? Component->GetStaticMesh() : nullptr;
     if (!Mesh || !Component->IsRegistered() || !Component->IsVisible())
     {
@@ -1904,7 +1921,7 @@ FRGLSceneManager::EStaticGate FRGLSceneManager::GateStaticComponent(const UStati
 
     // Sky domes and spheres are valid static meshes but should never take part in LiDAR ray tracing. Only the dome
     // words count, not "sky" anywhere in a name: that also dropped CARLA's shared skyscraper parts (SM_Skysc*).
-    // The verdict depends on the mesh alone: remembered per mesh, no name string per component (P7).
+    // The verdict depends on the mesh alone: remembered per mesh, no name string per component.
     if (IsSkyDomeMesh(Mesh, bRememberVerdict))
     {
         return EStaticGate::ExcludedByName;
@@ -1973,7 +1990,7 @@ bool FRGLSceneManager::ShouldRegisterComponent(UStaticMeshComponent* Component, 
     // Movable actors are kept even if no sensor has registered yet.
     if (Component->Mobility != EComponentMobility::Static)
     {
-        // 7b: on a World Partition map, a non-Static part the culling chooses (not protected) is registered by the
+        // On a World Partition map, a non-Static part the culling chooses (not protected) is registered by the
         // culling's queue only, never on this path (no immediate cached registration, no unlimited first scan).
         if (bWpActive && ClassifyWpProtection(Component) == EWpProtect::None)
         {
@@ -2006,7 +2023,8 @@ bool FRGLSceneManager::ShouldKeepRegisteredComponent(UStaticMeshComponent* Compo
     {
         return true;
     }
-    // 7b: a non-Static part the culling chooses stays until its queue removes it (distance) or the gate rejects it.
+    // World Partition culling: a non-Static part the culling chooses stays until its queue removes it (distance) or the
+    // gate rejects it.
     if (bWpActive && IsValid(Component) && Component->Mobility != EComponentMobility::Static &&
         GateStaticComponent(Component) == EStaticGate::Pass)
     {
@@ -2134,7 +2152,7 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
     }
 
     // Choose the instances before touching the mesh. A Static ISM gets entities for its instances inside R and keeps
-    // the sphere of every instance for the re-evaluation (P3); a Movable ISM gets all of its instances, as before.
+    // the sphere of every instance for the re-evaluation; a Movable ISM gets all of its instances, as before.
     const int32 NumInstances = Component->GetInstanceCount();
     const bool bStatic = (Component->Mobility == EComponentMobility::Static);
     TArray<FSphere3f> Spheres;
@@ -2313,7 +2331,7 @@ void FRGLSceneManager::UpdateTransforms()
         UnregisterComponent(Comp);
     }
 
-    // P1: an ISM group whose component is gone or no longer registered (its World Partition cell is being streamed
+    // An ISM group whose component is gone or no longer registered (its World Partition cell is being streamed
     // out, or the owner unregistered it) leaves the RGL scene in this Update too, instead of staying until the next
     // sync as ghosts. Instance transforms are not touched here.
     TArray<UInstancedStaticMeshComponent*> DeadIsm;
@@ -2346,7 +2364,7 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
             It.RemoveCurrent(); // No strong asset reference; GC address reuse cannot inherit a failure.
         }
     }
-    // P7: the sky-name verdicts of meshes that are gone (no lookup can reach them again).
+    // The sky-name verdicts of meshes that are gone (no lookup can reach them again).
     for (auto It = SkyVerdictByMesh.CreateIterator(); It; ++It)
     {
         if (!It.Key().ResolveObjectPtr())
@@ -2376,7 +2394,7 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
     // scan decides what is resident.
     PurgeIdleMeshes();
 
-    // 7b: a culling sync fixes its horizon and margin first; a world that no longer culls (rgl.Scene.WpMovableCulling
+    // World Partition culling: a culling sync fixes its horizon and margin first; a world that no longer culls (rgl.Scene.WpMovableCulling
     // switched off live) drops the culling's state here, and the scan below registers those parts the original way.
     if (bWpActive)
     {
@@ -2394,7 +2412,7 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
         }
     }
 
-    // P7: the scan's containers are members; Reset keeps their allocations from one sync to the next.
+    // The scan's containers are members; Reset keeps their allocations from one sync to the next.
     TSet<UStaticMeshComponent*>& CurrentComponents = ScanCurrentComponents;
     TSet<UInstancedStaticMeshComponent*>& CurrentISMComponents = ScanCurrentIsmComponents;
     TArray<FPendingCreate>& NewPending = ScanNewPending;
@@ -2434,7 +2452,7 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
 
         for (UStaticMeshComponent* Comp : ScanComponents)
         {
-            // 7b: a non-Static part the World Partition culling chooses goes to the culling (its candidates and queue),
+            // A non-Static part the World Partition culling chooses goes to the culling (its candidates and queue),
             // never to the original path below. The sets keep the original removals away from it.
             if (bWpActive && IsValid(Comp) && Comp->Mobility != EComponentMobility::Static &&
                 GateStaticComponent(Comp) == EStaticGate::Pass && ClassifyWpProtection(Comp) == EWpProtect::None)
@@ -2482,9 +2500,9 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
                 }
                 if (const FISMCEntityGroup* Group = ISMCEntityMap.Find(ISMComp))
                 {
-                    // Registered: a Static group's instances are re-evaluated after the scan (P3). A group whose
+                    // Registered: a Static group's instances are re-evaluated after the scan. A group whose
                     // instance count or mesh changed since its registration is rebuilt instead (its instance indices
-                    // may name other instances now, review focus 3): it leaves the scene here and is registered again
+                    // may name other instances now): it leaves the scene here and is registered again
                     // below like a new component.
                     if (Group->Component.Get() == ISMComp && Group->OriginalInstanceCount == ISMComp->GetInstanceCount() &&
                         Group->MeshKey == FObjectKey(ISMComp->GetStaticMesh()))
@@ -2497,7 +2515,7 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
                     ++RemovedISM;
                 }
                 // A Static ISM none of whose instances reaches R is not queued: registering it would upload its mesh
-                // for no entity (P3).
+                // for no entity.
                 if (ISMComp->Mobility == EComponentMobility::Static &&
                     !CollectInRangeInstances(ISMComp, ISMComp->GetStaticMesh(), IsmScanIndices, /*bStopAtFirst=*/true))
                 {
@@ -2521,7 +2539,7 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
             }
 
             // Only meshes with live entities can bypass the budget: reviving an idle mesh rebuilds GAS
-            // at the next raytrace, just like creating a new mesh. The scan runs before the removals below (D6): a
+            // at the next raytrace, just like creating a new mesh. The scan runs before the removals below: a
             // component that replaces a just-destroyed one with the same asset finds that one's mesh still live.
             if (FindCachedMesh(StaticMesh) && MeshRefCounts.FindRef(FObjectKey(StaticMesh)) > 0)
             {
@@ -2545,9 +2563,9 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
     ScanActorSkeletal.Reset();
     OutStats.RegMs = RegSeconds * 1000.0;
     OutStats.ScanMs = FMath::Max(0.0, (FPlatformTime::Seconds() - ScanStartSeconds - RegSeconds) * 1000.0);
-    // The scan has seen every level added so far: none of them needs a level-triggered sync any more (P5).
+    // The scan has seen every level added so far: none of them needs a level-triggered sync any more.
     PendingAddedLevels.Reset();
-    // 7b: candidates the scan no longer saw are dropped; the new queue replaces the old one (the waits are kept).
+    // World Partition culling: candidates the scan no longer saw are dropped; the new queue replaces the old one (the waits are kept).
     if (bWpActive)
     {
         WpEndSync();
@@ -2619,7 +2637,7 @@ void FRGLSceneManager::SyncWorldComponents(UWorld* World, FSceneSyncStats& OutSt
     CurrentComponents.Reset();
     CurrentISMComponents.Reset();
 
-    // P3: every registered Static ISM group is compared with the sensor spheres again, nearest first, on the next
+    // Every registered Static ISM group is compared with the sensor spheres again, nearest first, on the next
     // Updates without a sync (DrainIsmReevaluations). The queue is rebuilt like PendingCreates: a group the previous
     // round had not reached yet is queued again with the rest (ism_pending counts them).
     IsmScanIndices.Reset();
@@ -2666,7 +2684,7 @@ void FRGLSceneManager::DrainPendingCreates(bool bUnlimited, FDrainStats& OutStat
     const int32 MaxCreates = bUnlimited ? 0 : SceneMaxMeshCreatesPerUpdate();
     const double BudgetSeconds = bUnlimited ? 0.0 : static_cast<double>(SceneCreateBudgetMs()) / 1000.0;
     int32 BudgetedCreates = 0;
-    // P8: the queued parts inside some sensor's range, created outside the budget above (an unlimited drain needs no
+    // The queued parts inside some sensor's range, created outside the budget above (an unlimited drain needs no
     // priority). Their own count and wall time (the budget's ms leave them out); the first one always proceeds.
     const int32 InRangeMax = bUnlimited ? 0 : SceneInRangeCreatesPerUpdate();
     const double InRangeBudgetSeconds = static_cast<double>(SceneInRangeCreateBudgetMs()) / 1000.0;
@@ -2700,7 +2718,7 @@ void FRGLSceneManager::DrainPendingCreates(bool bUnlimited, FDrainStats& OutStat
             continue;
         }
 
-        // P8: a part whose bounds reach some sensor's range now takes an in-range slot while one is left: the count, and
+        // A part whose bounds reach some sensor's range now takes an in-range slot while one is left: the count, and
         // the wall time of this Update's in-range creations (checked between creations; the first always proceeds).
         // Beyond those caps it waits for the budget below like any other part.
         const bool bInRangeSlot = bNeedsCreate && InRangeMax > 0 && OutStats.InRangeCreates < InRangeMax &&
@@ -2917,7 +2935,7 @@ FRGLSceneManager::FSceneKnobs FRGLSceneManager::LogSceneConfigIfChanged()
 }
 
 // ============================================================================
-// World Partition culling of non-Static parts (7b)
+// World Partition culling of non-Static parts
 // ============================================================================
 // On a World Partition map (rgl.Scene.WpMovableCulling = 1), a non-Static static mesh part that is not protected
 // (ClassifyWpProtection) and has not been seen moving is registered only when its bounds (ISM: each instance's) reach
@@ -3132,7 +3150,7 @@ void FRGLSceneManager::WpCheckContracts(const UWorld* World, bool& bOutDeadline,
     const FWpKnobs K = CurrentWpKnobs();
     const double U = K.MaxUpdateGapS;
     const double Tol = U * 1.0e-3 + 1.0e-6;
-    // R10: this interval was classified at its START, after that Update's init sync. Sensors joining now must
+    // Start-up exemption: this interval was classified at its START, after that Update's init sync. Sensors joining now must
     // neither invalidate its exemption nor excuse an existing sensor's later gap. Consume the snapshot once.
     const bool bStartupUpdateInterval = bWpStartupSceneIntervalPending;
     bWpStartupSceneIntervalPending = false;
@@ -4720,7 +4738,7 @@ float FRGLSceneManager::StreamSourceRadiusCm(const AActor* RootParent)
 }
 
 // ============================================================================
-// Stream coverage warning (P4): the scene follows the loaded world, so a range that World Partition does not stream
+// Stream coverage warning: the scene follows the loaded world, so a range that World Partition does not stream
 // in is not in it. Not a defect to fix here; the line tells the user how to get the range loaded.
 // ============================================================================
 
@@ -4828,7 +4846,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
     R.LevelsAdded = LevelsAddedSinceAudit;
     R.SecondsSinceSync = (LastSyncSimTime >= 0.0) ? FMath::Max(0.0, CurrentSimTime - LastSyncSimTime) : -1.0;
     R.FrameMs = LastFrameMs;
-    // 7b: on a world that culls its non-Static parts, an ISM instance of the new path is placed with the same geometry
+    // On a world that culls its non-Static parts, an ISM instance of the culling's path is placed with the same geometry
     // as the culling uses (the mesh bounds' origin through the instance transform); a known candidate in range without
     // an entity is counted again as missing_wp_culled_in_range. Other worlds: unchanged.
     const bool bWpAudit = UsesWpNonStaticCulling(World);
@@ -5116,7 +5134,7 @@ FRGLSceneAuditResult FRGLSceneManager::AuditScene(UWorld* World, FRGLSceneAuditE
         }
         const bool bDeferred = !Group && IsMeshRetryDeferred(Mesh);
         const double MeshRadius = Mesh->GetBounds().SphereRadius;
-        // 7b: the new path's instances (non-Static, not protected, on a world that culls) are placed as the culling
+        // The culling path's instances (non-Static, not protected, on a world that culls) are placed as the culling
         // places them; a candidate whose layout the last scan recorded counts its unregistered in-range instances.
         const bool bWpGeometry = bWpAudit && ISM->Mobility != EComponentMobility::Static &&
                                  ClassifyWpProtection(ISM, /*bRemember=*/false) == EWpProtect::None;
@@ -5281,7 +5299,7 @@ void FRGLSceneManager::MaybeEmitAudit(UWorld* World, double SimTime, uint64 Fram
 }
 
 // ============================================================================
-// Level-added sync (P5)
+// Level-added sync
 // ============================================================================
 
 void FRGLSceneManager::BindWorld(UWorld* World)
@@ -5312,7 +5330,7 @@ bool FRGLSceneManager::ConsumeRelevantLevelAdds()
     {
         return false;
     }
-    // D5: a level-triggered sync at most every LevelSyncMinIntervalSeconds (sim); the levels wait meanwhile. A clock
+    // A level-triggered sync at most every LevelSyncMinIntervalSeconds (sim); the levels wait meanwhile. A clock
     // that went back (a new episode in the same world) does not hold them.
     if (LastSyncSimTime >= 0.0)
     {
@@ -5402,14 +5420,16 @@ void FRGLSceneManager::SyncStaticNow_ForTest(UWorld* World, double Now)
     }
     FDrainStats Drain;
     DrainPendingCreates(/*bUnlimited=*/true, Drain);
-    // 7b: the culling's queue, in full.
+    // The World Partition culling's queue, in full.
     if (bWpActive && WpJobs.Num() > 0)
     {
         WpDrain(/*bUnlimited=*/true);
     }
-    // The ISM re-evaluation the sync queued, in full (Update() runs it on the following Updates, capped).
+    // The ISM re-evaluation the sync queued, in full (Update() runs it on the following Updates, capped): its turn since
+    // this sync has come.
     FIsmReevalStats Ism;
     DrainIsmReevaluations(/*MaxChanges=*/0, Ism);
+    bIsmTurnSinceSync = true;
     IsmAddedSinceLog += Ism.Added;
     IsmRemovedSinceLog += Ism.Removed;
     IsmMsSinceLog += Ism.Ms;

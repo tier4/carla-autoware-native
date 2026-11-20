@@ -3,15 +3,15 @@
 // Shared fixture and helpers: RGLSceneTestUtil.h (each test works around its own BaseFor slot).
 // First the audit counts the World Partition fixes are judged by: missing_steady (the miss that the last sync
 // should already have registered), the ISM part of the ghosts, and spline mesh components in the scene.
-// Then the fixes: unregistered ISM components leave the scene at once (P1), adding a level with geometry in some
-// sensor's R syncs (P5), the instances of Static ISMs are re-evaluated against the sensor spheres (P3), the name
-// rule leaves out sky domes and spheres only (N1), and the mesh cache is keyed by the asset's identity (P2).
-// Then the warning for a sensor whose range is not streamed in on a World Partition map (P4). Last, the lighter sync
-// (P7): the sky-name verdict remembered per mesh, and the sync's cost on its line. Then the World Partition
-// culling of non-Static parts (7b): the policy and its seam, the original rule elsewhere, the distance rule per part and
-// per ISM instance, the protected parts, approaching parts and sensors, the budget, the contracts and the deadline.
-// At the end, the range edge (P8): the sync clock and interval, the switches and the knob lines, the distance trigger
-// capped by the margin between R and the range, and the in-range creates outside the create budget.
+// Then the fixes: unregistered ISM components leave the scene at once, adding a level with geometry in some
+// sensor's R syncs, the instances of Static ISMs are re-evaluated against the sensor spheres (also when every Update
+// syncs), the name rule leaves out sky domes and spheres only, and the mesh cache is keyed by the asset's identity.
+// Then the warning for a sensor whose range is not streamed in on a World Partition map. Then the lighter sync: the
+// sky-name verdict remembered per mesh, and the sync's cost on its line. Then the World Partition culling of non-Static
+// parts: the policy and its seam, the original rule elsewhere, the distance rule per part and per ISM instance, the
+// protected parts, approaching parts and sensors, the budget, the contracts and the deadline (the main ones on both sync
+// clocks). At the end, the range edge: the sync clock and interval, the switches and the knob lines, the distance
+// trigger capped by the margin between R and the range, and the in-range creates outside the create budget.
 
 #include <util/ue-header-guard-begin.h>
 #include "CoreMinimal.h"
@@ -154,7 +154,7 @@ bool FSceneSyncGhostIsmCountedTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// P1: unregistered ISM components leave the scene at once
+// Unregistered ISM components leave the scene at once
 // ============================================================================
 
 // An ISM whose component is not registered (its level is being streamed out, or the owner unregistered it) is no
@@ -225,7 +225,7 @@ bool FSceneSyncIsmGhostRemovedOnUpdateTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// Review focus 2 (a cell streams out and straight back in, before GC): the same ISMC unregistered and registered
+// A cell streams out and straight back in, before GC: the same ISMC unregistered and registered
 // again between two Updates is neither duplicated nor left as a ghost.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmReRegisteredNoDuplicateTest, "CarlaRGL.SceneSync.IsmReRegisteredNoDuplicate",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
@@ -265,7 +265,7 @@ bool FSceneSyncIsmReRegisteredNoDuplicateTest::RunTest(const FString& Parameters
 }
 
 // ============================================================================
-// P5: a sync when a level with geometry in some sensor's R is added
+// A sync when a level with geometry in some sensor's R is added
 // ============================================================================
 
 // A cube appears after the sync and its level is added: the next Update syncs ("level") although no other trigger
@@ -299,7 +299,7 @@ bool FSceneSyncLevelAddedForcesSyncTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// D5: a level-triggered sync waits until 0.3 s (sim) have passed since the previous sync; the level added in
+// A level-triggered sync waits until 0.3 s (sim) have passed since the previous sync; the level added in
 // between is kept and syncs once the interval is over (checked 1 ms past the limit: the times are not exact).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncLevelSyncMinIntervalTest, "CarlaRGL.SceneSync.LevelSyncMinInterval",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
@@ -345,7 +345,7 @@ bool FSceneSyncLevelSyncMinIntervalTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// Review focus 1 (a teleport or respawn makes WP add many cells in one frame): ten distinct levels added before one
+// A teleport or respawn makes World Partition add many cells in one frame: ten distinct levels added before one
 // Update give one sync, and the next Update (past the 0.3 s interval) has nothing left to sync for. Nine of them are
 // empty transient levels and come first; the last is the persistent level, which holds the cube.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncManyLevelAddsOneSyncTest, "CarlaRGL.SceneSync.ManyLevelAddsOneSync",
@@ -396,7 +396,7 @@ bool FSceneSyncIrrelevantLevelAddDoesNotSyncTest::RunTest(const FString& Paramet
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(40);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0036), Base + FVector(0.f, 0.f, 500000.f), 8900.0);
-    F.Sync();   // F10: the sensor's first sync, so the Update below has no "init" to run
+    F.Sync();   // the sensor's first sync, so the Update below has no "init" to run
 
     TestNotNull(TEXT("cube"), F.Keep(SpawnMeshActor(World, Cube, Base + FVector(6000.f, 0.f, 0.f), EComponentMobility::Static)));
     F.SM.SetSyncInterval(3600.f);
@@ -410,7 +410,7 @@ bool FSceneSyncIrrelevantLevelAddDoesNotSyncTest::RunTest(const FString& Paramet
 }
 
 // ============================================================================
-// P3: the instances of a Static ISM are re-evaluated against the sensor spheres
+// The instances of a Static ISM are re-evaluated against the sensor spheres
 // ============================================================================
 
 // The instances of a registered Static ISM are not chosen once: instance 0 at 40 m is registered, instance 1 at 200 m
@@ -485,7 +485,7 @@ bool FSceneSyncIsmInstanceDroppedBeyondUnloadRadiusTest::RunTest(const FString& 
     return true;
 }
 
-// M5 / D7: an Update that syncs only queues the ISM groups; the instance changes run on the next Update without a
+// An Update that syncs only queues the ISM groups; the instance changes run on the next Update without a
 // sync (cap 0 = unlimited). Instance 0 at 40 m, instance 1 at 200 m; the sensor moves 160 m (a distance sync).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmChangesDeferredOnSyncUpdateTest, "CarlaRGL.SceneSync.IsmChangesDeferredOnSyncUpdate",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
@@ -577,6 +577,121 @@ bool FSceneSyncIsmChangesCappedPerUpdateTest::RunTest(const FString& Parameters)
     return true;
 }
 
+// When every Update syncs, the instances of a Static ISM are re-evaluated all the same: on the simulation clock with
+// 1 s between Updates and the default 1 s interval (as with RGL sensors that all tick every second or slower), every
+// Update is a time sync, and there is no Update without a sync to take the re-evaluation's step. A sync Update that
+// follows another sync Update takes that step itself. Instances 40, 140, 240 and 340 m along +X; the sensor drives along
+// them 10 m per Update (below the 15 m distance trigger). No ISM instance is ever missing inside the range, and at the
+// end (sensor at 320 m) the two instances behind (280 m and 180 m away, beyond 140 m) are gone and the two ahead are in.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmReevaluatedWhenEveryUpdateSyncsTest, "CarlaRGL.SceneSync.IsmReevaluatedWhenEveryUpdateSyncs",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncIsmReevaluatedWhenEveryUpdateSyncsTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(49);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0046), Base, 9700.0);
+    SetCVar(TEXT("rgl.Scene.SyncClock"), 1);                     // the fixture puts the clock and the interval back
+    SetFloatCVar(TEXT("rgl.Scene.SyncIntervalSeconds"), 1.0f);
+    FFloatCVarGuard UnloadGuard(TEXT("rgl.Scene.UnloadDistanceFactor"));
+    SetFloatCVar(TEXT("rgl.Scene.UnloadDistanceFactor"), 1.0f);  // unload radius = 120 m + 20 m
+    FCVarGuard CapGuard(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"));
+    SetCVar(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"), 512);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AActor* Owner = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f),
+        { FVector::ZeroVector, FVector(10000.f, 0.f, 0.f), FVector(20000.f, 0.f, 0.f), FVector(30000.f, 0.f, 0.f) }, Owner);
+    F.Keep(Owner);
+    if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
+    F.Sync();
+    TestEqual(TEXT("instance 0 (40 m) registered"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+
+    // Updates at whole seconds (exact in binary): 1 s apart, so each one meets the 1 s interval exactly.
+    F.T = FMath::FloorToDouble(F.T) + 2.0;
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    int32 Updates = 0, NotTime = 0, MissFrames = 0;
+    FString FirstMiss;
+    for (int32 k = 0; k < 32; ++k)
+    {
+        F.SensorPos = Base + FVector(1000.f * static_cast<float>(k + 1), 0.f, 0.f);
+        F.Refresh();
+        F.SM.Update_ForTest(World, F.T);
+        ++Updates;
+        NotTime += (F.SM.LastSyncTrigger_ForTest == TEXT("time")) ? 0 : 1;
+        const FRGLSceneAuditResult D = Diff(R0, F.Audit());
+        if (D.MissingIsmInRange != 0 && MissFrames++ == 0)
+        {
+            FirstMiss = FString::Printf(TEXT("sensor at %.0f m: missing_ism_in_range=%d entities=%d"), 10.0 * (k + 1),
+                                        D.MissingIsmInRange, F.SM.GetIsmEntityCount_ForTest(Ism));
+        }
+        F.T += 1.0;
+    }
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(49, F.T, R1));
+    AddInfo(FString::Printf(TEXT("updates=%d syncs=%d not_time=%d miss_frames=%d first=%s entities=%d"), Updates,
+                            F.SM.SyncCount_ForTest - Syncs0, NotTime, MissFrames, *FirstMiss, F.SM.GetIsmEntityCount_ForTest(Ism)));
+    const FRGLSceneAuditResult D = Diff(R0, R1);
+    TestEqual(TEXT("every Update synced"), F.SM.SyncCount_ForTest - Syncs0, Updates);
+    TestEqual(TEXT("every sync was a time sync"), NotTime, 0);
+    TestEqual(TEXT("no Update with an ISM instance missing in range"), MissFrames, 0);
+    TestEqual(TEXT("the end: the two instances ahead are registered, the two behind are gone"), F.SM.GetIsmEntityCount_ForTest(Ism), 2);
+    TestEqual(TEXT("the end: registered +2"), D.Registered, 2);
+    TestEqual(TEXT("the end: nothing missing in range"), D.MissingInRange, 0);
+    TestEqual(TEXT("the end: no ISM ghost"), D.GhostIsm, 0);
+    return true;
+}
+
+// The step a sync Update takes when the previous Update synced too keeps rgl.Scene.MaxIsmInstanceChangesPerUpdate: cap 1,
+// three instances come into R together (200, 205 and 210 m; the sensor moves 160 m) and every Update is a sync (1 s
+// apart on the simulation clock): one instance per Update. The first sync Update after the fixture's sync (which drained
+// the re-evaluation in full) takes no step, as before: a step already ran since the previous sync.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmStepOnSyncUpdatesKeepsCapTest, "CarlaRGL.SceneSync.IsmStepOnSyncUpdatesKeepsCap",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncIsmStepOnSyncUpdatesKeepsCapTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(50);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0047), Base, 9750.0);
+    SetCVar(TEXT("rgl.Scene.SyncClock"), 1);
+    SetFloatCVar(TEXT("rgl.Scene.SyncIntervalSeconds"), 1.0f);
+    FFloatCVarGuard UnloadGuard(TEXT("rgl.Scene.UnloadDistanceFactor"));
+    SetFloatCVar(TEXT("rgl.Scene.UnloadDistanceFactor"), 1.0f);
+    FCVarGuard CapGuard(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"));
+    SetCVar(TEXT("rgl.Scene.MaxIsmInstanceChangesPerUpdate"), 1);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+
+    AActor* Owner = nullptr;
+    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base + FVector(4000.f, 0.f, 0.f),
+        { FVector::ZeroVector, FVector(16000.f, 0.f, 0.f), FVector(16500.f, 0.f, 0.f), FVector(17000.f, 0.f, 0.f) }, Owner);
+    F.Keep(Owner);
+    if (!TestNotNull(TEXT("ISMC"), Ism)) return false;
+    F.Sync();
+    TestEqual(TEXT("instance 0 registered"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+
+    F.T = FMath::FloorToDouble(F.T) + 2.0;
+    F.SensorPos = Base + FVector(16000.f, 0.f, 0.f);
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    auto Step = [&F, World]() { F.Refresh(); F.SM.Update_ForTest(World, F.T); F.T += 1.0; };
+    Step();
+    TestEqual(TEXT("1st sync Update (after the full drain): no instance changed"), F.SM.GetIsmEntityCount_ForTest(Ism), 1);
+    Step();
+    TestEqual(TEXT("2nd sync Update: one instance added (cap 1)"), F.SM.GetIsmEntityCount_ForTest(Ism), 2);
+    TestEqual(TEXT("2nd sync Update: the group still waits"), Diff(R0, F.Audit()).PendingIsm, 1);
+    Step();
+    TestEqual(TEXT("3rd sync Update: one more"), F.SM.GetIsmEntityCount_ForTest(Ism), 3);
+    Step();
+    const FRGLSceneAuditResult R1 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(50, F.T, R1));
+    TestEqual(TEXT("4th sync Update: all four registered"), F.SM.GetIsmEntityCount_ForTest(Ism), 4);
+    TestEqual(TEXT("every Update synced"), F.SM.SyncCount_ForTest - Syncs0, 4);
+    TestEqual(TEXT("nothing missing in range"), Diff(R0, R1).MissingInRange, 0);
+    return true;
+}
+
 // A Static ISM whose bounds reach R but none of whose instances do is neither queued nor uploaded: a cylinder ISMC
 // 60 m from the sensor with its two instances 150 m to either side of it (162 m from the sensor). The cylinder is used
 // by no other test, so an upload would show in the counter.
@@ -612,7 +727,7 @@ bool FSceneSyncIsmWithoutInstanceInRangeDoesNotUploadTest::RunTest(const FString
     return true;
 }
 
-// Review focus 3: the instance count of a registered ISM changes at run time. The group is rebuilt at the next sync
+// The instance count of a registered ISM changes at run time. The group is rebuilt at the next sync
 // and no old instance index stays in use: 2 instances, then one added 10 m further (3), then instance 0 removed (2).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncIsmInstanceCountChangeReRegistersTest, "CarlaRGL.SceneSync.IsmInstanceCountChangeReRegisters",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
@@ -657,7 +772,7 @@ bool FSceneSyncIsmInstanceCountChangeReRegistersTest::RunTest(const FString& Par
 }
 
 // ============================================================================
-// N1: the name rule leaves out sky domes and spheres, not every name with "sky" in it
+// The name rule leaves out sky domes and spheres, not every name with "sky" in it
 // ============================================================================
 
 // The dome words on the mesh name, case-insensitive; CARLA's skyscraper parts and other "sky" names are no dome.
@@ -705,7 +820,7 @@ bool FSceneSyncSkyscraperRegisteredTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// Review focus 4: a sky mesh on a map nobody checked, under a name the dome words miss, is still left out when the old
+// A sky mesh on a map nobody checked, under a name the dome words miss, is still left out when the old
 // rule's names match and its bounds are wider than 2 km (the size guard). The same name on a cube of ordinary size is
 // registered.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncHugeLegacySkyStillExcludedTest, "CarlaRGL.SceneSync.HugeLegacySkyStillExcluded",
@@ -782,10 +897,10 @@ bool FSceneSyncExcludedWorldCountsTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// P2: the mesh cache is keyed by the asset's identity (FObjectKey), not by its address
+// The mesh cache is keyed by the asset's identity (FObjectKey), not by its address
 // ============================================================================
 
-// L3 (D6 keeps the order inside a sync: the scan, then the removals): an NPC is destroyed and the same model spawned in
+// The order inside a sync (the scan, then the removals): an NPC is destroyed and the same model spawned in
 // its place between two syncs. The scan registers the new component on the mesh the old entity still holds, so nothing
 // is uploaded and nothing waits in the create queue. With rgl.Scene.IdleMeshCacheMax = 0 (set here), removing the old
 // entity before the scan would destroy the cube's RGL mesh and upload it again.
@@ -825,7 +940,7 @@ bool FSceneSyncSameAssetRespawnReusesLiveMeshTest::RunTest(const FString& Parame
     return true;
 }
 
-// P2 (best effort): A is destroyed and garbage collected with no Update in between, so A's entity still holds the cache
+// Best effort: A is destroyed and garbage collected with no Update in between, so A's entity still holds the cache
 // entry of A's mesh M1 when another mesh, M2, takes M1's address. B, given M2, must get an upload of its own, not M1's
 // shape (a 1 m box where M2 is a 2 m one). B is spawned without a mesh before the collections, so its component cannot
 // take the address of A's component (the entity map is keyed by component address, outside this test). The rounds go on
@@ -912,7 +1027,7 @@ bool FSceneSyncGcReusedAddressGetsFreshMeshTest::RunTest(const FString& Paramete
     return true;
 }
 
-// F14 (deterministic): an idle cache entry whose key no longer resolves (its asset is marked as garbage) counts as
+// Deterministic: an idle cache entry whose key no longer resolves (its asset is marked as garbage) counts as
 // cache_stale until the next sync's purge destroys it; an idle entry whose asset lives stays. rgl.Scene.IdleMeshCacheMax
 // is raised so that the purge, not the idle cap, decides.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncStaleCacheKeyPurgedTest, "CarlaRGL.SceneSync.StaleCacheKeyPurged",
@@ -953,7 +1068,7 @@ bool FSceneSyncStaleCacheKeyPurgedTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// P4: one rgl_scene_stream_warning per sensor whose range stays not streamed in on a World Partition map
+// One rgl_scene_stream_warning per sensor whose range stays not streamed in on a World Partition map
 // ============================================================================
 
 // EmptyMap is not a World Partition map: the check that runs after each sync prints nothing, however long the sensor
@@ -1107,7 +1222,7 @@ bool FSceneSyncStreamWarningLineFormatTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// P7: a lighter static sync (the sky-name verdict is remembered per mesh; the scan's arrays are reused)
+// A lighter static sync (the sky-name verdict is remembered per mesh; the scan's arrays are reused)
 // ============================================================================
 
 // The name rule's verdict belongs to the mesh, not to the component: a Movable cube is registered, leaves the scene when
@@ -1157,8 +1272,8 @@ bool FSceneSyncSkyVerdictFollowsMeshSwapTest::RunTest(const FString& Parameters)
 }
 
 // The cost of a sync with 2,000 static cubes in range (logged; no threshold), and the scan's own time on the sync line
-// (scan_ms) that the P7 measurement reads. The line comes from an Update whose sync the sensor's 30 m move triggers
-// (more than the 24 m distance trigger; every cube stays inside R).
+// (scan_ms) that a measurement of the sync's cost reads. The line comes from an Update whose sync the sensor's 30 m move
+// triggers (more than the distance trigger; every cube stays inside R).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSyncCostLoggedTest, "CarlaRGL.SceneSync.SyncCostLogged",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncSyncCostLoggedTest::RunTest(const FString& Parameters)
@@ -1229,7 +1344,7 @@ bool FSceneSyncSkyVerdictMemoPurgedTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// 7b: the World Partition culling of non-Static parts (the map is taken as a World Partition one through the seam)
+// The World Partition culling of non-Static parts (the map is taken as a World Partition one through the seam)
 // ============================================================================
 // FWpTestScope (RGLSceneTestUtil.h) fixes the numbers: speed bounds 5 m/s, U 0.1 s, L_create 1 s, I 1 s, dt 0.05 s ->
 // T_sync_max 2.1 s, H 3.2 s, M 32 m; the fixture's sensor (R 120 m, range 100 m): R_load 132 m, R_unload 152 m. The
@@ -1692,6 +1807,8 @@ bool FSceneSyncWpApproachingObjectBeforeRangeTest::RunTest(const FString& Parame
 
 // The same for one ISM instance moved by UpdateInstanceTransform (the component's transform never changes): the whole
 // component is promoted and created under a cap of 2 per Update; the registered instances follow the current transforms.
+// On both sync clocks (R_load 132 m with the Update clock, 122 m with the simulation clock; the moving instance starts
+// 145 m away either way).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpMovingIsmBeforeRangeTest, "CarlaRGL.SceneSync.WpMovingIsmBeforeRange",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncWpMovingIsmBeforeRangeTest::RunTest(const FString& Parameters)
@@ -1699,54 +1816,61 @@ bool FSceneSyncWpMovingIsmBeforeRangeTest::RunTest(const FString& Parameters)
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(69);
-    FWpTestScope W(World, true);
-    SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 2);
-    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0909), Base, 12800.0);
-    F.Sync();
-    const FRGLSceneAuditResult R0 = F.Audit();
-    TArray<FVector> Offsets;
-    Offsets.Add(FVector(14500.f, 0.f, 0.f));   // instance 0 moves
-    for (int32 i = 0; i < 20; ++i)
+    for (int32 Clock = 0; Clock <= 1; ++Clock)
     {
-        Offsets.Add(BandPoint(FVector::ZeroVector, i, 20, 10500.f, 13000.f));
+        const TCHAR* ClockName = Clock ? TEXT("sim clock") : TEXT("update clock");
+        auto Msg = [ClockName](const TCHAR* What) { return FString::Printf(TEXT("%s: %s"), ClockName, What); };
+        FWpTestScope W(World, true, 0.05f, 5.0f, Clock);
+        SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 2);
+        FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0909), Base, 12800.0 + 50.0 * Clock);
+        F.Sync();
+        const FRGLSceneAuditResult R0 = F.Audit();
+        TArray<FVector> Offsets;
+        Offsets.Add(FVector(14500.f, 0.f, 0.f));   // instance 0 moves
+        for (int32 i = 0; i < 20; ++i)
+        {
+            Offsets.Add(BandPoint(FVector::ZeroVector, i, 20, 10500.f, 13000.f));
+        }
+        AActor* O = nullptr;
+        UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base, Offsets, O, EComponentMobility::Movable);
+        F.Keep(O);
+        if (!TestNotNull(*Msg(TEXT("ISM")), Ism)) return false;
+        const FTransform Comp0 = Ism->GetComponentTransform();
+        FMissFrames Miss;
+        int32 BadConsistency = 0, Stale = 0, Ghost = 0, OverCap = 0;
+        for (int32 k = 0; k < 100; ++k)
+        {
+            FTransform T;
+            Ism->GetInstanceTransform(0, T, /*bWorldSpace=*/true);
+            T.AddToTranslation(FVector(-50.f, 0.f, 0.f));
+            Ism->UpdateInstanceTransform(0, T, /*bWorldSpace=*/true, /*bMarkRenderStateDirty=*/true, /*bTeleport=*/true);
+            Ism->UpdateBounds();   // what the end of the frame does; the test stays in one frame
+            StepUpdate(F, World);
+            const FRGLSceneAuditResult D = Diff(R0, F.Audit());
+            Miss.Look(D, F.T);
+            BadConsistency += F.SM.IsIsmGroupConsistent_ForTest(Ism) ? 0 : 1;
+            Stale += D.StaleInstance != 0 ? 1 : 0;
+            Ghost += D.Ghost != 0 ? 1 : 0;
+            OverCap += (F.SM.WpAddedLastUpdate_ForTest + F.SM.WpRemovedLastUpdate_ForTest > 2) ? 1 : 0;
+        }
+        AddInfo(FString::Printf(TEXT("%s: frames=%d bad=%d first=%s entities=%d"), ClockName, Miss.Frames, Miss.Bad, *Miss.First,
+                                F.SM.GetIsmEntityCount_ForTest(Ism)));
+        TestTrue(*Msg(TEXT("the component transform never changed")), Ism->GetComponentTransform().Equals(Comp0));
+        TestEqual(*Msg(TEXT("no frame with an instance missing in range")), Miss.Bad, 0);
+        TestEqual(*Msg(TEXT("group consistent at every frame")), BadConsistency, 0);
+        TestEqual(*Msg(TEXT("no stale instance at any frame")), Stale, 0);
+        TestEqual(*Msg(TEXT("no ghost at any frame")), Ghost, 0);
+        TestEqual(*Msg(TEXT("never more than 2 changes per Update")), OverCap, 0);
+        TestTrue(*Msg(TEXT("promoted")), F.SM.IsWpPromoted_ForTest(Ism));
+        TestEqual(*Msg(TEXT("all 21 instances registered in the end")), F.SM.GetIsmEntityCount_ForTest(Ism), 21);
     }
-    AActor* O = nullptr;
-    UInstancedStaticMeshComponent* Ism = SpawnIsm(World, Cube, Base, Offsets, O, EComponentMobility::Movable);
-    F.Keep(O);
-    if (!TestNotNull(TEXT("ISM"), Ism)) return false;
-    const FTransform Comp0 = Ism->GetComponentTransform();
-    FMissFrames Miss;
-    int32 BadConsistency = 0, Stale = 0, Ghost = 0, OverCap = 0;
-    for (int32 k = 0; k < 100; ++k)
-    {
-        FTransform T;
-        Ism->GetInstanceTransform(0, T, /*bWorldSpace=*/true);
-        T.AddToTranslation(FVector(-50.f, 0.f, 0.f));
-        Ism->UpdateInstanceTransform(0, T, /*bWorldSpace=*/true, /*bMarkRenderStateDirty=*/true, /*bTeleport=*/true);
-        Ism->UpdateBounds();   // what the end of the frame does; the test stays in one frame
-        StepUpdate(F, World);
-        const FRGLSceneAuditResult D = Diff(R0, F.Audit());
-        Miss.Look(D, F.T);
-        BadConsistency += F.SM.IsIsmGroupConsistent_ForTest(Ism) ? 0 : 1;
-        Stale += D.StaleInstance != 0 ? 1 : 0;
-        Ghost += D.Ghost != 0 ? 1 : 0;
-        OverCap += (F.SM.WpAddedLastUpdate_ForTest + F.SM.WpRemovedLastUpdate_ForTest > 2) ? 1 : 0;
-    }
-    AddInfo(FString::Printf(TEXT("frames=%d bad=%d first=%s entities=%d"), Miss.Frames, Miss.Bad, *Miss.First, F.SM.GetIsmEntityCount_ForTest(Ism)));
-    TestTrue(TEXT("the component transform never changed"), Ism->GetComponentTransform().Equals(Comp0));
-    TestEqual(TEXT("no frame with an instance missing in range"), Miss.Bad, 0);
-    TestEqual(TEXT("group consistent at every frame"), BadConsistency, 0);
-    TestEqual(TEXT("no stale instance at any frame"), Stale, 0);
-    TestEqual(TEXT("no ghost at any frame"), Ghost, 0);
-    TestEqual(TEXT("never more than 2 changes per Update"), OverCap, 0);
-    TestTrue(TEXT("promoted"), F.SM.IsWpPromoted_ForTest(Ism));
-    TestEqual(TEXT("all 21 instances registered in the end"), F.SM.GetIsmEntityCount_ForTest(Ism), 21);
     return true;
 }
 
 // Two sensors: the part is still; sensor A comes at 5 m/s, sensor B 200 m to the side also moves. A part reaches the
 // scene through either sphere; a part inside both is one entity; removing B drops only what B alone held; a part
-// between R_load and R_unload stays (hysteresis) and leaves beyond R_unload.
+// between R_load and R_unload stays (hysteresis) and leaves beyond R_unload. On both sync clocks: the part behind A starts
+// 7 m inside R_load (125 m with the Update clock's 132 m, 115 m with the simulation clock's 122 m).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpMovingSensorAndUnionTest, "CarlaRGL.SceneSync.WpMovingSensorAndUnion",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncWpMovingSensorAndUnionTest::RunTest(const FString& Parameters)
@@ -1754,61 +1878,71 @@ bool FSceneSyncWpMovingSensorAndUnionTest::RunTest(const FString& Parameters)
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(70);
-    FWpTestScope W(World, true);
-    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A090A), Base, 12900.0);
-    const void* SensorB = reinterpret_cast<const void*>(0x5A090B);
-    FVector PosB = Base + FVector(0.f, 20000.f, 0.f);
-    auto RefreshB = [&]() { F.SM.RegisterSensor(SensorB, PosB, kRegistrationCm, F.T); F.SM.SetSensorAuditRange(SensorB, kRangeCm); };
-    RefreshB();
-    F.Sync();
-    const FRGLSceneAuditResult R0 = F.Audit();
-    AStaticMeshActor* Ahead = F.Keep(SpawnPart(World, Cube, Base + FVector(14500.f, 0.f, 0.f)));    // A comes to it
-    AStaticMeshActor* OnlyB = F.Keep(SpawnPart(World, Cube, Base + FVector(0.f, 30000.f, 0.f)));   // 100 m from B
-    AStaticMeshActor* Both = F.Keep(SpawnPart(World, Cube, Base + FVector(0.f, 10000.f, 0.f)));    // 100 m from both
-    AStaticMeshActor* Behind = F.Keep(SpawnPart(World, Cube, Base - FVector(12500.f, 0.f, 0.f)));  // A leaves it
-    RefreshB();
-    F.Sync();
-    const FRGLSceneAuditResult R1 = F.Audit();
-    TestTrue(TEXT("only-B part registered (B's sphere)"), F.SM.IsEntityRegistered_ForTest(OnlyB->GetStaticMeshComponent()));
-    TestTrue(TEXT("part in both spheres registered"), F.SM.IsEntityRegistered_ForTest(Both->GetStaticMeshComponent()));
-    TestTrue(TEXT("part behind A registered"), F.SM.IsEntityRegistered_ForTest(Behind->GetStaticMeshComponent()));
-    TestFalse(TEXT("part 145 m ahead culled"), F.SM.IsEntityRegistered_ForTest(Ahead->GetStaticMeshComponent()));
-    TestEqual(TEXT("three entities (no duplicate for the overlap)"), Diff(R0, R1).Registered, 3);
-    FMissFrames Miss;
-    int32 HysteresisChecked = 0, HysteresisBad = 0, UnloadChecked = 0, UnloadBad = 0;
-    for (int32 k = 0; k < 90; ++k)
+    for (int32 Clock = 0; Clock <= 1; ++Clock)
     {
-        F.SensorPos += FVector(50.f, 0.f, 0.f);    // A: 5 m/s toward Ahead
-        PosB += FVector(0.f, 50.f, 0.f);           // B: 5 m/s away
+        const TCHAR* ClockName = Clock ? TEXT("sim clock") : TEXT("update clock");
+        auto Msg = [ClockName](const TCHAR* What) { return FString::Printf(TEXT("%s: %s"), ClockName, What); };
+        FWpTestScope W(World, true, 0.05f, 5.0f, Clock);
+        FAuditFixture F(World, reinterpret_cast<const void*>(0x5A090A), Base, 12900.0 + 50.0 * Clock);
+        const void* SensorB = reinterpret_cast<const void*>(0x5A090B);
+        FVector PosB = Base + FVector(0.f, 20000.f, 0.f);
+        auto RefreshB = [&]() { F.SM.RegisterSensor(SensorB, PosB, kRegistrationCm, F.T); F.SM.SetSensorAuditRange(SensorB, kRangeCm); };
         RefreshB();
-        const int32 Syncs = F.SM.SyncCount_ForTest;
-        StepUpdate(F, World);
-        Miss.Look(Diff(R0, F.Audit()), F.T);
-        if (F.SM.SyncCount_ForTest != Syncs)
+        F.Sync();
+        const float LoadCm = F.SM.GetWpLoadRadiusCm_ForTest(F.Sensor);
+        const float UnloadCm = LoadCm + 2000.f;   // unload factor 1 + the 20 m margin
+        TestTrue(*Msg(Clock ? TEXT("R_load 122 m") : TEXT("R_load 132 m")), FMath::IsNearlyEqual(LoadCm, Clock ? 12200.f : kLoadCm, 1.f));
+        const FRGLSceneAuditResult R0 = F.Audit();
+        AStaticMeshActor* Ahead = F.Keep(SpawnPart(World, Cube, Base + FVector(14500.f, 0.f, 0.f)));    // A comes to it
+        AStaticMeshActor* OnlyB = F.Keep(SpawnPart(World, Cube, Base + FVector(0.f, 30000.f, 0.f)));   // 100 m from B
+        AStaticMeshActor* Both = F.Keep(SpawnPart(World, Cube, Base + FVector(0.f, 10000.f, 0.f)));    // 100 m from both
+        AStaticMeshActor* Behind = F.Keep(SpawnPart(World, Cube, Base - FVector(LoadCm - 700.f, 0.f, 0.f)));   // A leaves it
+        RefreshB();
+        F.Sync();
+        const FRGLSceneAuditResult R1 = F.Audit();
+        TestTrue(*Msg(TEXT("only-B part registered (B's sphere)")), F.SM.IsEntityRegistered_ForTest(OnlyB->GetStaticMeshComponent()));
+        TestTrue(*Msg(TEXT("part in both spheres registered")), F.SM.IsEntityRegistered_ForTest(Both->GetStaticMeshComponent()));
+        TestTrue(*Msg(TEXT("part behind A registered")), F.SM.IsEntityRegistered_ForTest(Behind->GetStaticMeshComponent()));
+        TestFalse(*Msg(TEXT("part 145 m ahead culled")), F.SM.IsEntityRegistered_ForTest(Ahead->GetStaticMeshComponent()));
+        TestEqual(*Msg(TEXT("three entities (no duplicate for the overlap)")), Diff(R0, R1).Registered, 3);
+        FMissFrames Miss;
+        int32 HysteresisChecked = 0, HysteresisBad = 0, UnloadChecked = 0, UnloadBad = 0;
+        for (int32 k = 0; k < 90; ++k)
         {
-            const float Gap = FVector::Dist(Behind->GetActorLocation(), F.SensorPos);
-            const bool bReg = F.SM.IsEntityRegistered_ForTest(Behind->GetStaticMeshComponent());
-            if (Gap > kLoadCm + 100.f && Gap < kUnloadCm - 100.f) { ++HysteresisChecked; HysteresisBad += bReg ? 0 : 1; }
-            if (Gap > kUnloadCm + 100.f) { ++UnloadChecked; UnloadBad += bReg ? 1 : 0; }
+            F.SensorPos += FVector(50.f, 0.f, 0.f);    // A: 5 m/s toward Ahead
+            PosB += FVector(0.f, 50.f, 0.f);           // B: 5 m/s away
+            RefreshB();
+            const int32 Syncs = F.SM.SyncCount_ForTest;
+            StepUpdate(F, World);
+            Miss.Look(Diff(R0, F.Audit()), F.T);
+            if (F.SM.SyncCount_ForTest != Syncs)
+            {
+                const float Gap = FVector::Dist(Behind->GetActorLocation(), F.SensorPos);
+                const bool bReg = F.SM.IsEntityRegistered_ForTest(Behind->GetStaticMeshComponent());
+                if (Gap > LoadCm + 100.f && Gap < UnloadCm - 100.f) { ++HysteresisChecked; HysteresisBad += bReg ? 0 : 1; }
+                if (Gap > UnloadCm + 100.f) { ++UnloadChecked; UnloadBad += bReg ? 1 : 0; }
+            }
         }
+        AddInfo(FString::Printf(TEXT("%s: frames=%d bad=%d first=%s hysteresis_checked=%d unload_checked=%d"), ClockName, Miss.Frames,
+                                Miss.Bad, *Miss.First, HysteresisChecked, UnloadChecked));
+        TestEqual(*Msg(TEXT("no frame with a part missing in range")), Miss.Bad, 0);
+        TestTrue(*Msg(TEXT("Ahead registered before A reached it")), F.SM.IsEntityRegistered_ForTest(Ahead->GetStaticMeshComponent()));
+        TestTrue(*Msg(TEXT("a sync saw Behind between R_load and R_unload")), HysteresisChecked > 0);
+        TestEqual(*Msg(TEXT("kept between R_load and R_unload")), HysteresisBad, 0);
+        TestTrue(*Msg(TEXT("a sync saw Behind beyond R_unload")), UnloadChecked > 0);
+        TestEqual(*Msg(TEXT("gone beyond R_unload")), UnloadBad, 0);
+        F.SM.UnregisterSensor(SensorB);
+        F.Sync();
+        TestFalse(*Msg(TEXT("B removed: the only-B part leaves")), F.SM.IsEntityRegistered_ForTest(OnlyB->GetStaticMeshComponent()));
+        TestTrue(*Msg(TEXT("B removed: Ahead (A's) stays")), F.SM.IsEntityRegistered_ForTest(Ahead->GetStaticMeshComponent()));
     }
-    AddInfo(FString::Printf(TEXT("frames=%d bad=%d first=%s hysteresis_checked=%d unload_checked=%d"), Miss.Frames, Miss.Bad, *Miss.First,
-                            HysteresisChecked, UnloadChecked));
-    TestEqual(TEXT("no frame with a part missing in range"), Miss.Bad, 0);
-    TestTrue(TEXT("Ahead registered before A reached it"), F.SM.IsEntityRegistered_ForTest(Ahead->GetStaticMeshComponent()));
-    TestTrue(TEXT("a sync saw Behind between R_load and R_unload"), HysteresisChecked > 0);
-    TestEqual(TEXT("kept between R_load and R_unload"), HysteresisBad, 0);
-    TestTrue(TEXT("a sync saw Behind beyond R_unload"), UnloadChecked > 0);
-    TestEqual(TEXT("gone beyond R_unload"), UnloadBad, 0);
-    F.SM.UnregisterSensor(SensorB);
-    F.Sync();
-    TestFalse(TEXT("B removed: the only-B part leaves"), F.SM.IsEntityRegistered_ForTest(OnlyB->GetStaticMeshComponent()));
-    TestTrue(TEXT("B removed: Ahead (A's) stays"), F.SM.IsEntityRegistered_ForTest(Ahead->GetStaticMeshComponent()));
     return true;
 }
 
 // A mesh that already has live entities does not let 2,000 parts in at once: cap 2, no ms cap. The sync's scan creates
-// nothing itself; every Update (sync Updates included) adds at most 2; the oldest wait keeps its age across syncs.
+// nothing itself; every Update (sync Updates included) adds at most 2; the oldest wait keeps its age across syncs. On
+// both sync clocks: the periodic sync every 20 Updates (Update clock) or every 10 (simulation clock); the age is read
+// at the first sync that finds parts waiting for more than 1 s (the 2nd, or the 3rd on the simulation clock).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpCachedEntitiesRespectBudgetTest, "CarlaRGL.SceneSync.WpCachedEntitiesRespectBudget",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncWpCachedEntitiesRespectBudgetTest::RunTest(const FString& Parameters)
@@ -1816,40 +1950,46 @@ bool FSceneSyncWpCachedEntitiesRespectBudgetTest::RunTest(const FString& Paramet
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(71);
-    FWpTestScope W(World, true);
-    SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 2);
-    SetFloatCVar(TEXT("rgl.Scene.MovableEntityBudgetMs"), 0.0f);
-    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A090C), Base, 13000.0);
-    F.Keep(SpawnMeshActor(World, Cube, Base + FVector(2000.f, 0.f, 0.f), EComponentMobility::Static));   // keeps the cube live
-    F.Sync();
-    TestTrue(TEXT("the cube mesh is live"), F.SM.GetMeshRefCount_ForTest(Cube) > 0);
-    for (int32 i = 0; i < 2000; ++i)
+    for (int32 Clock = 0; Clock <= 1; ++Clock)
     {
-        F.Keep(SpawnPart(World, Cube, BandPoint(Base, i, 2000, 10500.f, 13000.f)));
-    }
-    int32 MaxPerUpdate = 0, Syncs = 0, MaxEntityStep = 0;
-    double AgeBeforeSecondSync = -1.0, AgeAfterSecondSync = -1.0;
-    for (int32 k = 0; k < 45; ++k)
-    {
-        const int32 E0 = F.SM.GetSceneCounts_ForTest().Entities;
-        const int32 S0 = F.SM.SyncCount_ForTest;
-        const double Age0 = F.SM.GetWpQueueAgeMax_ForTest();
-        StepUpdate(F, World);
-        MaxPerUpdate = FMath::Max(MaxPerUpdate, F.SM.WpAddedLastUpdate_ForTest);
-        MaxEntityStep = FMath::Max(MaxEntityStep, F.SM.GetSceneCounts_ForTest().Entities - E0);
-        if (F.SM.SyncCount_ForTest != S0 && ++Syncs == 2)
+        const TCHAR* ClockName = Clock ? TEXT("sim clock") : TEXT("update clock");
+        auto Msg = [ClockName](const TCHAR* What) { return FString::Printf(TEXT("%s: %s"), ClockName, What); };
+        FWpTestScope W(World, true, 0.05f, 5.0f, Clock);
+        SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 2);
+        SetFloatCVar(TEXT("rgl.Scene.MovableEntityBudgetMs"), 0.0f);
+        FAuditFixture F(World, reinterpret_cast<const void*>(0x5A090C), Base, 13000.0 + 50.0 * Clock);
+        F.Keep(SpawnMeshActor(World, Cube, Base + FVector(2000.f, 0.f, 0.f), EComponentMobility::Static));   // keeps the cube live
+        F.Sync();
+        TestTrue(*Msg(TEXT("the cube mesh is live")), F.SM.GetMeshRefCount_ForTest(Cube) > 0);
+        for (int32 i = 0; i < 2000; ++i)
         {
-            AgeBeforeSecondSync = Age0;
-            AgeAfterSecondSync = F.SM.GetWpQueueAgeMax_ForTest();
+            F.Keep(SpawnPart(World, Cube, BandPoint(Base, i, 2000, 10500.f, 13000.f)));
         }
+        const int32 AgeSync = Clock ? 3 : 2;
+        int32 MaxPerUpdate = 0, Syncs = 0, MaxEntityStep = 0;
+        double AgeBefore = -1.0, AgeAfter = -1.0;
+        for (int32 k = 0; k < 45; ++k)
+        {
+            const int32 E0 = F.SM.GetSceneCounts_ForTest().Entities;
+            const int32 S0 = F.SM.SyncCount_ForTest;
+            const double Age0 = F.SM.GetWpQueueAgeMax_ForTest();
+            StepUpdate(F, World);
+            MaxPerUpdate = FMath::Max(MaxPerUpdate, F.SM.WpAddedLastUpdate_ForTest);
+            MaxEntityStep = FMath::Max(MaxEntityStep, F.SM.GetSceneCounts_ForTest().Entities - E0);
+            if (F.SM.SyncCount_ForTest != S0 && ++Syncs == AgeSync)
+            {
+                AgeBefore = Age0;
+                AgeAfter = F.SM.GetWpQueueAgeMax_ForTest();
+            }
+        }
+        AddInfo(FString::Printf(TEXT("%s: syncs=%d max_added_per_update=%d max_entity_step=%d age_before=%.2f age_after=%.2f pending=%d"),
+                                ClockName, Syncs, MaxPerUpdate, MaxEntityStep, AgeBefore, AgeAfter, F.SM.GetWpPendingJobs_ForTest()));
+        TestTrue(*Msg(TEXT("enough syncs ran")), Syncs >= AgeSync);
+        TestEqual(*Msg(TEXT("at most 2 added per Update")), MaxPerUpdate, 2);
+        TestTrue(*Msg(TEXT("the scene grows by at most 2 per Update (sync Updates included)")), MaxEntityStep <= 2);
+        TestTrue(*Msg(TEXT("work remains")), F.SM.GetWpPendingJobs_ForTest() > 0);
+        TestTrue(*Msg(TEXT("the oldest wait is not reset by the sync")), AgeAfter >= AgeBefore && AgeBefore > 1.0);
     }
-    AddInfo(FString::Printf(TEXT("syncs=%d max_added_per_update=%d max_entity_step=%d age_before=%.2f age_after=%.2f pending=%d"), Syncs,
-                            MaxPerUpdate, MaxEntityStep, AgeBeforeSecondSync, AgeAfterSecondSync, F.SM.GetWpPendingJobs_ForTest()));
-    TestTrue(TEXT("two syncs ran"), Syncs >= 2);
-    TestEqual(TEXT("at most 2 added per Update"), MaxPerUpdate, 2);
-    TestTrue(TEXT("the scene grows by at most 2 per Update (sync Updates included)"), MaxEntityStep <= 2);
-    TestTrue(TEXT("work remains"), F.SM.GetWpPendingJobs_ForTest() > 0);
-    TestTrue(TEXT("the oldest wait is not reset by the sync"), AgeAfterSecondSync >= AgeBeforeSecondSync && AgeBeforeSecondSync > 1.0);
     return true;
 }
 
@@ -2070,7 +2210,7 @@ bool FSceneSyncWpMotionPromotionFromRestTest::RunTest(const FString& Parameters)
 
 // Each contract broken on its own is logged: an Update gap above U, a pose refresh gap above U, a sensor faster than its
 // bound (and a sync forced by it), a culled part faster than its bound, a wait above L_create (whose age the next sync
-// does not reset).
+// does not reset). On both sync clocks (the interval's sync comes 2 s or 1 s after the previous one).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpCullContractsAreCheckedTest, "CarlaRGL.SceneSync.WpCullContractsAreChecked",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncWpCullContractsAreCheckedTest::RunTest(const FString& Parameters)
@@ -2078,63 +2218,104 @@ bool FSceneSyncWpCullContractsAreCheckedTest::RunTest(const FString& Parameters)
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
     const FVector Base = BaseFor(76);
-    FWpTestScope W(World, true);
-    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0911), Base, 13500.0);
-    F.Sync();
-    StepUpdate(F, World);
-    StepUpdate(F, World);
-    auto V = [&F](const TCHAR* K) { return F.SM.GetWpViolations_ForTest(K); };
-
-    // U: the scene Update and the pose refresh 0.3 s after the previous ones.
-    const int32 Gap0 = V(TEXT("update_gap")), Pose0 = V(TEXT("pose_gap"));
-    StepUpdate(F, World, 0.3);
-    TestEqual(TEXT("update_gap +1"), V(TEXT("update_gap")) - Gap0, 1);
-    TestEqual(TEXT("pose_gap +1"), V(TEXT("pose_gap")) - Pose0, 1);
-
-    // Sensor speed: 10 m in 0.1 s (100 m/s, bound 5): logged, and the Update syncs (wp_reset).
-    const int32 Speed0 = V(TEXT("sensor_speed"));
-    const int32 Syncs0 = F.SM.SyncCount_ForTest;
-    F.SensorPos += FVector(1000.f, 0.f, 0.f);
-    StepUpdate(F, World);
-    TestEqual(TEXT("sensor_speed +1"), V(TEXT("sensor_speed")) - Speed0, 1);
-    TestEqual(TEXT("a sync forced"), F.SM.SyncCount_ForTest - Syncs0, 1);
-    TestEqual(TEXT("trigger=wp_reset"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("wp_reset")));
-
-    // A culled part faster than its bound: 50 m between two syncs.
-    AStaticMeshActor* Far = F.Keep(SpawnPart(World, Cube, F.SensorPos + FVector(40000.f, 0.f, 0.f)));
-    F.Sync();
-    const int32 Obj0 = V(TEXT("object_speed"));
-    Far->SetActorLocation(Far->GetActorLocation() + FVector(5000.f, 0.f, 0.f));
-    F.Sync();
-    TestEqual(TEXT("object_speed +1"), V(TEXT("object_speed")) - Obj0, 1);
-    TestTrue(TEXT("and promoted"), F.SM.IsWpPromoted_ForTest(Far->GetStaticMeshComponent()));
-
-    // L_create: 0.2 s, one change per Update, 60 parts. The knob change forces a sync at the next Update, which finds
-    // them (new parts: not covered yet); the next interval sync (2 s later) queues them as known parts, older than 0.2 s.
-    SetFloatCVar(TEXT("rgl.Scene.MovableCreateLatencySeconds"), 0.2f);
-    SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 1);
-    for (int32 i = 0; i < 60; ++i)
+    for (int32 Clock = 0; Clock <= 1; ++Clock)
     {
-        F.Keep(SpawnPart(World, Cube, BandPoint(F.SensorPos, i, 60, 10500.f, 13000.f)));
+        const TCHAR* ClockName = Clock ? TEXT("sim clock") : TEXT("update clock");
+        auto Msg = [ClockName](const TCHAR* What) { return FString::Printf(TEXT("%s: %s"), ClockName, What); };
+        FWpTestScope W(World, true, 0.05f, 5.0f, Clock);
+        FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0911), Base, 13500.0 + 50.0 * Clock);
+        F.Sync();
+        StepUpdate(F, World);
+        StepUpdate(F, World);
+        auto V = [&F](const TCHAR* K) { return F.SM.GetWpViolations_ForTest(K); };
+
+        // U: the scene Update and the pose refresh 0.3 s after the previous ones.
+        const int32 Gap0 = V(TEXT("update_gap")), Pose0 = V(TEXT("pose_gap"));
+        StepUpdate(F, World, 0.3);
+        TestEqual(*Msg(TEXT("update_gap +1")), V(TEXT("update_gap")) - Gap0, 1);
+        TestEqual(*Msg(TEXT("pose_gap +1")), V(TEXT("pose_gap")) - Pose0, 1);
+
+        // Sensor speed: 10 m in 0.1 s (100 m/s, bound 5): logged, and the Update syncs (wp_reset).
+        const int32 Speed0 = V(TEXT("sensor_speed"));
+        const int32 Syncs0 = F.SM.SyncCount_ForTest;
+        F.SensorPos += FVector(1000.f, 0.f, 0.f);
+        StepUpdate(F, World);
+        TestEqual(*Msg(TEXT("sensor_speed +1")), V(TEXT("sensor_speed")) - Speed0, 1);
+        TestEqual(*Msg(TEXT("a sync forced")), F.SM.SyncCount_ForTest - Syncs0, 1);
+        TestEqual(*Msg(TEXT("trigger=wp_reset")), F.SM.LastSyncTrigger_ForTest, FString(TEXT("wp_reset")));
+
+        // A culled part faster than its bound: 50 m between two syncs.
+        AStaticMeshActor* Far = F.Keep(SpawnPart(World, Cube, F.SensorPos + FVector(40000.f, 0.f, 0.f)));
+        F.Sync();
+        const int32 Obj0 = V(TEXT("object_speed"));
+        Far->SetActorLocation(Far->GetActorLocation() + FVector(5000.f, 0.f, 0.f));
+        F.Sync();
+        TestEqual(*Msg(TEXT("object_speed +1")), V(TEXT("object_speed")) - Obj0, 1);
+        TestTrue(*Msg(TEXT("and promoted")), F.SM.IsWpPromoted_ForTest(Far->GetStaticMeshComponent()));
+
+        // L_create: 0.2 s, one change per Update, 60 parts. The knob change forces a sync at the next Update, which finds
+        // them (new parts: not covered yet); the next interval sync queues them as known parts, older than 0.2 s.
+        SetFloatCVar(TEXT("rgl.Scene.MovableCreateLatencySeconds"), 0.2f);
+        SetCVar(TEXT("rgl.Scene.MaxMovableEntityChangesPerUpdate"), 1);
+        for (int32 i = 0; i < 60; ++i)
+        {
+            F.Keep(SpawnPart(World, Cube, BandPoint(F.SensorPos, i, 60, 10500.f, 13000.f)));
+        }
+        const int32 Age0 = V(TEXT("queue_age"));
+        const int32 SyncsQ = F.SM.SyncCount_ForTest;
+        int32 Guard = 0;
+        while (F.SM.SyncCount_ForTest - SyncsQ < 2 && Guard++ < 45) StepUpdate(F, World);
+        StepUpdate(F, World);
+        AddInfo(FString::Printf(TEXT("%s: queue_age syncs=%d pending=%d age=%.2f"), ClockName, F.SM.SyncCount_ForTest - SyncsQ,
+                                F.SM.GetWpPendingJobs_ForTest(), F.SM.GetWpQueueAgeMax_ForTest()));
+        TestTrue(*Msg(TEXT("queue_age logged")), V(TEXT("queue_age")) - Age0 >= 1);
+        // A budgeted sync (a knob change forces it) rebuilds the queue: the waits keep their start.
+        const double AgeBefore = F.SM.GetWpQueueAgeMax_ForTest();
+        const int32 S1 = F.SM.SyncCount_ForTest;
+        SetFloatCVar(TEXT("rgl.Scene.MovableMinMarginM"), 21.0f);
+        StepUpdate(F, World);
+        AddInfo(FString::Printf(TEXT("%s: age_before=%.2f age_after=%.2f pending=%d trigger=%s"), ClockName, AgeBefore,
+                                F.SM.GetWpQueueAgeMax_ForTest(), F.SM.GetWpPendingJobs_ForTest(), *F.SM.LastSyncTrigger_ForTest));
+        TestEqual(*Msg(TEXT("the knob change forced a sync")), F.SM.SyncCount_ForTest - S1, 1);
+        TestTrue(*Msg(TEXT("still waiting after the sync")), F.SM.GetWpPendingJobs_ForTest() > 0);
+        TestTrue(*Msg(TEXT("age not reset by the sync")), F.SM.GetWpQueueAgeMax_ForTest() >= AgeBefore);
     }
-    const int32 Age0 = V(TEXT("queue_age"));
-    const int32 SyncsQ = F.SM.SyncCount_ForTest;
-    int32 Guard = 0;
-    while (F.SM.SyncCount_ForTest - SyncsQ < 2 && Guard++ < 45) StepUpdate(F, World);
+    return true;
+}
+
+// The culling's horizon is worked out from the sync clock and interval: changing either one live forces a sync at the
+// next Update (trigger wp_reset) whose horizon follows the new value (wp_sync_bound_s); an Update with no change does
+// not sync. From the Update clock (T_sync_max 2.1 s) to the simulation clock (1.1 s), then to a 2.5 s interval (2.6 s).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpLiveClockChangeResyncsTest, "CarlaRGL.SceneSync.WpLiveClockChangeResyncs",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncWpLiveClockChangeResyncsTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    FWpTestScope W(World, true);   // the Update clock, I 1 s, dt 0.05 s
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0A20), BaseFor(51), 15600.0);
+    F.Sync();
     StepUpdate(F, World);
-    AddInfo(FString::Printf(TEXT("queue_age syncs=%d pending=%d age=%.2f"), F.SM.SyncCount_ForTest - SyncsQ,
-                            F.SM.GetWpPendingJobs_ForTest(), F.SM.GetWpQueueAgeMax_ForTest()));
-    TestTrue(TEXT("queue_age logged"), V(TEXT("queue_age")) - Age0 >= 1);
-    // A budgeted sync (a knob change forces it) rebuilds the queue: the waits keep their start.
-    const double AgeBefore = F.SM.GetWpQueueAgeMax_ForTest();
-    const int32 S1 = F.SM.SyncCount_ForTest;
-    SetFloatCVar(TEXT("rgl.Scene.MovableMinMarginM"), 21.0f);
+    const int32 S0 = F.SM.SyncCount_ForTest;
     StepUpdate(F, World);
-    AddInfo(FString::Printf(TEXT("age_before=%.2f age_after=%.2f pending=%d trigger=%s"), AgeBefore, F.SM.GetWpQueueAgeMax_ForTest(),
-                            F.SM.GetWpPendingJobs_ForTest(), *F.SM.LastSyncTrigger_ForTest));
-    TestEqual(TEXT("the knob change forced a sync"), F.SM.SyncCount_ForTest - S1, 1);
-    TestTrue(TEXT("still waiting after the sync"), F.SM.GetWpPendingJobs_ForTest() > 0);
-    TestTrue(TEXT("age not reset by the sync"), F.SM.GetWpQueueAgeMax_ForTest() >= AgeBefore);
+    TestEqual(TEXT("no change: no sync"), F.SM.SyncCount_ForTest - S0, 0);
+
+    SetCVar(TEXT("rgl.Scene.SyncClock"), 1);
+    StepUpdate(F, World);
+    AddInfo(F.SM.LastSyncLine_ForTest);
+    TestEqual(TEXT("clock changed: one sync"), F.SM.SyncCount_ForTest - S0, 1);
+    TestEqual(TEXT("clock changed: trigger=wp_reset"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("wp_reset")));
+    TestTrue(TEXT("clock changed: wp_sync_bound_s=1.10"), F.SM.LastSyncLine_ForTest.Contains(TEXT(" wp_sync_bound_s=1.10 ")));
+    StepUpdate(F, World);
+    TestEqual(TEXT("no further change: no sync"), F.SM.SyncCount_ForTest - S0, 1);
+
+    SetFloatCVar(TEXT("rgl.Scene.SyncIntervalSeconds"), 2.5f);
+    StepUpdate(F, World);
+    AddInfo(F.SM.LastSyncLine_ForTest);
+    TestEqual(TEXT("interval changed: one sync"), F.SM.SyncCount_ForTest - S0, 2);
+    TestEqual(TEXT("interval changed: trigger=wp_reset"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("wp_reset")));
+    TestTrue(TEXT("interval changed: wp_sync_bound_s=2.60"), F.SM.LastSyncLine_ForTest.Contains(TEXT(" wp_sync_bound_s=2.60 ")));
+    StepUpdate(F, World);
+    TestEqual(TEXT("no further change: no sync"), F.SM.SyncCount_ForTest - S0, 2);
     return true;
 }
 
@@ -2183,7 +2364,7 @@ bool FSceneSyncWpCullStateDoesNotCrossWorldsTest::RunTest(const FString& Paramet
     return true;
 }
 
-// R5: the dt shrinks after the culling sync (0.05 -> 0.005 s) and the periodic sync would come 20 s later; a culled part
+// The deadline: the dt shrinks after the culling sync (0.05 -> 0.005 s) and the periodic sync would come 20 s later; a culled part
 // 420.9 m away (R_load 420 m with the default 50 m/s bounds) comes at 50 m/s and would reach the range at 6.4 s. The
 // deadline on the sim clock syncs in time (trigger wp_deadline); nothing is missing at any Update.
 // On both sync clocks: the above is the Update clock. On the simulation clock (rgl.Scene.SyncClock = 1) the periodic
@@ -2415,7 +2596,7 @@ bool FSceneSyncSyncFirstRglCallTimingTest::RunTest(const FString& Parameters)
 }
 
 // The late-creation contract covers what the margin protects: a part that was outside the load sphere at the previous
-// look. R6 makes parts first found inside the range immediately, without late_create. A part culled 300 m away
+// look. Parts first found inside the range are made immediately (outside the budget), without late_create. A part culled 300 m away
 // and then put inside the range (faster than its bound) is created inside the range: late_create.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpLateCreateOnlyForCulledPartsTest, "CarlaRGL.SceneSync.WpLateCreateOnlyForCulledParts",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
@@ -2446,7 +2627,7 @@ bool FSceneSyncWpLateCreateOnlyForCulledPartsTest::RunTest(const FString& Parame
     int32 Waiting = 0;
     for (UStaticMeshComponent* C : InRange) Waiting += F.SM.IsEntityRegistered_ForTest(C) ? 0 : 1;
     AddInfo(FString::Printf(TEXT("in-range parts still waiting at the second sync: %d"), Waiting));
-    TestEqual(TEXT("R6: no found-in-range part waits at the second sync"), Waiting, 0);
+    TestEqual(TEXT("no found-in-range part waits at the second sync"), Waiting, 0);
     for (int32 k = 0; k < 10; ++k) StepUpdate(F, World);
     int32 Registered = 0;
     for (UStaticMeshComponent* C : InRange) Registered += F.SM.IsEntityRegistered_ForTest(C) ? 1 : 0;
@@ -2462,7 +2643,7 @@ bool FSceneSyncWpLateCreateOnlyForCulledPartsTest::RunTest(const FString& Parame
     return true;
 }
 
-// R6: a loaded cell's in-range burst bypasses BOTH entity limits, including a cold mesh, while the prefetch band
+// A loaded cell's in-range burst bypasses BOTH entity limits, including a cold mesh, while the prefetch band
 // still has a budget. Sensor B alone sees the burst; A must not define the union by itself.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncWpInRangeDiscoveryBurstTest, "CarlaRGL.SceneSync.WpInRangeDiscoveryBurst",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
@@ -2504,18 +2685,18 @@ bool FSceneSyncWpInRangeDiscoveryBurstTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("discovery sync ran"), F.SM.SyncCount_ForTest > S0);
     int32 Registered = 0;
     for (UStaticMeshComponent* C : Parts) Registered += F.SM.IsEntityRegistered_ForTest(C) ? 1 : 0;
-    TestEqual(TEXT("R6: all 2000 regular parts in the discovery Update"), Registered, Parts.Num());
-    TestEqual(TEXT("R6: all 2000 cold-mesh instances in the discovery Update"), F.SM.GetIsmEntityCount_ForTest(Ism), 2000);
+    TestEqual(TEXT("all 2000 regular parts in the discovery Update"), Registered, Parts.Num());
+    TestEqual(TEXT("all 2000 cold-mesh instances in the discovery Update"), F.SM.GetIsmEntityCount_ForTest(Ism), 2000);
     TestTrue(TEXT("ISM consistent after the burst"), F.SM.IsIsmGroupConsistent_ForTest(Ism));
     TestTrue(TEXT("prefetch band still waiting"), F.SM.GetWpPendingJobs_ForTest() > 0);
-    TestTrue(TEXT("R6: sync reports burst count"), F.SM.LastSyncLine_ForTest.Contains(TEXT("wp_inrange_added=4000")));
-    TestTrue(TEXT("R6: sync reports burst time"), F.SM.LastSyncLine_ForTest.Contains(TEXT("wp_inrange_ms=")));
-    TestEqual(TEXT("R6: no WP candidate missing in raw range"), F.Audit().MissingWpCulledInRange, 0);
+    TestTrue(TEXT("sync reports burst count"), F.SM.LastSyncLine_ForTest.Contains(TEXT("wp_inrange_added=4000")));
+    TestTrue(TEXT("sync reports burst time"), F.SM.LastSyncLine_ForTest.Contains(TEXT("wp_inrange_ms=")));
+    TestEqual(TEXT("no WP candidate missing in raw range"), F.Audit().MissingWpCulledInRange, 0);
     F.SM.UnregisterSensor(B);
     return true;
 }
 
-// R7 boundary: first 0.15 s interval (U=.1, dt=.05), then dt shrinks with prefetch work waiting. A culled object
+// The start-up exemption's boundary: first 0.15 s interval (U=.1, dt=.05), then dt shrinks with prefetch work waiting. A culled object
 // approaches a stationary sensor at the bound; the deadline and budget finish it BEFORE raw range, on every frame.
 // Only the first <=U+dt gap is exempt; second gaps, late sensors' second gaps, and oversized first gaps still violate.
 // On both sync clocks: on the simulation clock (R_load 320 m) the periodic sync counts sim time, so the shrinking dt
@@ -2545,7 +2726,7 @@ bool FSceneSyncWpStartupGapBoundaryTest::RunTest(const FString& Parameters)
         TestFalse(*Msg(TEXT("approaching part initially culled")), F.SM.IsEntityRegistered_ForTest(C));
         const FRGLSceneAuditResult R0 = F.Audit();
         A->SetActorLocation(A->GetActorLocation() - FVector(750.f, 0.f, 0.f));
-        // R10: only A was active at the interval start. Seven sensors join at its END, before the next init sync.
+        // Only A was active at the interval start. Seven sensors join at its END, before the next init sync.
         // Their uninitialized state must not invalidate A's first scene-wide interval (nor excuse a later interval).
         TArray<const void*> JoinedSensors;
         for (UPTRINT i = 0; i < 7; ++i)
@@ -2555,12 +2736,12 @@ bool FSceneSyncWpStartupGapBoundaryTest::RunTest(const FString& Parameters)
             F.SM.RegisterSensor(Sensor, Base, kRegistrationCm, F.T + 0.15);
         }
         StepUpdate(F, World, 0.15);
-        TestEqual(*Msg(TEXT("R10: seven joining sensors do not invalidate the first update interval")), V(TEXT("update_gap")) - U0, 0);
-        TestEqual(*Msg(TEXT("R7: first pose gap <= U+dt exempt")), V(TEXT("pose_gap")) - P0, 0);
+        TestEqual(*Msg(TEXT("seven joining sensors do not invalidate the first update interval")), V(TEXT("update_gap")) - U0, 0);
+        TestEqual(*Msg(TEXT("first pose gap <= U+dt exempt")), V(TEXT("pose_gap")) - P0, 0);
         for (const void* Sensor : JoinedSensors) F.SM.UnregisterSensor(Sensor);
         for (int32 i = 0; i < 8; ++i) F.Keep(SpawnPart(World, Cube, BandPoint(Base, i, 8, 20000.f, 22000.f)));
         F.SM.WorldDtOverride_ForTest = 0.005f;
-        // R5 must force the scan before the old horizon expires, including the first extra dt (Update clock).
+        // The deadline must force the scan before the old horizon expires, including the first extra dt (Update clock).
         const int32 Deadline0 = F.SM.WpDeadlineSyncs_ForTest();
         int32 PendingMax = 0, Missing = 0;
         double RegisteredGap = -1.0;
@@ -2615,7 +2796,7 @@ bool FSceneSyncWpStartupGapBoundaryTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// P8 part 1: the clock and the interval of the periodic sync (rgl.Scene.SyncClock, rgl.Scene.SyncIntervalSeconds), the
+// The clock and the interval of the periodic sync (rgl.Scene.SyncClock, rgl.Scene.SyncIntervalSeconds), the
 // shared parser of the -rgl-scene-*= switches, the rgl_scene_config line and the per-sensor rgl_scene_sensor line
 // ============================================================================
 
@@ -2857,7 +3038,7 @@ bool FSceneSyncSceneSensorLineAtFirstSyncTest::RunTest(const FString& Parameters
 }
 
 // ============================================================================
-// P8 part 2: the distance trigger capped by the margin between R and the range (rgl.Scene.SyncTriggerRatio,
+// The range edge: the distance trigger capped by the margin between R and the range (rgl.Scene.SyncTriggerRatio,
 // rgl.Scene.SyncTriggerMarginSlackM), and the queued parts inside a sensor's range created outside the create budget
 // (rgl.Scene.InRangeCreatesPerUpdate, rgl.Scene.InRangeCreateBudgetMs)
 // ============================================================================
