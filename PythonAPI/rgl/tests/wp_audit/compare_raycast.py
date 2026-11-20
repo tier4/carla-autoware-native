@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Occupancy-grid comparison between RGL hits and ray_cast_semantic hits (0b).
+"""Occupancy-grid comparison between RGL hits and ray_cast_semantic hits.
 
 Usage:
   compare_raycast.py --rgl <dir> --raycast <dir> --cell 1.0 [--mask-tags 22,23] [--static]
                      [--csv <path>]
 
---rgl <dir>      : Task 5 dump files <sensor>_<frame>.bin (CARLA world coordinates [m]).
+--rgl <dir>      : debug hit dump files <sensor>_<frame>.bin (rgl.Debug.HitDumpDir; CARLA world coordinates [m]).
 --raycast <dir>  : <frame>.npz with xyz (m, CARLA world coordinates) and tag, written by
                    run_scenario.py --with-raycast.
 Running comparison pairs the two sides by sim_t (one revolution each). RGL dumps carry

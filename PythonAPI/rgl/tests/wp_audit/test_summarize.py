@@ -8,7 +8,7 @@ import summarize  # noqa: E402
 
 
 def _audit(frame, missing_in_range=0, radius=200.0, sim_t=None, **kw):
-    """A stage-0 style audit line (no ghost_ism / missing_steady / pending_ism ... unless given in kw)."""
+    """An audit line of the first format (no ghost_ism / missing_steady / pending_ism ... unless given in kw)."""
     f = dict(
         ghost=0, ghost_in_range=0, missing_sync=0, missing_in_range=missing_in_range,
         mesh_mismatch=0, stale_instance=0, excluded_by_name=0, unextractable=0,
@@ -132,7 +132,7 @@ def test_ism_breakdown_and_old_lines():
     assert r["missing_ism_sync_max"] == 3
 
 
-# ---- stage 1 (Task 0C): steady state (D13), pending split, ISM / spline / cache breakdown, sync triggers
+# ---- the later keys: steady state, pending split, ISM / spline / cache breakdown, sync triggers
 
 def test_steady_requires_sync_after_level_add():
     # a level comes in at 1.0 s; the sync that saw it is the one 0.0 s before 1.2 s (the 1.1 s line's sync is older)
@@ -187,7 +187,7 @@ def test_sync_trigger_counts():
 
 
 def test_old_lines_without_new_keys_count_zero():
-    # stage-0 lines: none of the stage-1 keys; a missing key counts as 0
+    # lines of the first format: none of the later keys; a missing key counts as 0
     lines = [_audit(1, ghost=2, missing_in_range=3, missing_sync=3), _audit(2)]
     r = summarize.summarize_lines(lines, "S1p", "Town15", 200.0)
     assert r["ghost_ism_max"] == 0 and r["missing_steady_max"] == 0 and r["pending_ism_max"] == 0
@@ -219,7 +219,7 @@ def _write_run(tmp_path, no_audit, lines):
 
 
 def test_no_audit_run_reports_radius_na(tmp_path, capsys):
-    # 0B-R2: a --no-audit run has no audit line, so there is nothing to check the radius against
+    # a --no-audit run has no audit line, so there is nothing to check the radius against
     d = _write_run(tmp_path, 1, [_sync(5.0, "init"), _sync(7.0)])
     r = summarize.summarize_dir(d)
     assert r["radius_mismatch"] is None
@@ -236,7 +236,7 @@ def test_audit_run_without_audit_lines_stays_invalid(tmp_path, capsys):
     assert "status=invalid reason=radius_mismatch" in capsys.readouterr().out
 
 
-# ---- 7b: the World Partition culling of non-Static parts ----
+# ---- the World Partition culling of non-Static parts ----
 def test_missing_wp_culled_counted_while_pending():
     # a known culled part in range is a miss even while jobs are pending: never dropped by the pending filters
     lines = [_audit(1, pending=2, pending_ism=1, missing_in_range=1, missing_wp_culled_in_range=1),
@@ -292,7 +292,7 @@ def test_wp_sync_keys_absent_are_na_and_counts_zero():
 
 
 def test_steady_excludes_rows_with_the_wp_queue_waiting():
-    # 7b: the culling's queue not yet empty (wp_pending > 0) is no steady row, like pending / pending_ism
+    # the culling's queue not yet empty (wp_pending > 0) is no steady row, like pending / pending_ism
     lines = [_audit(1, wp_pending=1441, missing_steady=1448, missing_in_range=1441),
              _audit(2, wp_pending=0, missing_steady=0)]
     r = summarize.summarize_lines(lines, "S1p", "Town15", 200.0)

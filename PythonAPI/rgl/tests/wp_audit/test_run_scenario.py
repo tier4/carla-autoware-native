@@ -39,7 +39,7 @@ def test_udp_ports_free_when_nothing_listens():
 def test_det_turns_noise_off():
     assert run_scenario.lidar_preset_kwargs(True) == {"apply_noise": False}
     assert run_scenario.lidar_preset_kwargs(False) == {}
-    # F3: the deterministic set also switches off the wall-clock in-range create budget (unknown switches are ignored)
+    # The deterministic set also switches off the wall-clock in-range create budget (unknown switches are ignored)
     assert run_scenario.det_server_args(True) == ["-rgl-scene-create-budget-ms=0",
                                                   "-rgl-scene-in-range-create-budget-ms=0"]
     assert run_scenario.det_server_args(False) == []

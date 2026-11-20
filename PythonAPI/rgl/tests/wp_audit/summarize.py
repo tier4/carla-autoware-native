@@ -18,18 +18,18 @@ SYNC_TAG = "rgl_scene_sync "
 STREAM_WARNING_TAG = "rgl_scene_stream_warning"
 SYNC_TRIGGERS = ("init", "time", "distance", "level")
 
-# Stage-0 definition of "steady" for missing_sync_steady_max (kept unchanged): lines
+# The first definition of "steady", for missing_sync_steady_max (kept unchanged): lines
 # where no level was added since the previous line, nothing is pending creation and
 # the streaming is reported complete (stream_covered != 0).
 #
-# Stage-1 definition (D13) for missing_steady_max / steady_rows / steady_valid, decided
+# The later definition, for missing_steady_max / steady_rows / steady_valid, decided
 # line by line in order: t_add = sim_t of the last line so far with levels_added > 0;
 # a line is steady when pending == 0 and pending_ism == 0 and (t_add is None or
 # sim_t - since_sync_s >= t_add - 0.01), i.e. a sync ran after the last level came in.
 # stream_covered is not used: the audit counts only components of loaded levels, and a
 # map that never reports full coverage (S3) would otherwise have no steady line at all.
 # steady_valid = steady_rows >= 0.2 * frames. Keys missing from a line count as 0.
-# Task 7b adds the culling's queue: a line with wp_pending > 0 (jobs of the World Partition culling of non-Static parts
+# The World Partition culling adds its queue: a line with wp_pending > 0 (jobs of the World Partition culling of non-Static parts
 # not done yet) is not steady either.
 
 
@@ -92,7 +92,7 @@ def _radius_mismatch(radii, expected):
 
 
 def steady_lines(audits):
-    """The audit lines that are steady by the stage-1 definition (D13, see the top of this file)."""
+    """The audit lines that are steady by the later definition (see the top of this file)."""
     t_add = None
     out = []
     for a in audits:
@@ -182,7 +182,7 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None, 
         "tick_over_100ms": sum(1 for v in tick_ms if v > 100.0) if tick_ms else None,
         "tick_ms_p99": percentile(list(tick_ms), 99) if tick_ms else None,
         "tick_ms_max": max(tick_ms) if tick_ms else None,
-        # stage 1 (D13 steady state, pending split, breakdowns; keys missing from a line count as 0)
+        # the later steady state, pending split, breakdowns (keys missing from a line count as 0)
         "missing_steady_max": int(max((_num(a, "missing_steady") for a in st), default=0)),
         "steady_rows": len(st),
         "steady_valid": int(len(st) >= 0.2 * len(audits)),
@@ -198,7 +198,7 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None, 
         "spline_registered_max": int(max(g("spline_registered"), default=0)),
         "sync_triggers": ",".join("%s:%d" % (t, triggers.count(t)) for t in SYNC_TRIGGERS),
         "stream_warnings": warnings,
-        # 7b (World Partition culling of non-Static parts). Audit keys: na without audit lines or without the key.
+        # World Partition culling of non-Static parts. Audit keys: na without audit lines or without the key.
         # missing_wp_culled_in_range is counted on every audit line, pending or not (a known part in range).
         "missing_wp_culled_in_range_frames": (None if wp_culled is None else sum(1 for v in wp_culled if v > 0)),
         "missing_wp_culled_in_range_max": (None if wp_culled is None else int(max(wp_culled, default=0))),

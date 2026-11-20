@@ -1,31 +1,27 @@
-"""Scenario table for the World Partition scene-audit runner (stage 0).
+"""Scenario table for the World Partition scene-audit runner.
 
 Does not import carla (so the table can be inspected and tested anywhere).
 
-ROUTE COORDINATES ARE PLACEHOLDERS (TODO). The maps cannot be opened on the dev
-PC, so no polyline below is real. run_scenario.py detects a placeholder route
-and stops with `status=invalid reason=route_not_set`. Fill them in before the
-first real run (coordinates are CARLA world coordinates [m], left-handed,
-x forward / y right / z up, the same as carla.Location):
+The routes are polylines in CARLA world coordinates [m] (left-handed, x forward /
+y right / z up, the same as carla.Location), one JSON file per map in routes/
+(see the frozen-routes comment below). A map without a file has no route, and
+run_scenario.py stops with `status=invalid reason=route_not_set`. How they were
+made:
 
-  Town15 (WP)   : run pick_route.py --mode town15 on the machine that has the
-                  package. It walks world.get_map() waypoints and keeps only
-                  road stretches where cast_ray hits (downwards, semantic tag)
+  Town15 (WP)   : pick_route.py --mode town15 on a machine that has the package.
+                  It walks world.get_map() waypoints and keeps only road
+                  stretches where cast_ray hits (downwards, semantic tag)
                   contain no Terrain (= no Landscape under the road), then
-                  prints a polyline. Plan (Task 6, "polyline provenance"):
-                  pick a stretch without Landscape and freeze its coordinates.
+                  prints a polyline: a stretch without Landscape, frozen.
   Odaiba        : the OpenDRIVE map does not exist, so waypoints are not
-                  available. The polyline comes from the CS Odaiba V2I scenario
-                  (ndt_awsimpcd_teleport_1b_v2i.yml under
-                  /mnt/dsk0/wk0/CARLA/ss2_carla_bridge/AW/pilot-auto.x2/v4.4-e2e/
-                  pilot-auto.x2/src/simulator/carla_support.x2/scenario/ndt_scenarios/):
-                  ego start = lanelet 2314486 s=25.0127 offset=0.5, route
-                  waypoints = lanelet 1501 s=30, lanelet 164 s=25. Use
-                  `pick_route.py --mode odaiba --lanelets 2314486,1501,164` to
-                  print the lanelet2 centerlines (local_x/local_y of the osm),
-                  then convert to CARLA coordinates (the controller decides
-                  the conversion; it is not guessed here).
-  Town10HD_Opt  : CONTROL only. Use waypoints (pick_route.py --mode town10).
+                  available. The polyline follows the lanelet2 map from the
+                  ego start of a driving scenario on that map (lanelet 2314486
+                  s=25.0127 offset=0.5; route waypoints lanelet 1501 s=30,
+                  lanelet 164 s=25). `pick_route.py --mode odaiba --lanelets
+                  2314486,1501,164 --osm <lanelet2_map.osm>` prints the lanelet2
+                  centerlines (local_x/local_y of the osm); they are converted
+                  to CARLA coordinates with the map's offset (below).
+  Town10HD_Opt  : CONTROL only. Waypoints (pick_route.py --mode town10).
 
 Route length requirements (checked by run_scenario.py, `reason=route_too_short`):
   S1 / CONTROL : >= 6000 m of path (the polyline may be repeated by the runner
@@ -49,13 +45,13 @@ LIDAR_Z = 2.0
 LIDAR_MODEL = "HesaiPandar128E4X"
 
 # Frozen routes (2026-11-18), one JSON list of [x, y, z] per map in routes/<map>.json (CARLA m):
-#   Town15       : pick_route.py --mode town15 --load --length 6000 --step 10 on the t345b package
+#   Town15       : pick_route.py --mode town15 --load --length 6000 --step 10 on a packaged build
 #                  (waypoints without Terrain under the road), 600 points, ~6000 m.
 #   Town10HD_Opt : pick_route.py --mode town10 --load --length 6000 --step 10, 600 points, ~6000 m.
-#   Odaiba       : lanelet2 map 2516 (autoware_map/Odaiba/lanelet2_map.osm), lanelets chained from the CS V2I
-#                  scenario start 2314486, keeping only the 1131 lanelets whose centerline hits the CARLA
-#                  ground within 2 m; CARLA x = local_x - 92008.5, y = -(local_y - 45335.1), z = ele
-#                  (ss2_carla_bridge knowledge 003/019). 2222 points, 6558 m.
+#   Odaiba       : the Odaiba lanelet2 map (lanelet2_map.osm), lanelets chained from the scenario start
+#                  2314486, keeping only the 1131 lanelets whose centerline hits the CARLA ground within
+#                  2 m; CARLA x = local_x - 92008.5, y = -(local_y - 45335.1), z = ele (the map's offset).
+#                  2222 points, 6558 m.
 # A missing file leaves the map's route unset (run_scenario.py then stops with route_not_set).
 _ROUTE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "routes")
 
@@ -89,7 +85,7 @@ class Scenario:
     laps: int = 1
     pingpong: bool = False              # S5: forward and back
     min_route_m: float = 0.0
-    max_route_m: Optional[float] = None  # use only the first max_route_m of the map's route (keeps stage 0 short)
+    max_route_m: Optional[float] = None  # use only the first max_route_m of the map's route (keeps the run short)
     events: Tuple[str, ...] = ()        # runner-side behaviours, see run_scenario.py
     fixed_duration_s: Optional[float] = None    # when not route-based
     fixed_ticks: Optional[int] = None   # exact tick count (STATIC: settle + hold ticks, set by the runner)
@@ -106,10 +102,10 @@ def _s(**kw):
 SCENARIOS = {
     "S1": _s(name="S1", map="Town15", tile_stream_m=3000, actor_active_m=2000,
              radius_expected_m=3000.0, min_route_m=6000.0,
-             description="6 km at the default radii (Movable, P6, P7)"),
+             description="6 km at the default radii (non-Static parts, late sensors, sync cost)"),
     "S1p": _s(name="S1p", map="Town15", tile_stream_m=150, actor_active_m=150,
               radius_expected_m=150.0, min_route_m=500.0, max_route_m=1500.0,
-              description="same road with 150 m radii (P1, P2, P3, P5)"),
+              description="same road with 150 m radii (ghosts, mesh cache, ISM instances, level adds)"),
     "S2": _s(name="S2", map="Town15", tile_stream_m=150, actor_active_m=150,
              ego_role="npc_lidar", radius_expected_m=200.0, lidar_range_m=200.0,
              min_route_m=500.0, max_route_m=1500.0, description="non-hero vehicle carrying a 200 m LiDAR"),

@@ -10,20 +10,21 @@
   tuple literal to paste into scenarios.py.
 
   odaiba mode (no carla needed; the Odaiba map has no OpenDRIVE):
-    pick_route.py --mode odaiba --lanelets 2314486,1501,164
-                  [--osm /mnt/dsk0/wk0/CARLA/autoware_map/Odaiba/lanelet2_map.osm]
+    pick_route.py --mode odaiba --lanelets 2314486,1501,164 --osm <lanelet2_map.osm>
+  (--osm defaults to the environment variable ODAIBA_LANELET2_OSM; one of the two is required.)
   Prints the lanelet2 centerline (midpoint of the left/right bound) of each
   lanelet id in the osm's local_x/local_y/ele. These are NOT CARLA coordinates;
-  the controller decides the conversion before pasting into scenarios.py.
-  Source of the ids: the CS Odaiba V2I scenario ego start (lanelet 2314486,
-  s=25.0127) and route waypoints (lanelet 1501 s=30, lanelet 164 s=25) in
-  .../carla_support.x2/scenario/ndt_scenarios/ndt_awsimpcd_teleport_1b_v2i.yml.
+  convert them (the map's own offset) before pasting into scenarios.py.
+  Source of the ids: the ego start (lanelet 2314486, s=25.0127) and route
+  waypoints (lanelet 1501 s=30, lanelet 164 s=25) of a driving scenario on the
+  Odaiba map.
 """
 import argparse
+import os
 import sys
 import xml.etree.ElementTree as ET
 
-DEFAULT_OSM = "/mnt/dsk0/wk0/CARLA/autoware_map/Odaiba/lanelet2_map.osm"
+DEFAULT_OSM = os.environ.get("ODAIBA_LANELET2_OSM", "")
 
 
 def odaiba_centerlines(osm_path, lanelet_ids):
@@ -103,6 +104,8 @@ def main(argv):
     ap.add_argument("--osm", default=DEFAULT_OSM)
     args = ap.parse_args(argv)
     if args.mode == "odaiba":
+        if not args.osm:
+            ap.error("--mode odaiba needs --osm <lanelet2_map.osm> (or ODAIBA_LANELET2_OSM)")
         ids = [s for s in args.lanelets.split(",") if s]
         cl = odaiba_centerlines(args.osm, ids)
         for i in ids:

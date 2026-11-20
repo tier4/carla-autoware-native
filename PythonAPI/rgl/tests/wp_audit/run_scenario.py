@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""World Partition scene-audit scenario runner (stage 0).
+"""World Partition scene-audit scenario runner.
 
   run_scenario.py --pkg <dir> --map <Odaiba|Town15|Town10HD_Opt>
                   --scenario <S1|S1p|S2|S3|S4|S5|S6|S6b|S6c|S7|STATIC|CONTROL> --out <dir>
@@ -18,8 +18,8 @@ tick_ms.txt (client world.tick() wall time per tick), and with --with-raycast
 hits/ (the server's hit dumps) and raycast/<frame>.npz.
 
 No ROS 2 is needed: the RGL LiDAR is created without a topic and nothing is
-subscribed. Run this inside the venv that has the package's carla wheel.
-Not runnable on the dev PC (needs a package and a GPU).
+subscribed. Run it with a python that has the package's carla wheel.
+Needs a packaged server and a GPU.
 """
 import argparse
 import dataclasses
@@ -52,7 +52,7 @@ UDP_PORT_OFFSET = 40000
 NPC_BLUEPRINT = "vehicle.lincoln.mkz_2020"   # also the ego fallback
 NPC_AHEAD_M = 30.0
 NPC_SPAWN_TICK, NPC_DESTROY_TICK, NPC_RESPAWN_TICK = 400, 800, 801
-# D2: the deterministic set. The create budgets are wall-clock based; 0 removes them (the per-update count
+# The deterministic set (--det). The create budgets are wall-clock based; 0 removes them (the per-update count
 # limit stays). A server that does not know a switch ignores it.
 DET_SERVER_ARGS = ("-rgl-scene-create-budget-ms=0", "-rgl-scene-in-range-create-budget-ms=0")
 
@@ -100,7 +100,7 @@ def det_server_args(det):
 
 
 def npc_cycle_action(tick):
-    """D3: spawn at tick 400, destroy at 800, spawn the same vehicle again at 801."""
+    """The NPC cycle (--npc-cycle): spawn at tick 400, destroy at 800, spawn the same vehicle again at 801."""
     return {NPC_SPAWN_TICK: "spawn", NPC_DESTROY_TICK: "destroy", NPC_RESPAWN_TICK: "respawn"}.get(tick)
 
 
@@ -539,7 +539,7 @@ def drive(carla, world, bp_lib, sc, route, out, with_raycast, tick_log, deadline
                 s = sc.speed_mps * k * sc_mod.FIXED_DT + s_offset
             x, y, z, pitch, yaw = path.pose(s)
             action = npc_cycle_action(k) if opts.npc_cycle else None
-            if action == "spawn":      # D3: 30 m ahead on the route, physics off; the same spot is used again at 801
+            if action == "spawn":      # 30 m ahead on the route, physics off; the same spot is used again at 801
                 nx, ny, nz, npitch, nyaw = path.pose(s + NPC_AHEAD_M)
                 npc_tf = carla.Transform(carla.Location(nx, ny, nz + 0.5), carla.Rotation(pitch=npitch, yaw=nyaw))
             if action in ("spawn", "respawn"):
@@ -599,7 +599,7 @@ def main(argv):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--port", type=int, default=4000)
     ap.add_argument("--speed-mps", type=float, default=None,
-                    help="override the scenario's ego speed (e.g. the range-edge gap P8 grows with speed)")
+                    help="override the scenario's ego speed (e.g. the range-edge gap grows with speed)")
     ap.add_argument("--fixed-dt", type=float, default=None,
                     help="override fixed_delta_seconds (the end-to-end runs use 40 fps = 0.025; the RGL sync timer "
                          "only advances on frames where a sensor updates, so dt changes the sync interval)")
@@ -608,7 +608,7 @@ def main(argv):
     ap.add_argument("--udp-port-offset", type=int, default=UDP_PORT_OFFSET,
                     help="added to every rgl_udp_dest_port of the layout (default %(default)s)")
     ap.add_argument("--det", action="store_true",
-                    help="D2 deterministic set: server create budgets 0 and LiDAR noise off")
+                    help="deterministic set: server create budgets 0 and LiDAR noise off")
     ap.add_argument("--server-arg", action="append", default=[], metavar="SWITCH",
                     help="extra server switch, repeatable; write --server-arg=-rgl-scene-x=1")
     ap.add_argument("--hit-dump", action="store_true", help="have the server write hit dumps to <out>/hits")
@@ -620,7 +620,7 @@ def main(argv):
     ap.add_argument("--max-route-m", type=float, default=None,
                     help="use only the first M metres of the scenario's route (min_route_m becomes min(old, M))")
     ap.add_argument("--npc-cycle", action="store_true",
-                    help="D3: spawn an NPC 30 m ahead at tick 400, destroy it at 800, spawn it again at 801")
+                    help="spawn an NPC 30 m ahead at tick 400, destroy it at 800, spawn it again at 801")
     ap.add_argument("--hold-near", default=None, metavar="X,Y",
                     help="STATIC only: park the ego at the route point nearest to (x, y); write --hold-near=-1,2")
     ap.add_argument("--settle-ticks", type=int, default=200, help="STATIC: ticks before the hold (default %(default)s)")
@@ -713,7 +713,7 @@ def main(argv):
             if not free:
                 raise RunInvalid("udp_port_busy:%d" % busy)
 
-        import carla  # noqa: E402  (venv with the package wheel)
+        import carla  # noqa: E402  (a python with the package wheel)
         proc = start_server(a.pkg, a.out, a.port, not a.no_audit, dump_every, server_extra)
         pgid = proc.pid
         client = wait_rpc(carla, a.port, proc)

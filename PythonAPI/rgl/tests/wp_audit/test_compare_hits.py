@@ -1,4 +1,4 @@
-"""Tests for compare_hits.py (synthetic .bin dumps written with the stage-0 header; no CARLA, numpy only)."""
+"""Tests for compare_hits.py (synthetic .bin dumps written with the dump header; no CARLA, numpy only)."""
 import os
 import struct
 import sys
@@ -102,7 +102,7 @@ def test_identical_dumps_match_across_sensor_ids(tmp_path):
 
 def test_shifted_sim_t_still_matched(tmp_path, capsys):
     make_run(tmp_path / "b", 0xAAA, t0=2.4)
-    make_run(tmp_path / "c", 0xBBB, t0=2.5)             # every sim_t + 0.1 s (H1)
+    make_run(tmp_path / "c", 0xBBB, t0=2.5)             # every sim_t + 0.1 s
     kv = diff_kv(capsys, tmp_path / "b", tmp_path / "c")
     assert kv["matched"] == "2" and kv["time_mismatch"] == "0" and kv["identical"] == "2"
 
@@ -242,7 +242,7 @@ def test_fingerprint_rows(tmp_path):
     assert len(rows[0].split(",")[4]) == 40
 
 
-# ---- 7b: the keys added to the sync line (wait_ms, wait_api, wp_*) do not change what the gate compares ----
+# ---- World Partition culling: the keys added to the sync line (wait_ms, wait_api, wp_*) do not change what the gate compares ----
 WP_TAIL = (" scan_ms=1.00 reg_ms=0.00 remove_ms=0.00 skel_ms=0.00 wait_ms=61.20 wait_api=rgl_entity_destroy wp=1 "
            "wp_sync_bound_s=2.10 wp_create_latency_s=1.00 wp_margin_m=320.0 wp_pending=7 wp_queue_age_max_s=0.40 "
            "wp_check_n=12 wp_check_instances=900 wp_check_ms=3.10 wp_check_max_ms=3.10 wp_entity_added=5 "

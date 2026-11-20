@@ -23,7 +23,7 @@ set -u
 PKG_DIR="${PKG_DIR:-}"            # packaged server dir holding exactly one launcher script (*.sh)
 DEMO="${DEMO:-}"                  # PythonAPI/examples/rgl_test_autoware_demo.py
 PORT="${PORT:-}"                  # RPC port of the server (the demo and the reset use it too)
-PY="${PY:-/mnt/dsk0/wk0/CARLA/RGLWP/venv/bin/python}"
+PY="${PY:-python3}"              # a python with the carla module and PyKDL
 MAP="${MAP:-Town10HD_Opt}"
 DURATION="${DURATION:-25}"        # seconds each config runs before SIGINT
 SEP="${SEP:-150}"                 # meters between the 2 separated sensors (config c)

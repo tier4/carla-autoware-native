@@ -31,7 +31,7 @@ namespace RGLSceneAuditTests
 using namespace RGLSceneTestUtil;
 
 // ============================================================================
-// Task 3: AuditScene
+// AuditScene
 // ============================================================================
 
 // A static cube in range: registered by a sync, and no defect counter moves.
@@ -108,7 +108,7 @@ bool FSceneAuditMissingBeforeSyncTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// P8 with the legacy values of the range-edge knobs (rgl.Scene.SyncTriggerMarginSlackM = -1: the distance trigger is
+// The range edge with the legacy values of its knobs (rgl.Scene.SyncTriggerMarginSlackM = -1: the distance trigger is
 // 0.2 R with no cap; rgl.Scene.InRangeCreatesPerUpdate = 0: no in-range priority), so the old behaviour stays reachable:
 // range 100 m, R = 120 m, distance trigger 0.2 R = 24 m. A cube whose bounds start at 122 m is outside R at the sync; a
 // 23 m move brings it inside the range without triggering a sync: missing in range, while the registration rule (the
@@ -270,7 +270,7 @@ bool FSceneAuditExcludedByNameTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// Review focus 5: a component without a mesh and an ISMC without instances are no candidates at all.
+// A component without a mesh and an ISMC without instances are no candidates at all.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditNullMeshAndEmptyIsmcTest, "CarlaRGL.SceneAudit.NullMeshAndEmptyIsmc",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneAuditNullMeshAndEmptyIsmcTest::RunTest(const FString& Parameters)
@@ -370,7 +370,7 @@ bool FSceneAuditFormatLineTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// Review focus 4: the audit's cost with 2,000 static cubes in range (logged; no threshold).
+// The audit's cost with 2,000 static cubes in range (logged; no threshold).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditCostTest, "CarlaRGL.SceneAudit.AuditCost",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneAuditCostTest::RunTest(const FString& Parameters)
@@ -398,10 +398,10 @@ bool FSceneAuditCostTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// Task 4: MaybeEmitAudit (rgl.Scene.Audit)
+// MaybeEmitAudit (rgl.Scene.Audit)
 // ============================================================================
 
-// Review focus 2: two sensors tick in the same frame -> one line.
+// Two sensors tick in the same frame -> one line.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditOncePerFrameTest, "CarlaRGL.SceneAudit.OncePerFrame",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneAuditOncePerFrameTest::RunTest(const FString& Parameters)
@@ -450,7 +450,7 @@ bool FSceneAuditEveryNthTest::RunTest(const FString& Parameters)
 }
 
 // Off unless asked for: no line. The LevelAddedToWorld binding does not depend on the audit: the level-triggered
-// sync (P5) needs it for the instance's whole life.
+// sync needs it for the instance's whole life.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditOffByDefaultTest, "CarlaRGL.SceneAudit.OffByDefault",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneAuditOffByDefaultTest::RunTest(const FString& Parameters)
@@ -467,11 +467,11 @@ bool FSceneAuditOffByDefaultTest::RunTest(const FString& Parameters)
         SM.MaybeEmitAudit(World, 6200.0 + 0.05 * static_cast<double>(f), Frame0 + f);
     }
     TestEqual(TEXT("no line"), SM.AuditLinesEmitted_ForTest - Before, 0);
-    TestTrue(TEXT("the level binding is always on (P5)"), FWorldDelegates::LevelAddedToWorld.IsBoundToObject(&SM));
+    TestTrue(TEXT("the level binding is always on"), FWorldDelegates::LevelAddedToWorld.IsBoundToObject(&SM));
     return true;
 }
 
-// Review focus 1: the audit is on when the world goes away (load_world: CleanupWorld -> OnWorldCleanup ->
+// The audit is on when the world goes away (load_world: CleanupWorld -> OnWorldCleanup ->
 // DestroyInstance). The manager goes with its delegate binding, and a manager of a new world counts only its own
 // lines. Throwaway worlds: broadcasting OnWorldCleanup for the game world would tear down far more than RGL.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditWorldCleanupTest, "CarlaRGL.SceneAudit.WorldCleanup",
@@ -510,7 +510,7 @@ bool FSceneAuditWorldCleanupTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// Task 5: debug hit dump (rgl.Debug.HitDumpDir)
+// Debug hit dump (rgl.Debug.HitDumpDir)
 // ============================================================================
 
 // One scan of a 4 m box 15 m in front of a 32-channel lidar, no client listening: the dumped points are all on
@@ -615,7 +615,7 @@ bool FSceneAuditHitDumpRoundTripTest::RunTest(const FString& Parameters)
 }
 
 // ============================================================================
-// 7b: a known culled part that comes into range is not hidden by a waiting queue
+// World Partition culling: a known culled part that comes into range is not hidden by a waiting queue
 // ============================================================================
 
 // World Partition culling (the seam): a part found far away (300 m) by a sync is culled; three parts in R_load but out of
@@ -687,7 +687,7 @@ bool FSceneAuditWpLateApproachIsNotMaskedByPendingTest::RunTest(const FString& P
     return true;
 }
 
-// 7b: the audit line shows the culling's queue (wp_pending, current jobs), so that a line whose queue is not done is not
+// The audit line shows the World Partition culling's queue (wp_pending, current jobs), so that a line whose queue is not done is not
 // counted as steady (summarize). Three parts in R_load but out of range, one change per Update: after the sync that found
 // them, jobs wait; after a full drain, none.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditWpPendingShownTest, "CarlaRGL.SceneAudit.WpPendingShown",

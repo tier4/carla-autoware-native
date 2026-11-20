@@ -1120,7 +1120,8 @@ FRGLTickResult FRGLBackendImpl::Tick(
             SensorWorldTransform.GetLocation(),
             RegistrationDistanceCm,
             SimulationTime);
-        // Scene audit (rgl.Scene.Audit): the range the rays reach and the actor the sensor rides on.
+        // The range the rays reach and the actor the sensor rides on: the scene audit reads them, and so does the sync
+        // (the distance trigger's cap, the in-range creates, the World Partition culling and the stream warning).
         SceneMgr.SetSensorAuditRange(static_cast<const void*>(Session), Desc.Range);
         SceneMgr.SetSensorAuditParent(static_cast<const void*>(Session), Session->AuditParent.Get());
         if (Session->SelfCutoutRadiusCm > 0.0f)
