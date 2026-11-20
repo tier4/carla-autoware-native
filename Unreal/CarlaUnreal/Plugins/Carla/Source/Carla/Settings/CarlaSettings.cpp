@@ -99,6 +99,8 @@ static void LoadSettingsFromConfig(
     ConfigFile.GetString(S_CARLA_SERVER, TEXT("ROS2CameraQos"), Settings.ROS2CameraQos);
     ConfigFile.GetString(S_CARLA_SERVER, TEXT("ROS2LidarQos"), Settings.ROS2LidarQos);
     ConfigFile.GetString(S_CARLA_SERVER, TEXT("ROS2ImuQos"), Settings.ROS2ImuQos);
+    // tier4: paced IMU publish (see UCarlaSettings).
+    ConfigFile.GetString(S_CARLA_SERVER, TEXT("ROS2ImuPacing"), Settings.ROS2ImuPacing);
     // tier4: MGRS projection ellipsoid (see UCarlaSettings).
     ConfigFile.GetString(S_CARLA_SERVER, TEXT("AutowareEllipsoid"), Settings.AutowareEllipsoid);
   }
@@ -209,6 +211,11 @@ void UCarlaSettings::LoadSettings()
     if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-imu-qos="), QosValue, false))
     {
       ROS2ImuQos = QosValue;
+    }
+    FString PacingValue;
+    if (FParse::Value(FCommandLine::Get(), TEXT("-ros2-imu-pacing="), PacingValue))
+    {
+      ROS2ImuPacing = PacingValue;
     }
     FString EllipsoidValue;
     if (FParse::Value(FCommandLine::Get(), TEXT("-autoware-ellipsoid="), EllipsoidValue))
