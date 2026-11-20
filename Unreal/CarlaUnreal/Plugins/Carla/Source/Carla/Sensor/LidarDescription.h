@@ -199,4 +199,10 @@ struct CARLA_API FLidarDescription
   /// Hesai-specific: ensure compatibility with Hesai Pandar ROS driver
   /// quirks (only meaningful for HesaiPandarQT).
   bool UdpHesaiPandarDriverCompat = false;
+
+  /// How a scan's points are timed (rgl_scan_timing): "firing" (default)
+  /// stamps each UDP packet as the real sensor fires it, over one rotation
+  /// from the capture time, while the points are captured at that one time;
+  /// "instant" stamps every packet with the capture time.
+  FString RglScanTiming = TEXT("firing");
 };

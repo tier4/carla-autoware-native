@@ -123,10 +123,32 @@ rest of the LiDAR continues to operate normally.
 | `rgl_udp_hesai_enable_udp_sequence` | bool | `false` | Add UDP sequence-number field |
 | `rgl_udp_hesai_blockage_detection` | bool | `false` | Up-close blockage detection (HesaiQT128C2X only) |
 | `rgl_udp_hesai_pandar_driver_compat` | bool | `false` | Pandar driver compatibility (HesaiPandarQT only) |
+| `rgl_scan_timing` | string | `"firing"` | How a scan's points are timed: `firing` or `instant` (see below) |
 
 UDP publishing activates only when `rgl_udp_enabled = true` **and**
 `rgl_udp_dest_ip` is non-empty. With either condition unsatisfied UDP
 stays off regardless of the other attributes.
+
+### Scan timing
+
+RGL captures all the points of a scan at one time: the simulation time of
+the frame that triggers the scan. `rgl_scan_timing` sets the time the UDP
+packets carry.
+
+| Value | Packet time | Use |
+|---|---|---|
+| `firing` (default) | Each packet is stamped as the real sensor would fire it, over one rotation from the capture time. | Drivers and tools that expect the real sensor's packet timing. |
+| `instant` | Every packet carries the capture time. | Stacks that compensate motion per point, such as Autoware. |
+
+With `firing`, the points do not move during the rotation, but their times
+do. A driver that compensates motion per point, such as Autoware's distortion
+corrector, then shifts them by the vehicle speed times their time offset: up to
+one rotation of travel (about 1 m at 10 m/s and 10 Hz). The packet times also
+run up to one rotation ahead of the simulation time when they arrive. With
+`instant`, every point carries the time it was captured at, so such a driver
+leaves the points where they are.
+
+In Python, `apply_preset(..., scan_timing="instant")` sets the attribute.
 
 ## Smoke test
 

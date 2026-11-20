@@ -142,6 +142,10 @@ def list_models():
               f"H-FOV={m['horizontal_fov']}")
 
 
+# Values of the rgl_scan_timing blueprint attribute.
+SCAN_TIMINGS = ("firing", "instant")
+
+
 def apply_preset(
     blueprint,
     model_name,
@@ -149,6 +153,7 @@ def apply_preset(
     apply_beam_divergence=False,
     hesai_ros_driver_compat=None,
     udp_publish=None,
+    scan_timing=None,
 ):
     """Apply a LiDAR preset to a CARLA blueprint.
 
@@ -176,10 +181,20 @@ def apply_preset(
               enable_hesai_udp_sequence                (bool, default False)
               enable_hesai_blockage_detection          (bool, default False)
               ensure_hesai_pandar_driver_compat        (bool, default False)
+        scan_timing: how a scan's points are timed (rgl_scan_timing).
+            None (default): leave the server default ("firing").
+            "firing": UDP packets are stamped as the real sensor fires them,
+                over one rotation from the capture time; the points are
+                still captured at that one time.
+            "instant": every UDP packet carries the capture time, so the
+                stamps match the points.
     """
     if model_name not in MODEL_REGISTRY:
         available = ", ".join(sorted(MODEL_REGISTRY.keys()))
         raise ValueError(f"Unknown model '{model_name}'. Available: {available}")
+    if scan_timing is not None and scan_timing not in SCAN_TIMINGS:
+        raise ValueError(
+            f"Unknown scan_timing '{scan_timing}'. Available: {', '.join(SCAN_TIMINGS)}")
 
     import warnings as _warnings
 
@@ -298,6 +313,17 @@ def apply_preset(
             _set_udp("rgl_udp_hesai_pandar_driver_compat",
                      "true" if udp_publish.get("ensure_hesai_pandar_driver_compat",
                                                False) else "false")
+
+    # Scan timing (validated above).
+    if scan_timing is not None:
+        try:
+            blueprint.set_attribute("rgl_scan_timing", scan_timing)
+        except RuntimeError:
+            _warnings.warn(
+                "Attribute 'rgl_scan_timing' unavailable in this build; "
+                "the server keeps its default timing.",
+                stacklevel=2,
+            )
 
 
 def set_azimuth_fov(blueprint, sections):

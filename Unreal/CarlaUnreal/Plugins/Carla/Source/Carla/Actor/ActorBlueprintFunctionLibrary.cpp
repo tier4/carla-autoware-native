@@ -1932,6 +1932,15 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     RglUdpHesaiPandarDriver.RecommendedValues = { TEXT("false") };
     RglUdpHesaiPandarDriver.bRestrictToRecommended = false;
 
+    // How a scan's points are timed: "firing" stamps each UDP packet as the
+    // real sensor fires it (the points are captured at one time); "instant"
+    // stamps every packet with the capture time.
+    FActorVariation RglScanTiming;
+    RglScanTiming.Id = TEXT("rgl_scan_timing");
+    RglScanTiming.Type = EActorAttributeType::String;
+    RglScanTiming.RecommendedValues = { TEXT("firing"), TEXT("instant") };
+    RglScanTiming.bRestrictToRecommended = true;
+
     Definition.Variations.Append({
       Channels,
       Range,
@@ -1987,7 +1996,8 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
       RglUdpDestPort,
       RglUdpHesaiUdpSequence,
       RglUdpHesaiBlockage,
-      RglUdpHesaiPandarDriver});
+      RglUdpHesaiPandarDriver,
+      RglScanTiming});
   }
   else
   {
@@ -3233,6 +3243,8 @@ void UActorBlueprintFunctionLibrary::SetLidar(
       "rgl_udp_hesai_blockage_detection", Description.Variations, false);
   Lidar.UdpHesaiPandarDriverCompat = RetrieveActorAttributeToBool(
       "rgl_udp_hesai_pandar_driver_compat", Description.Variations, false);
+  Lidar.RglScanTiming = RetrieveActorAttributeToString(
+      "rgl_scan_timing", Description.Variations, TEXT("firing"));
 }
 
 void UActorBlueprintFunctionLibrary::SetGnss(

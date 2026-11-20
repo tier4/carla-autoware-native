@@ -8,6 +8,7 @@
 #include "RGLSceneManager.h"
 #include "RGLCoordinateUtils.h"
 #include "RGLUdpExtensionShim.h"
+#include "RGLScanTiming.h"
 
 #include <util/disable-ue4-macros.h>
 #include <rgl/api/core.h>
@@ -412,6 +413,10 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
                         *M);
                 }
 
+                // rgl_scan_timing (see RGLScanTiming.h): "instant" stamps every
+                // packet with the capture time of the points.
+                UdpOptions |= RGLScanTiming::UdpOptions(Desc.RglScanTiming);
+
                 const FString EffSrcIp = Desc.UdpSourceIp.IsEmpty()
                     ? TEXT("0.0.0.0") : Desc.UdpSourceIp;
 
@@ -436,8 +441,8 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
                 {
                     Session->bUdpActive = true;
                     UE_LOG(LogTemp, Log,
-                        TEXT("RGLBackendImpl: UDP publish enabled: model=%s dest=%s:%d opts=0x%08X"),
-                        *M, *Desc.UdpDestIp, Desc.UdpDestPort, UdpOptions);
+                        TEXT("RGLBackendImpl: UDP publish enabled: model=%s dest=%s:%d opts=0x%08X scan_timing=%s"),
+                        *M, *Desc.UdpDestIp, Desc.UdpDestPort, UdpOptions, *Desc.RglScanTiming);
                 }
             }
         }

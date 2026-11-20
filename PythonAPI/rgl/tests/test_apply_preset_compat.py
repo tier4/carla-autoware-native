@@ -107,6 +107,34 @@ def test_explicit_false_non_hesai_nothing():
         f"Expected 0 warnings, got {len(caught)}: {[str(w.message) for w in caught]}")
 
 
+def test_scan_timing_default_leaves_attribute_unset():
+    """scan_timing None (default) → rgl_scan_timing not set (server default applies)."""
+    bp = FakeBlueprint()
+    apply_preset(bp, "HesaiPandar128E4X")
+    assert "rgl_scan_timing" not in bp.attrs, (
+        f"rgl_scan_timing should not be set, got {bp.attrs.get('rgl_scan_timing')!r}")
+
+
+def test_scan_timing_values_are_passed_through():
+    """scan_timing 'instant' / 'firing' → rgl_scan_timing set to that value."""
+    for value in ("instant", "firing"):
+        bp = FakeBlueprint()
+        apply_preset(bp, "HesaiPandar128E4X", scan_timing=value)
+        assert bp.attrs.get("rgl_scan_timing") == value, (
+            f"Expected {value!r}, got {bp.attrs.get('rgl_scan_timing')!r}")
+
+
+def test_scan_timing_rejects_unknown_value():
+    """An unknown scan_timing → ValueError, before any attribute is set."""
+    bp = FakeBlueprint()
+    try:
+        apply_preset(bp, "HesaiPandar128E4X", scan_timing="bogus")
+    except ValueError:
+        assert not bp.attrs, f"No attribute should be set, got {sorted(bp.attrs)}"
+        return
+    raise AssertionError("Expected ValueError for scan_timing='bogus'")
+
+
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
@@ -119,6 +147,9 @@ def main():
         test_explicit_true_non_hesai_warns,
         test_explicit_true_hesai_sets_start_angle,
         test_explicit_false_non_hesai_nothing,
+        test_scan_timing_default_leaves_attribute_unset,
+        test_scan_timing_values_are_passed_through,
+        test_scan_timing_rejects_unknown_value,
     ]
     failures = []
     for fn in tests:
