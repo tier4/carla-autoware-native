@@ -410,7 +410,15 @@ wall 時間): skeletal OFF に比べて中央値で +11.4% (予算 +20% の内)�
 
 ## World Partition の地図
 
-Town15 などの World Partition の地図では、Unreal Engine は streaming source の周りの cell 単位で地図を読み込み、RGL の scene は読み込まれたものに従う。Static の mesh は従来のセンサーの球による選別を保ち、cell が外されると scene からも外れる。読み込まれていないものは RGL の scene に無い。`ray_cast` の LiDAR が辿る physics の scene に無いのと同じである。ある区域を見るには、そこを読み込ませる (下を見る)。World Partition でない地図 (例: Town10HD_Opt) の登録は従来のままである。
+Town15 などの World Partition の地図では、Unreal Engine は streaming source の周りの cell 単位で地図を読み込み、RGL の scene は読み込まれたものに従う。Static の mesh は従来のセンサーの球による選別を保ち、cell が外されると scene からも外れる。読み込まれていないものは RGL の scene に無い。`ray_cast` の LiDAR が辿る physics の scene に無いのと同じである。ある区域を見るには、そこを読み込ませる (下を見る)。World Partition でない地図 (例: Town10HD_Opt) では、非 Static の部品はこれまでどおり距離に関係なく登録する。下に書く非 Static の部品の距離による選別は、World Partition の地図だけに効く。
+
+次のことは World Partition の有無に関係なくすべての地図に効く。そのため Town10HD_Opt のような地図の点群も変わる。
+
+* 名前で外すのは空のドームと球だけである: mesh の名前に `SkySphere`・`SkyDome`・`Sky_Sphere`・`Sky_Dome` を含む (大文字・小文字は問わない) static mesh と、owner・component・mesh の名前に `sky` を含み、幅が 2 km を超える component。以前は名前のどこかに `sky` があれば外していたため、CARLA の高層ビルの部品 (`SM_Skysc*`) などの建物も消えていた。今は LiDAR に見える。
+* 登録を外された instanced static mesh (ISM) の component (cell が読み込みから外れた、または owner が登録を外した) は、次の同期ではなく次の scene の Update で RGL の scene から外れる。その instance が幽霊の点を残さない。
+* Static の ISM の instance は、登録のときに 1 回だけ選ぶのではなく、同期のたびにセンサーの球と比べ直す (scene の Update ごとの上限は `rgl.Scene.MaxIsmInstanceChangesPerUpdate`)。センサーが近づいた instance は足し、離れた instance は外す。
+* センサーの登録の半径の中に static の形を持つ level が加わると、すぐに同期する (simulation 時間で 0.3 s に 1 回まで)。新しく読み込まれた cell が周期の同期を待たない。
+* 周期の同期は simulation 時間で数え、距離の発火はセンサーの登録の半径と range の間の余白より小さく保つ (下の scene の同期の knob を見る)。そこに挙げた旧の値で元の時機に戻る。
 
 WP の地図に限り、実際の移動が未観測の非 Static の static-mesh component (Movable と Stationary の両方) と ISM/HISM の instance を、全センサーの球の和集合と速度に応じた登録余白で選ぶ。Pawn の部品・物理で動く部品・車両に取り付けた部品は従来の登録を保つ。attachment の祖先、movement/skeletal を持つ owner、センサーの親も保護する。skeletal mesh の距離・件数・自車の cutout の規則は従来のままである。`rgl.Scene.WpMovableCulling` が効くのは実際の World Partition world だけで、地図名や streaming の充足状態では決まらない。0 は旧経路に戻す。
 
@@ -427,11 +435,11 @@ R_load = max(RegistrationDistance, SensorRange + M)
 R_unload = R_load * UnloadDistanceFactor + UnregistrationHysteresis
 ```
 
-既定の simulation clock では、既定の `I=1 s`・`U=0.1`・`L=1` で、どの `d` でも `T_sync_max = 1.1 s`、余白 220 m になる。Update clock (元の timer) は scene Update ごとに world dt だけ進む。Update 間隔が 0.1 s のとき、`I=1 s` は `d=0.05` で約 2 s、`d=0.025` で約 4 s の sync 間隔になり、上限は 2.1/4.1 s、余白は 320/520 m である。WP 限定の sim 時間の締切により、直前の culling sync が保存した上限で `sim_now - last_wp_sync_sim + U > T_assumed + 1e-6` になれば sync を強制する。これで sync 間に dt が縮んでも前提を保つ。新しいセンサー、pose jump、時間の巻戻り、horizon の入力の live 変更でも sync する。非 WP の発火は従来のままである。
+既定の simulation clock では、既定の `I=1 s`・`U=0.1`・`L=1` で、どの `d` でも `T_sync_max = 1.1 s`、余白 220 m になる。Update clock (元の timer) は scene Update ごとに world dt だけ進む。Update 間隔が 0.1 s のとき、`I=1 s` は `d=0.05` で約 2 s、`d=0.025` で約 4 s の sync 間隔になり、上限は 2.1/4.1 s、余白は 320/520 m である。WP 限定の sim 時間の締切により、直前の culling sync が保存した上限で `sim_now - last_wp_sync_sim + U > T_assumed + 1e-6` になれば sync を強制する。これで sync 間に dt が縮んでも前提を保つ。新しいセンサー、pose jump、時間の巻戻り、horizon の入力の live 変更でも sync する。その他の発火 (時間・距離・level・新しいセンサー) は、すべての地図で、scene の同期の knob に書いたとおりに働く。
 
-発見時点で bounds がセンサーの生の range に交差する新規 job は、entity/mesh upload の件数上限も ms 予算もかけず、その Update で作る。このため起動時には塊の作成が起きる。余白の帯での先回りの作成と queue の削除は WP 専用 queue を通し、最も早い range 到達期限を優先する。cached mesh と ISM の個々の entity も entity 予算を使う。`L` は queue・upload・部分作成の全待ち時間を含む期限で、wall 時間の 4 ms 予算とは異なる。この予算は最初の変更を終えてから変更の間で確認し、少なくとも 1 件は進めるため、Update の wall 時間の厳密な上限ではない。
+同期が queue を作る時点で bounds がどれかのセンサーの生の range に交差する追加の job は、すべて (初めて見つかった部品も、range に入ってきた既知の部品も)、entity/mesh upload の件数上限も ms 予算もかけず、その同期の Update で作る。このため起動時には塊の作成が起きる。余白の帯での先回りの作成と queue の削除は WP 専用 queue を通し、最も早い range 到達期限を優先する。cached mesh と ISM の個々の entity も entity 予算を使う。`L` は queue・upload・部分作成の全待ち時間を含む期限で、wall 時間の 4 ms 予算とは異なる。この予算は最初の変更を終えてから変更の間で確認し、少なくとも 1 件は進めるため、Update の wall 時間の厳密な上限ではない。
 
-連続移動の契約は、Update/pose 間隔が `U` 以内、速度が設定上限以内、保証対象の作成 job が `L` 以内に完了することを前提にする。超過は `rgl_scene_wp_cull_violation` (`update_gap`・`pose_gap`・`sensor_speed`・`object_speed`・`queue_age`・`late_create` など) に残す。新しいセンサーの init sync 直後の最初の 1 区間だけは、`U` の超過が world dt 1 つ以内なら許し、生の値を `rgl_scene_wp_cull_startup_gap` に残す。scene 全体の初回区間は区間開始時に存在したセンサーで判定するため、終端で加わったセンサーがその初回区間の免除を無効にしない。その後の gap と大きすぎる gap は violation のままである。起動、新しいセンサー、任意の teleport、瞬間的な大量出現について、欠け 0 と 100 ms 未満の tick の両立を一般には保証しない。未読込の物体は契約の外である。audit は、既知の WP 候補が生の range 内で未登録なら、pending 中や保護への昇格中でも欠けとして数える。
+連続移動の契約は、Update/pose 間隔が `U` 以内、速度が設定上限以内、保証対象の作成 job が `L` 以内に完了することを前提にする。超過は `rgl_scene_wp_cull_violation` (`update_gap`・`pose_gap`・`sensor_speed`・`object_speed`・`queue_age`・`late_create` など) に残す。新しいセンサーの init sync 直後の最初の 1 区間だけは、`U` の超過が world dt 1 つ以内なら許し、生の値を `rgl_scene_wp_cull_startup_gap` に残す。scene 全体の初回区間は区間開始時に存在したセンサーで判定するため、終端で加わったセンサーがその初回区間の免除を無効にしない。その後の gap と大きすぎる gap は violation のままである。pose の更新の間隔が `rgl.Scene.MovableMaxUpdateGapSeconds` (既定 0.1 s) より長いセンサー (例: 5 Hz の LiDAR、`sensor_tick` が 0.1 s を超えるセンサー) は、更新のたびに `U` の契約を破り (`pose_gap`、より速いセンサーが scene の Update を回していなければ `update_gap` も)、連続移動の保証の外である。保証が要るなら `rgl.Scene.MovableMaxUpdateGapSeconds` をその更新の間隔まで上げる (余白は広がる)。起動、新しいセンサー、任意の teleport、瞬間的な大量出現について、欠け 0 と 100 ms 未満の tick の両立を一般には保証しない。未読込の物体は契約の外である。audit は、既知の WP 候補が生の range 内で未登録なら、pending 中や保護への昇格中でも欠けとして数える。
 
 > [!NOTE]
 > Landscape (地形の高さ場) の component は、RGL の scene に登録しない。`ray_cast` の
@@ -504,37 +512,41 @@ rgl_scene_stream_warning t=12.400 sensor=0x7f3a2c001230 range_m=200 parent=BP_Ca
 
 ### 既定の 3 km の hero の半径での同期の費用
 
-各 sync は従来どおり読み込まれた世界の actor を全部走査する。既定の `tile_stream_distance` (3000 m) では hero が 3 km の円盤を読み込ませる。2026-11-20 に pc4090 (RTX 4090)、Town15、走る hero に 200 m の LiDAR を 1 つ、dt 0.05 s、audit off、下表の WP knob の既定値で計測した。run 順に seed 0/1/2。同期の設定は旧の値 (Update clock、間隔 1 s、上限なしの距離の発火 0.2 R、range 内の作成優先なし) である。主経路の streaming 半径は 3000 m、別の確認では 150 m である。値は sync の `elapsed_ms`:
+各 sync は従来どおり読み込まれた世界の actor を全部走査する。既定の `tile_stream_distance` (3000 m) では hero が 3 km の円盤を読み込ませる。2026-11-20 に RTX 4090 の作業機で計測した: Town15、同じ経路を走る hero に 200 m の LiDAR を 1 つ、dt 0.05 s、audit off、下表の World Partition の knob の既定値。最初の行はすべての knob を出荷の既定値にしたもの (3 回)。他の行は、同じ World Partition の culling を持ち、同期の時計と range の縁の knob がまだ無かった、この branch の前の build の値である。その振る舞いは scene の同期の knob に挙げた旧の値 (Update clock、間隔 1 s、上限なしの距離の発火 0.2 R、range 内の作成優先なし) と同じで、seed 0/1/2、hero の streaming 半径は 3000 m または 150 m である。値は sync の `elapsed_ms`:
 
-| scenario / run | hero の streaming 半径 | 全 sync の p95 (ms) | 最初の init を除く max (ms) | 最初の init を含む max (ms) |
+| 設定 / run | hero の streaming 半径 | 全 sync の p95 (ms) | 最初の init を除く max (ms) | 最初の init を含む max (ms) |
 |---|---|---|---|---|
-| Town15 (3 km) / 1 | 3000 m (既定) | 35.73 | 38.56 | 192.75 |
-| Town15 (3 km) / 2 | 3000 m (既定) | 36.67 | 38.54 | 180.33 |
-| Town15 (3 km) / 3 | 3000 m (既定) | 36.26 | 40.71 | 190.65 |
-| Town15 (150 m) / 1 | 150 m | 25.58 | 28.22 | 185.93 |
-| Town15 (150 m) / 2 | 150 m | 24.51 | 26.06 | 194.25 |
-| Town15 (150 m) / 3 | 150 m | 23.83 | 27.31 | 199.16 |
+| 出荷の既定 / 1 | 3000 m (既定) | 33.70 | 43.01 | 166.97 |
+| 出荷の既定 / 2 | 3000 m (既定) | 32.88 | 42.85 | 178.89 |
+| 出荷の既定 / 3 | 3000 m (既定) | 32.73 | 39.36 | 181.03 |
+| 同期の旧の値 / 1 | 3000 m (既定) | 35.73 | 38.56 | 192.75 |
+| 同期の旧の値 / 2 | 3000 m (既定) | 36.67 | 38.54 | 180.33 |
+| 同期の旧の値 / 3 | 3000 m (既定) | 36.26 | 40.71 | 190.65 |
+| 同期の旧の値 / 1 | 150 m | 25.58 | 28.22 | 185.93 |
+| 同期の旧の値 / 2 | 150 m | 24.51 | 26.06 | 194.25 |
+| 同期の旧の値 / 3 | 150 m | 23.83 | 27.31 | 199.16 |
 
-Town15 の半径 3 km での p95 は 35.73–36.67 ms で、WP の非 Static culling 前の約 81 ms から下がった。起動窓を適用し、同期の負荷は全 sync の p95 (≤50 ms) と scene 最初の init sync だけを除く max (<100 ms) で合格した。後から足したセンサーの init sync は除かない。当初の基準と、WP culling 導入直前の build の基準にも同じ窓を適用する。旧経路の初期登録は `InitializeFromWorld` 内で `elapsed_ms` の外にあり、新経路は range 内の発見時の塊を最初の init sync 内で作る。最後の列は各回の最初の init sync の値と一致する。`wait_ms` は最初の RGL API 呼出しの待ちと API 自身の処理を含む診断値 (呼出しなしなら `wait_api=none`、0 ms) である。sync の合否には `wait_ms` を差し引かず `elapsed_ms` を使う。
+3 km の経路の p95 は、非 Static の部品の World Partition culling の前は約 81 ms だった。p95 はすべての sync を含む。中の列は scene の最初の init sync だけを除き、後から加わったセンサーの init sync は除かない。最初の init sync が最も大きいのは、range の中にすでにある部品をその sync の中で作るからである (元の経路は起動時の部品を `InitializeFromWorld` の中、`elapsed_ms` の外で登録していた)。最後の列は各回のその sync の値である。`wait_ms` は sync の最初の RGL API 呼出しの時間で、前の raytrace の待ちとその呼出し自身の処理を含む (呼出しが無ければ `wait_api=none`、0 ms)。診断用の値で、`elapsed_ms` はこれを含む。
 
-起動時は raw の全走行 tick と、両側に同じ固定窓 `[60,N)` (0-based、先頭 60 tick だけ除外) を当てた値でも判定する:
+world の tick (client の `world.tick()` の wall 時間) が 100 ms を超えた回数。全走行と、tick 60 以降 (0 始まり。先頭 60 tick は起動) の値である。Odaiba の行は、World Partition でない地図の Odaiba で、同じ LiDAR で経路を走ったもの:
 
-| scenario | 全走行の tick >100 ms、run 1/2/3 | `[60,N)` の tick >100 ms、run 1/2/3 |
+| 設定 / scenario | 全走行の tick >100 ms、run 1/2/3 | tick 60 以降の tick >100 ms、run 1/2/3 |
 |---|---|---|
-| Town15 (3 km) | 2 / 2 / 2 | 0 / 0 / 0 |
-| Town15 (150 m) | 2 / 2 / 2 | 0 / 0 / 0 |
-| Odaiba | 1 / 1 / 1 | 0 / 0 / 0 |
+| 出荷の既定 / Town15 (3 km) | 2 / 2 / 2 | 0 / 0 / 0 |
+| 同期の旧の値 / Town15 (3 km) | 2 / 2 / 2 | 0 / 0 / 0 |
+| 同期の旧の値 / Town15 (150 m) | 2 / 2 / 2 | 0 / 0 / 0 |
+| 同期の旧の値 / Odaiba | 1 / 1 / 1 | 0 / 0 / 0 |
 
-Town15 の半径 3 km での tick max は 814.32 / 803.27 / 787.76 ms (WP culling 導入直前の build の最大 810.53 ms、当初の基準の最大 818.76 ms)。同じ経路の基準の回数は、当初が全走行 3/6/4・tick 60 以降 1/4/2、WP culling 導入直前の build が 4/2/3・2/0/1 だった。Odaiba の sync max は 8.95 / 8.58 / 8.49 ms (上限 10.27 ms 以下)。9 回すべてで `wp_deadline` の発火は 0 だった。
+3 km の経路の全走行の tick max は起動時の tick で、出荷の既定で 778.57 / 794.88 / 788.35 ms、同期の旧の値で 814.32 / 803.27 / 787.76 ms である。この branch の前は最大 818.76 ms、100 ms 超えは全走行で 3 / 6 / 4 回、tick 60 以降で 1 / 4 / 2 回だった。Odaiba (World Partition なし) の sync max は 8.95 / 8.58 / 8.49 ms だった。`wp_deadline` はどの回でも発火しなかった。
 
-別の audit 比較は同じ binary・route 区間・seed 0 で culling off/on を比べ、on 側には seed 1/2 も含む。以下は sync 行の p50 の件数であり、gate の `entities` や VRAM の MB ではない:
+別の比較は、同じ binary・route 区間・seed 0 で culling を off と on にした (on は seed 1/2 も)。以下は sync 行の `wp_entities_total` と `wp_nonstatic_registered` の p50 で、`entities` の key の値でも VRAM の MB でもない:
 
 | scenario | 総 entity、off → on | 登録済み非 Static、off → on | 非 Static の削減率 |
 |---|---|---|---|
 | Town15 (3 km) | 169,968 → 28,423–28,793 | 155,514 → 14,109–14,189 | 約 90.9% |
 | Town15 (150 m) | 85,400 → 27,772 | 71,035 → 13,554 | 約 80.9% |
 
-entity の減少は後段の VRAM 作業の対象 scene を縮める証拠であり、mesh の共有・idle mesh・加速構造の MB は別途測る必要がある。
+entity が減れば scene は小さくなる。それで VRAM が何 MB 減るかはここでは測っていない (mesh の共有・idle mesh・加速構造は別に測る必要がある)。
 
 読み込む区域と同期の時間を減らすには、両方の距離を、センサーに要る分まで下げる。
 センサーの range に、hero の原点からセンサーまでの距離と、少しの余裕を足した値である。
@@ -551,12 +563,12 @@ server は、2 列目の switch も受ける。例: `-rgl-scene-audit=10`。最�
 | `rgl.Scene.CreateBudgetMs` | `-rgl-scene-create-budget-ms=` | 4 | scene の Update 1 回あたりの、mesh の作成の wall 時間の予算 (ms)。0 = 上限なし。 |
 | `rgl.Scene.UnloadDistanceFactor` | `-rgl-scene-unload-distance-factor=` | 1.0 | static mesh を外すのは、登録の半径 × factor + 20 m より遠くなってから。1 未満は 1 とみなす。 |
 | `rgl.Scene.IdleMeshCacheMax` | `-rgl-scene-idle-mesh-cache-max=` | 0 | 最後の entity が外れた後も残しておく RGL の mesh の数。最も前に idle になったものから壊す。0 = すぐ壊す。 |
-| `rgl.Scene.MaxIsmInstanceChangesPerUpdate` | `-rgl-scene-max-ism-instance-changes-per-update=` | 512 | 同期が ISM の群をセンサーの球と比べ直させるとき (同期の無い Update で行う)、scene の Update 1 回あたりに足し引きする Static の ISM の instance の上限。0 = 上限なし。 |
+| `rgl.Scene.MaxIsmInstanceChangesPerUpdate` | `-rgl-scene-max-ism-instance-changes-per-update=` | 512 | 同期が ISM の群をセンサーの球と比べ直させるとき (同期の無い Update で行う。毎 Update が同期のときは、各同期の Update がその同期の後で行う)、scene の Update 1 回あたりに足し引きする Static の ISM の instance の上限。0 = 上限なし。 |
 | `rgl.Scene.SyncClock` | `-rgl-scene-sync-clock=` | 1 | 周期の同期の時計: 1 = simulation 時間。0 = scene の Update の world dt だけ (元の timer。dt 0.025 s で 0.1 s の LiDAR なら、1 s の間隔が約 4 s になっていた)。他の値は 1 とみなす。旧の値: 0。 |
-| `rgl.Scene.SyncIntervalSeconds` | `-rgl-scene-sync-interval-seconds=` | 1.0 | その時計での周期の同期の間隔 (秒)、≥0.1。旧の値: 1。 |
-| `rgl.Scene.SyncTriggerRatio` | `-rgl-scene-sync-trigger-ratio=` | 0.2 | 距離の発火: 前の同期からこの比 × R より多く動いたセンサーは、すぐに同期する (R = 登録の半径。LiDAR では range + 20 m)。>0。旧の値: 0.2。 |
+| `rgl.Scene.SyncIntervalSeconds` | `-rgl-scene-sync-interval-seconds=` | 1.0 | その時計での周期の同期の間隔 (秒)、≥0.1 (それより小さい値は 0.1 に引き上げる)。旧の値: 1。 |
+| `rgl.Scene.SyncTriggerRatio` | `-rgl-scene-sync-trigger-ratio=` | 0.2 | 距離の発火: 前の同期からこの比 × R より多く動いたセンサーは、すぐに同期する (R = 登録の半径。RGL の LiDAR では max(50 m, range + 20 m))。>0。旧の値: 0.2。 |
 | `rgl.Scene.SyncTriggerMarginSlackM` | `-rgl-scene-sync-trigger-margin-slack-m=` | 5.0 | 距離の発火を max(1 m, (R − range) − この値) で抑える。前の同期で R のすぐ外にあった部品が range に届く前に、同期が来る。R = range + 20 m なら 15 m。負 = 上限なし。旧の値: −1。 |
-| `rgl.Scene.InRangeCreatesPerUpdate` | `-rgl-scene-in-range-creates-per-update=` | 16 | bounds がセンサーの range に届く作成待ちの static の部品を、`MaxMeshCreatesPerUpdate`・`CreateBudgetMs` の予算の外で先に作る。scene の Update 1 回あたりの上限で、残りはその予算を待つ。≥0、0 = 優先なし。旧の値: 0。 |
+| `rgl.Scene.InRangeCreatesPerUpdate` | `-rgl-scene-in-range-creates-per-update=` | 16 | bounds がセンサーの range に届く作成待ちの queue の部品 (mobility を問わない static mesh の component。World Partition の culling の queue は別) を、`MaxMeshCreatesPerUpdate`・`CreateBudgetMs` の予算の外で先に作る。scene の Update 1 回あたりの上限で、残りはその予算を待つ。≥0、0 = 優先なし。旧の値: 0。 |
 | `rgl.Scene.InRangeCreateBudgetMs` | `-rgl-scene-in-range-create-budget-ms=` | 8.0 | その range の中の作成の、scene の Update 1 回あたりの wall 時間の上限 (ms)。作成の間で確かめ、少なくとも 1 件は進める。≥0、0 = ms の上限なし。旧の値では使わない。 |
 | `rgl.Scene.WpMovableCulling` | `-rgl-scene-wp-movable-culling=` | 1 | WP 限定: 0 = 旧登録、1 = 非 Static の static mesh の距離選別。非 WP では無効。 |
 | `rgl.Scene.MovableMinMarginM` | `-rgl-scene-movable-min-margin-m=` | 20 | WP 限定: 登録余白の下限 (m)、≥20。0 は不正。 |
@@ -564,15 +576,15 @@ server は、2 列目の switch も受ける。例: `-rgl-scene-audit=10`。最�
 | `rgl.Scene.MovableObjectSpeedBoundMps` | `-rgl-scene-movable-object-speed-bound-mps=` | 50 | WP 限定: 動き始める可能性のある地図部品の想定速度上限 (m/s)、>0。0 は不正。実動の観測で保護へ昇格。 |
 | `rgl.Scene.MovableMaxUpdateGapSeconds` | `-rgl-scene-movable-max-update-gap-seconds=` | 0.1 | WP 限定: scene Update と使用中の sensor の pose refresh の最大間隔 (sim s)、>0。0 は不正。 |
 | `rgl.Scene.MovableCreateLatencySeconds` | `-rgl-scene-movable-create-latency-seconds=` | 1.0 | WP 限定: 作成の全待ち時間を含む保証対象 job の完了期限 (sim s)、>0。0 は不正。 |
-| `rgl.Scene.MaxMovableEntityChangesPerUpdate` | `-rgl-scene-max-movable-entity-changes-per-update=` | 512 | WP 限定: Update ごとの entity の追加/削除数。cached regular mesh と ISM の個々の instance を含む。≥0、0 = 件数上限なし。発見時 range 内の job は上限を適用しない。 |
-| `rgl.Scene.MovableEntityBudgetMs` | `-rgl-scene-movable-entity-budget-ms=` | 4.0 | WP 限定: 最初の変更後の足し引きの wall 時間の予算 (ms)。≥0、0 = ms 上限なし。発見時 range 内の job は予算を適用しない。 |
-| `rgl.Scene.Audit` | `-rgl-scene-audit=` | 0 | 読むだけの検査: N >= 1 で、N frame ごとに `rgl_scene_audit` の行を出す。actor を全部走査するので、frame の時間を測るときは切っておく。 |
+| `rgl.Scene.MaxMovableEntityChangesPerUpdate` | `-rgl-scene-max-movable-entity-changes-per-update=` | 512 | WP 限定: Update ごとの entity の追加/削除数。cached regular mesh と ISM の個々の instance を含む。≥0、0 = 件数上限なし。queue を作る時点で range 内にある部品の追加は上限を適用しない。 |
+| `rgl.Scene.MovableEntityBudgetMs` | `-rgl-scene-movable-entity-budget-ms=` | 4.0 | WP 限定: 最初の変更後の足し引きの wall 時間の予算 (ms)。≥0、0 = ms 上限なし。queue を作る時点で range 内にある部品の追加は予算を適用しない。 |
+| `rgl.Scene.Audit` | `-rgl-scene-audit=` | 0 | 読むだけの検査: N >= 1 で、scene の Update N 回ごとに (frame ごとに最大 1 行) `rgl_scene_audit` の行を出す。actor を全部走査するので、frame の時間を測るときは切っておく。 |
 | `rgl.Debug.HitDumpDir` | `-rgl-debug-hit-dump=` | (空) | debug: dump した scan ごとに、当たった点の file を 1 つ受ける dir。空 = 切。 |
 | `rgl.Debug.HitDumpEvery` | `-rgl-debug-hit-dump-every=` | 10 | debug: dump の dir を設定したとき、各センサーの最初の scan と、その後 N 回ごとの scan を dump する。 |
 
-WP・同期の時計・range の縁の設定の不正な値 (非有限 float や負の件数上限を含む) は、警告を出して既定値へ戻す。live の enable 変更は次の WP sync で整合させ、off/on の比較には server を起こし直す。horizon の入力変更は再評価を強制する。
+WP・同期の時計・range の縁の設定の不正な値 (非有限 float や負の件数上限を含む) は、警告を出して既定値へ戻す。ただし 0.1 未満の `rgl.Scene.SyncIntervalSeconds` は 0.1 に引き上げる (非有限なら 1.0 に戻す)。古い 5 つの設定 (`MaxMeshCreatesPerUpdate`・`CreateBudgetMs`・`UnloadDistanceFactor`・`IdleMeshCacheMax`・`MaxIsmInstanceChangesPerUpdate`) は、警告なしに範囲へ丸める。live の enable 変更は次の WP sync で整合させ、off/on の比較には server を起こし直す。horizon の入力変更は再評価を強制する。
 
-同期の時計と range の縁の設定は、センサーの range の縁の欠けを塞ぐ。センサーは、range の 20 m 外までの R の中の static の部品を登録する。旧の値 (Update clock と、0.2 R の距離の発火。200 m の LiDAR では 44 m) では、ある同期で R の外だった部品が次の同期より前に range に入り、そのときまで欠けていた。作成の予算で、さらに数 Update の間 queue に留まることもあった。センサーごとの値は、そのセンサーの最初の同期で 1 回だけ `rgl_scene_sensor` の行 (`registration_m`・`range_m`・`trigger_m`) に出る。同期の行の `in_range_creates`・`in_range_ms` は、その Update の作成の段の値である。旧の値で元の振る舞いに戻る:
+同期の時計と range の縁の設定は、センサーの range の縁の欠けを塞ぐ。センサーは、登録の半径 R = max(50 m, range + 20 m) の中の Static の部品を登録する。旧の値 (Update clock と、0.2 R の距離の発火。200 m の LiDAR では 44 m) では、ある同期で R の外だった部品が次の同期より前に range に入り、そのときまで欠けていた。作成の予算で、さらに数 Update の間 queue に留まることもあった。センサーごとの値は、そのセンサーの最初の同期で 1 回だけ `rgl_scene_sensor` の行 (`registration_m`・`range_m`・`trigger_m`) に出る。同期の行の `in_range_creates`・`in_range_ms` は、その Update の作成の段の値である。旧の値で元の振る舞いに戻る:
 
 ```text
 -rgl-scene-sync-clock=0 -rgl-scene-sync-interval-seconds=1 -rgl-scene-sync-trigger-ratio=0.2 -rgl-scene-sync-trigger-margin-slack-m=-1 -rgl-scene-in-range-creates-per-update=0
@@ -583,14 +595,17 @@ WP・同期の時計・range の縁の設定の不正な値 (非有限 float や
 別の行にある 2 つの key は、名前が似ていて、同じ queue を違う時点で数える。その queue は、
 instance をセンサーの球と比べ直すのを待つ、Static の instanced static mesh (ISM) の群の列
 である。同期のたびに、登録済みの Static の ISM の群を全部 queue に入れ直し、同期の無い
-Update が `rgl.Scene.MaxIsmInstanceChangesPerUpdate` の上限の内で順に処理する。
+Update が `rgl.Scene.MaxIsmInstanceChangesPerUpdate` の上限の内で順に処理する。同期の Update
+の次がまた同期の Update のとき (毎 Update が同期する。例: RGL のセンサーがすべて同期の間隔
+より長い周期で tick する) は、その同期の Update が同期の後に同じ上限の 1 歩を進めるので、
+回は止まらない。
 
 | 行 | Key | 意味 |
 |---|---|---|
-| `rgl_scene_sync` | `ism_pending` | この同期が queue を入れ直したときに残っていた entry の数: 前の回が届かなかった群。0 でないのは、前の同期からの Update で回が終わらなかったとき: 上限で止まったか、同期が続いた (回は同期の無い Update でだけ進む)。 |
+| `rgl_scene_sync` | `ism_pending` | この同期が queue を入れ直したときに残っていた entry の数: 前の回が届かなかった群。0 でないのは、前の同期からの歩みで回が終わらなかったとき: 上限で止まったか、同期が続いた (その間に上限の 1 歩しか進まない)。 |
 | `rgl_scene_audit` | `pending_ism` | 検査した frame の時点の queue の entry の数: まだ今のセンサーの球と比べていない群。 |
 
 どちらの数にも、queue に入れた後に外された component の entry が入る。そのような entry は、
 queue がそこに届いたときに捨てる。
 
-WP の非 Static queue は別である。`wp_pending` は現在の job 数、`wp_queue_age_max_s` は現在待つ作成の最長 age (sim 秒)。`wp_check_n`・`wp_check_instances`・`wp_check_ms`・`wp_entity_added`・`wp_entity_removed`・`wp_entity_ms` は前の sync log 行からの合計で、`wp_check_max_ms` は同区間の単一確認の最大時間である。`wp_inrange_added`/`wp_inrange_ms` はこの Update だけの生 range 内の発見時の塊で、upload と最初の API 待ちも含む。`wp_sync_bound_s`/`wp_create_latency_s`/`wp_margin_m` は今回の sync の horizon、`wp_violations` は前の行からの violation 数、`wp_deadline_syncs` は累積である。`wp_promoted` は現在の昇格済み候補数。`wp_entities_total` は regular + 全 ISM instance + live skeletal の合計 (synthetic ground を除外)、`wp_nonstatic_registered` は Stationary を含む regular/ISM の非 Static 数 (skeletal を除外) である。従来の `entities` key は regular の entity map の件数のまま。audit の `missing_wp_culled_in_range` は pending 中も含め、既知の WP 候補が生の range 内で未登録の数であり、Static mesh の作成 queue の件数ではない。
+WP の非 Static queue は別である。`wp_pending` は現在の job 数、`wp_queue_age_max_s` は現在待つ作成の最長 age (sim 秒)。`wp_check_n`・`wp_check_instances`・`wp_check_ms`・`wp_entity_added`・`wp_entity_removed`・`wp_entity_ms` は前の sync log 行からの合計で、`wp_check_max_ms` は同区間の単一確認の最大時間である。`wp_inrange_added`/`wp_inrange_ms` は、queue を作った時点でどれかのセンサーの生の range 内にあった部品の、この Update だけの追加で、upload と最初の API 待ちも含む。`wp_sync_bound_s`/`wp_create_latency_s`/`wp_margin_m` は今回の sync の horizon、`wp_violations` は前の行からの violation 数、`wp_deadline_syncs` は累積である。`wp_promoted` は現在の昇格済み候補数。`wp_entities_total` は regular + 全 ISM instance + live skeletal の合計 (synthetic ground を除外)、`wp_nonstatic_registered` は Stationary を含む regular/ISM の非 Static 数 (skeletal を除外) である。従来の `entities` key は regular の entity map の件数のまま。audit の `missing_wp_culled_in_range` は pending 中も含め、既知の WP 候補が生の range 内で未登録の数であり、Static mesh の作成 queue の件数ではない。
