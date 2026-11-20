@@ -61,35 +61,51 @@ namespace ros2 {
     }
   };
 
-  /// Release offsets in seconds, from the moment a frame's batch of `count`
-  /// samples is handed over. `substep_s` is the batch's sample spacing in
-  /// simulation time; `frame_span_s` is the wall time the previous frame took
-  /// (<= 0 if unknown). The spacing is compressed so that the whole batch is
-  /// released within that span, ahead of the next frame's batch.
+  /// Release offsets in seconds, from the moment a frame's batch is handed
+  /// over, for samples taken `sample_lag_s[k]` seconds before the frame stamp
+  /// (oldest first). "substep" keeps the samples' own spacing in simulation
+  /// time; a fixed interval spaces them evenly. `frame_span_s` is the wall time
+  /// the previous frame took (<= 0 if unknown): the spacing is compressed so
+  /// that the batch, plus one more step, fits in it, ahead of the next batch.
   inline std::vector<double> ImuPacingOffsets(
       const ImuPacingConfig &config,
-      std::size_t count,
-      double substep_s,
+      const std::vector<double> &sample_lag_s,
       double frame_span_s) {
+    const std::size_t count = sample_lag_s.size();
     std::vector<double> offsets(count, 0.0);
     if (count == 0u || config.mode == ImuPacingConfig::Mode::Off) {
       return offsets;
     }
-    double interval = config.mode == ImuPacingConfig::Mode::Substep ? substep_s : config.interval_s;
-    if (frame_span_s > 0.0) {
-      interval = std::min(interval, frame_span_s / static_cast<double>(count));
+    double span = 0.0;
+    if (config.mode == ImuPacingConfig::Mode::Substep) {
+      for (std::size_t k = 1u; k < count; ++k) {
+        offsets[k] = std::max(offsets[k - 1], sample_lag_s[0] - sample_lag_s[k]);
+      }
+      span = count > 1u
+          ? offsets[count - 1] * static_cast<double>(count) / static_cast<double>(count - 1)
+          : 0.0;
+    } else {
+      for (std::size_t k = 0u; k < count; ++k) {
+        offsets[k] = config.interval_s * static_cast<double>(k);
+      }
+      span = config.interval_s * static_cast<double>(count);
     }
-    interval = std::max(interval, 0.0);
-    for (std::size_t k = 0u; k < count; ++k) {
-      offsets[k] = interval * static_cast<double>(k);
+    if (frame_span_s > 0.0 && span > frame_span_s) {
+      const double scale = frame_span_s / span;
+      for (double &offset : offsets) {
+        offset *= scale;
+      }
     }
     return offsets;
   }
 
-  /// Runs submitted tasks on its own thread, each at its release time. A new
-  /// batch first releases whatever is left of the previous one (in order), so
-  /// nothing piles up when frames come faster than their batches drain. Stop()
-  /// drops pending tasks and joins; SubmitBatch() after Stop() does nothing.
+  /// Runs submitted tasks on its own thread, each at its release time and never
+  /// closer than the minimum gap to the previous one. A new batch pulls the
+  /// release of whatever is left of the previous one forward (in order). At
+  /// most SetMaxPending() tasks wait; beyond that the oldest are dropped and
+  /// counted. Clear() drops what waits; Stop() also joins (a task already
+  /// running finishes first). SubmitBatch() after Stop() does nothing. Start,
+  /// Stop and the setters are meant to be called from one thread.
   class ImuPacer {
   public:
     using Task = std::function<void()>;
@@ -98,6 +114,35 @@ namespace ros2 {
     ImuPacer(const ImuPacer &) = delete;
     ImuPacer &operator=(const ImuPacer &) = delete;
     ~ImuPacer() { Stop(); }
+
+    /// Minimum wall time between two task runs (seconds, default 0).
+    void SetMinGap(double seconds) {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _min_gap = std::chrono::duration_cast<Clock::duration>(
+          std::chrono::duration<double>(std::max(seconds, 0.0)));
+    }
+
+    /// Most tasks that may wait (default 64); the oldest beyond it are dropped.
+    void SetMaxPending(std::size_t count) {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _max_pending = std::max<std::size_t>(count, 1u);
+    }
+
+    std::size_t DroppedCount() const {
+      std::lock_guard<std::mutex> lock(_mutex);
+      return _dropped;
+    }
+
+    std::size_t PendingCount() const {
+      std::lock_guard<std::mutex> lock(_mutex);
+      return _queue.size();
+    }
+
+    /// Drops the tasks that wait; the thread keeps running.
+    void Clear() {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _queue.clear();
+    }
 
     void Start() {
       std::lock_guard<std::mutex> lock(_mutex);
@@ -142,6 +187,10 @@ namespace ros2 {
               now + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(offset)),
               std::move(tasks[k])});
         }
+        while (_queue.size() > _max_pending) {
+          _queue.pop_front();
+          ++_dropped;
+        }
       }
       _cv.notify_all();
     }
@@ -161,23 +210,32 @@ namespace ros2 {
           _cv.wait(lock, [this] { return _stopping || !_queue.empty(); });
           continue;
         }
-        const Clock::time_point release = _queue.front().release;
+        const Clock::time_point release = std::max(_queue.front().release, _last_run + _min_gap);
         if (Clock::now() < release) {
           _cv.wait_until(lock, release);
           continue;  // re-check: a new batch may have pulled the release forward
         }
         Task task = std::move(_queue.front().task);
         _queue.pop_front();
+        _last_run = Clock::now();
         lock.unlock();
         if (task) {
-          task();
+          try {
+            task();
+          } catch (...) {
+            // A failed publish must not take the thread (and the process) down.
+          }
         }
         lock.lock();
       }
     }
 
-    std::mutex _mutex;
+    mutable std::mutex _mutex;
     std::condition_variable _cv;
+    Clock::duration _min_gap = Clock::duration::zero();
+    Clock::time_point _last_run{};
+    std::size_t _max_pending = 64u;
+    std::size_t _dropped = 0u;
     std::deque<Item> _queue;
     std::thread _thread;
     bool _stopping = false;

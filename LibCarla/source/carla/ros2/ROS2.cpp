@@ -789,16 +789,31 @@ void ROS2::ProcessDataFromIMU(
 
 void ROS2::ProcessDataFromIMUStamped(
     double time_offset_seconds,
-    uint64_t sensor_type,
+    uint64_t /*sensor_type*/,
     carla::streaming::detail::stream_id_type stream_id,
     const carla::geom::Transform sensor_transform,
     carla::geom::Vector3D accelerometer,
     carla::geom::Vector3D gyroscope,
     float compass,
     void *actor) {
-  PrepareIMUStamped(
-      time_offset_seconds, sensor_type, stream_id, sensor_transform,
-      accelerometer, gyroscope, compass, actor)();
+  Stamp stamp = GetStamp();
+  double t = static_cast<double>(stamp.seconds) + 1e-9 * static_cast<double>(stamp.nanoseconds)
+      - time_offset_seconds;
+  if (t < 0.0) {
+    t = 0.0;
+  }
+  stamp.seconds = static_cast<int32_t>(t);
+  stamp.nanoseconds = static_cast<uint32_t>((t - static_cast<double>(stamp.seconds)) * 1e9);
+  if (auto base = GetOrCreateSensor(ESensors::InertialMeasurementUnit, stream_id, actor)) {
+    auto publisher = std::dynamic_pointer_cast<CarlaIMUPublisher>(base);
+    publisher->Write(
+        stamp.seconds, stamp.nanoseconds,
+        accelerometer.x, accelerometer.y, accelerometer.z,
+        gyroscope.x, gyroscope.y, gyroscope.z,
+        compass);
+    publisher->Publish();
+  }
+  PublishTransform(actor, stamp, sensor_transform);
 }
 
 std::function<void()> ROS2::PrepareIMUStamped(

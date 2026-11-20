@@ -177,6 +177,12 @@ private:
   /// The publishes prepared during one PostPhysTick, handed to the pacer at
   /// its end with their release offsets.
   std::vector<std::function<void()>> Ros2Batch;
+  /// How long before the frame stamp each batched sample was taken (seconds).
+  std::vector<double> Ros2BatchLags;
+
+  /// Dropped-task count last reported, and when (wall seconds).
+  std::size_t Ros2DroppedReported = 0u;
+  double Ros2DropReportWallS = -1.0;
 
   /// Wall time of the previous PostPhysTick and the span between the last two
   /// (seconds): a batch is released within that span.
@@ -185,7 +191,7 @@ private:
 
   void StartRos2PacingOnce();
   void StopRos2Pacing();
-  void SubmitRos2Batch(float DeltaTime);
+  void SubmitRos2Batch();
 
   /// The per-frame sample computation and publish (PostPhysTick without the
   /// pacing bookkeeping around it).

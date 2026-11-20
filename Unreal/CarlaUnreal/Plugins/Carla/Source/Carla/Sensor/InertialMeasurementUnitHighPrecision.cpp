@@ -356,9 +356,18 @@ void AInertialMeasurementUnitHighPrecision::PublishSubstepSample(
     {
       // Paced: stamp and publishers are resolved now, the publish itself runs
       // on the pacer thread at its release time (SubmitRos2Batch).
-      Ros2Batch.push_back(ROS2->PrepareIMUStamped(
+      // The task checks again that ROS 2 is still on when it runs.
+      auto Publish = ROS2->PrepareIMUStamped(
           TimeOffsetSeconds, DataStream.GetSensorType(), StreamId,
-          SensorTransform, Accelerometer, Gyroscope, Compass, this));
+          SensorTransform, Accelerometer, Gyroscope, Compass, this);
+      Ros2Batch.push_back([ROS2, Publish]()
+      {
+        if (ROS2->IsEnabled())
+        {
+          Publish();
+        }
+      });
+      Ros2BatchLags.push_back(TimeOffsetSeconds);
     }
     else
     {
@@ -436,6 +445,11 @@ void AInertialMeasurementUnitHighPrecision::StartRos2PacingOnce()
   }
   Ros2Pacing = Config;
   Ros2Pacer = std::make_unique<carla::ros2::ImuPacer>();
+  // Never two publishes closer than 1 ms (or the fixed interval if shorter),
+  // also when a late or new batch pulls releases forward.
+  Ros2Pacer->SetMinGap(Config.mode == carla::ros2::ImuPacingConfig::Mode::Fixed
+      ? std::min(Config.interval_s, 0.001) : 0.001);
+  Ros2Pacer->SetMaxPending(64u);
   Ros2Pacer->Start();
   UE_LOG(LogCarla, Log, TEXT("%s: ROS 2 publish paced (%s)"), *GetName(), *Text);
 }
@@ -449,23 +463,34 @@ void AInertialMeasurementUnitHighPrecision::StopRos2Pacing()
     Ros2Pacer.reset();
   }
   Ros2Batch.clear();
+  Ros2BatchLags.clear();
 }
 
-void AInertialMeasurementUnitHighPrecision::SubmitRos2Batch(float DeltaTime)
+void AInertialMeasurementUnitHighPrecision::SubmitRos2Batch()
 {
   if (!Ros2Pacer || Ros2Batch.empty())
   {
     Ros2Batch.clear();
+    Ros2BatchLags.clear();
     return;
   }
-  // The batch holds the frame's samples, spaced DeltaTime / N apart in
-  // simulation time (the substep when they come from the substep path).
-  const std::size_t Count = Ros2Batch.size();
-  const double SampleSpacingS = static_cast<double>(DeltaTime) / static_cast<double>(Count);
   const std::vector<double> Offsets =
-      carla::ros2::ImuPacingOffsets(Ros2Pacing, Count, SampleSpacingS, LastFrameSpanS);
+      carla::ros2::ImuPacingOffsets(Ros2Pacing, Ros2BatchLags, LastFrameSpanS);
   Ros2Pacer->SubmitBatch(std::move(Ros2Batch), Offsets);
   Ros2Batch.clear();
+  Ros2BatchLags.clear();
+
+  // The pacer drops the oldest waiting publishes when it cannot keep up.
+  const std::size_t Dropped = Ros2Pacer->DroppedCount();
+  const double NowS = FPlatformTime::Seconds();
+  if (Dropped > Ros2DroppedReported && (Ros2DropReportWallS < 0.0 || NowS - Ros2DropReportWallS >= 1.0))
+  {
+    UE_LOG(LogCarla, Warning,
+        TEXT("%s: paced ROS 2 publish fell behind; %llu samples dropped so far."),
+        *GetName(), static_cast<unsigned long long>(Dropped));
+    Ros2DroppedReported = Dropped;
+    Ros2DropReportWallS = NowS;
+  }
 }
 
 void AInertialMeasurementUnitHighPrecision::PostPhysTick(
@@ -480,8 +505,17 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTick(
 
   StartRos2PacingOnce();
   Ros2Batch.clear();
+  Ros2BatchLags.clear();
   PostPhysTickSamples(World, TickType, DeltaTime);
-  SubmitRos2Batch(DeltaTime);
+#if defined(WITH_ROS2)
+  // ROS 2 or this sensor's ROS output switched off: drop what still waits.
+  if (Ros2Pacer &&
+      (!bRos2StreamEnabled || !carla::ros2::ROS2::GetInstance()->IsEnabled()))
+  {
+    Ros2Pacer->Clear();
+  }
+#endif
+  SubmitRos2Batch();
 }
 
 void AInertialMeasurementUnitHighPrecision::PostPhysTickSamples(
