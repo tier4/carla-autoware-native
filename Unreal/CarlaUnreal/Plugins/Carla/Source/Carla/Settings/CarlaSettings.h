@@ -193,6 +193,19 @@ public:
       DisplayName = "ROS2 IMU QoS")
   FString ROS2ImuQos;
 
+  /// tier4: how sensor.other.imu_highprecision spreads the ROS 2 publishes of
+  /// the samples it computes together in one frame: "off" (default, back to
+  /// back), "substep" (spaced by the physics substep, as a real IMU driver
+  /// publishes) or a whole number of microseconds (fixed spacing). The header
+  /// stamps do not change. Set via -ros2-imu-pacing= or ROS2ImuPacing in the
+  /// [CARLA/Server] section of the CARLA settings file.
+  UPROPERTY(Category = "Quality Settings/ROS2",
+      BlueprintReadOnly,
+      EditAnywhere,
+      config,
+      DisplayName = "ROS2 IMU pacing")
+  FString ROS2ImuPacing;
+
   /// tier4: ellipsoid of the Transverse Mercator projection built from an
   /// Autoware map's MGRS georeference (AAutowareGameModeBase). "sphere"
   /// (default) keeps upstream's behaviour; "wgs84" uses the WGS84 ellipsoid,

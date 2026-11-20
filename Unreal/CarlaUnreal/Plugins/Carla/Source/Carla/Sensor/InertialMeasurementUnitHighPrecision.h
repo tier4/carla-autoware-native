@@ -13,7 +13,12 @@
 
 #include <util/disable-ue4-macros.h>
 #include "carla/geom/Vector3D.h"
+#include "carla/ros2/ImuPacing.h"
 #include <util/enable-ue4-macros.h>
+
+#include <functional>
+#include <memory>
+#include <vector>
 
 #include "Carla/Sensor/carla_imu_raw_sink.h"
 
@@ -160,4 +165,35 @@ private:
   bool bRos2StreamEnabled = true;
 
   bool IsStreamEnabledForRos();
+
+  // ---- Paced ROS 2 publish (-ros2-imu-pacing) ----
+
+  /// The setting is read once (first PostPhysTick); the pacer thread runs only
+  /// when it is not "off".
+  bool bRos2PacingTried = false;
+  carla::ros2::ImuPacingConfig Ros2Pacing;
+  std::unique_ptr<carla::ros2::ImuPacer> Ros2Pacer;
+
+  /// The publishes prepared during one PostPhysTick, handed to the pacer at
+  /// its end with their release offsets.
+  std::vector<std::function<void()>> Ros2Batch;
+  /// How long before the frame stamp each batched sample was taken (seconds).
+  std::vector<double> Ros2BatchLags;
+
+  /// Dropped-task count last reported, and when (wall seconds).
+  std::size_t Ros2DroppedReported = 0u;
+  double Ros2DropReportWallS = -1.0;
+
+  /// Wall time of the previous PostPhysTick and the span between the last two
+  /// (seconds): a batch is released within that span.
+  double LastPostPhysWallS = -1.0;
+  double LastFrameSpanS = 0.0;
+
+  void StartRos2PacingOnce();
+  void StopRos2Pacing();
+  void SubmitRos2Batch();
+
+  /// The per-frame sample computation and publish (PostPhysTick without the
+  /// pacing bookkeeping around it).
+  void PostPhysTickSamples(UWorld *World, ELevelTick TickType, float DeltaTime);
 };

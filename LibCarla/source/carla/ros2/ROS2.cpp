@@ -743,6 +743,60 @@ void ROS2::ProcessDataFromIMUStamped(
   PublishTransform(actor, stamp, sensor_transform);
 }
 
+std::function<void()> ROS2::PrepareIMUStamped(
+    double time_offset_seconds,
+    uint64_t /*sensor_type*/,
+    carla::streaming::detail::stream_id_type stream_id,
+    const carla::geom::Transform sensor_transform,
+    carla::geom::Vector3D accelerometer,
+    carla::geom::Vector3D gyroscope,
+    float compass,
+    void *actor) {
+  Stamp stamp = GetStamp();
+  double t = static_cast<double>(stamp.seconds) + 1e-9 * static_cast<double>(stamp.nanoseconds)
+      - time_offset_seconds;
+  if (t < 0.0) {
+    t = 0.0;
+  }
+  stamp.seconds = static_cast<int32_t>(t);
+  stamp.nanoseconds = static_cast<uint32_t>((t - static_cast<double>(stamp.seconds)) * 1e9);
+  std::shared_ptr<CarlaIMUPublisher> publisher;
+  if (auto base = GetOrCreateSensor(ESensors::InertialMeasurementUnit, stream_id, actor)) {
+    publisher = std::dynamic_pointer_cast<CarlaIMUPublisher>(base);
+  }
+  // Same resolution as PublishTransform, done now (under the lock) so the
+  // task does not look the actor up later.
+  std::shared_ptr<CarlaTransformPublisher> transform_publisher;
+  std::string parent_frame;
+  std::string frame_id;
+  {
+    std::lock_guard<std::mutex> lock(_mutex);
+    transform_publisher = GetOrCreateTransformPublisherLocked(actor);
+    if (transform_publisher) {
+      parent_frame = ParentFrameOrMap(BuildParentChain(actor));
+      frame_id = LookupFrameId(actor);
+    }
+  }
+  return [publisher, transform_publisher, parent_frame, frame_id, stamp,
+          sensor_transform, accelerometer, gyroscope, compass]() {
+    if (publisher) {
+      publisher->Write(
+          stamp.seconds, stamp.nanoseconds,
+          accelerometer.x, accelerometer.y, accelerometer.z,
+          gyroscope.x, gyroscope.y, gyroscope.z,
+          compass);
+      publisher->Publish();
+    }
+    if (transform_publisher) {
+      transform_publisher->Write(
+          stamp.seconds, stamp.nanoseconds, parent_frame, frame_id,
+          sensor_transform.location.x, sensor_transform.location.y, sensor_transform.location.z,
+          sensor_transform.rotation.pitch, sensor_transform.rotation.yaw, sensor_transform.rotation.roll);
+      transform_publisher->Publish();
+    }
+  };
+}
+
 void ROS2::ProcessDataFromDVS(
     uint64_t /*sensor_type*/,
     carla::streaming::detail::stream_id_type stream_id,
