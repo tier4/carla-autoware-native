@@ -813,7 +813,7 @@ distance_sensor.listen(on_distance)
 * __Blueprint:__ sensor.camera.rt_lens_instance
 * __Output:__ [carla.Image](python_api.md#carla.Image) per step (unless `sensor_tick` says otherwise).
 
-The labelling twin of [`sensor.camera.rt_lens`](#ray-traced-lens-camera): same shared lens attribute surface as the distance camera above, but the geometry AOV it renders is the primary hit's CARLA tag rather than a distance. The output byte layout is identical to the [instance segmentation camera](#instance-segmentation-camera): red channel `R` carries the semantic label, and the green/blue channels carry the 16-bit instance id (`G` low byte, `B` high byte). The id is the __engine's internal actor unique id__ used to build the tag on the GPU, not the id returned by the Python `actor.id` property — treat it as an opaque per-instance key within one episode, not as a value to compare against `actor.id`.
+The labelling twin of [`sensor.camera.rt_lens`](#ray-traced-lens-camera): same shared lens attribute surface as the distance camera above, but the geometry AOV it renders is the primary hit's CARLA tag rather than a distance. The output byte layout is identical to the [instance segmentation camera](#instance-segmentation-camera): red channel `R` carries the semantic label, and the green/blue channels carry the 16-bit instance id (`G` low byte, `B` high byte). The id is the __engine's internal actor unique id__ used to build the tag on the GPU, not the id returned by the Python `actor.id` property — treat it as an opaque per-instance key within one episode, not as a value to compare against `actor.id`. Rays that hit nothing are tagged `Sky` (`11`) with id `0xFFFF`, the same bytes the raster cameras write for sky pixels.
 
 Depth of field is disabled (a defocused ray would blend two actors' ids into one pixel), and — like the distance camera — `samples_per_pixel`/`enable_denoiser` default to `1`/`False` (the AOV is an exact integer read off the primary hit, nothing for a denoiser to do) and post-process attributes are not present.
 
@@ -1241,6 +1241,20 @@ Triggering conditions according to ETSI standard:
 - Speed change > 5 m/s
 - Time elapsed > CAM Generation time (configurable)
 - Low Frequency Container Time Elapsed > 500 ms
+
+Values in the message returned by `get()` are ETSI integer codes, not SI units, each rounded to the field's unit. Speed, vehicle length and vehicle width above their field's range are sent as its out-of-range code.
+
+| Field | Unit |
+|-------|------|
+| Latitude, longitude | 0.1 microdegree |
+| Altitude | 0.01 m |
+| Heading | 0.1° from north, clockwise |
+| Speed | 0.01 m/s |
+| Longitudinal acceleration | 0.1 m/s² |
+| Yaw rate | 0.01°/s |
+| Vehicle length, vehicle width | 0.1 m (a 4.89 m car is sent as 49) |
+
+For an actor's exact size, read [`actor.bounding_box`](python_api.md#carla.Actor.bounding_box) rather than the CAM.
 
 For the CAM V2X sensor, additional blueprint attributes apply:
 

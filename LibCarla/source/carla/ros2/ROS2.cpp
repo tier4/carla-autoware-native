@@ -6,6 +6,7 @@
 
 #include "carla/Logging.h"
 #include "carla/ros2/ROS2.h"
+#include "carla/ros2/ROS2SensorTypes.h"
 #include "carla/geom/GeoLocation.h"
 #include "carla/geom/Vector3D.h"
 #include "carla/sensor/data/DVSEvent.h"
@@ -63,98 +64,6 @@ namespace ros2 {
 // static fields
 std::shared_ptr<ROS2> ROS2::_instance;
 
-// list of sensors (should be equal to the list of SensorsRegistry)
-enum ESensors {
-  CollisionSensor,
-  DepthCamera,
-  NormalsCamera,
-  DVSCamera,
-  GnssSensor,
-  InertialMeasurementUnit,
-  LaneInvasionSensor,
-  ObstacleDetectionSensor,
-  OpticalFlowCamera,
-  Radar,
-  RayCastSemanticLidar,
-  RayCastLidar,
-  RssSensor,
-  SceneCaptureCamera,
-  // Registered in SensorRegistry right after SceneCaptureCamera. Without this
-  // entry every value below was one lower than the registry index, so the
-  // camera dispatch (keyed on the serializer header's registry index) sent
-  // semantic segmentation through the instance-segmentation case and dropped
-  // instance segmentation altogether.
-  SceneCaptureCamera_RayTracedLens,
-  SemanticSegmentationCamera,
-  InstanceSegmentationCamera,
-  WorldObserver,
-  // Keep these in lock-step with the SensorRegistry tuple order: the fisheye /
-  // wide-angle-lens cameras (ported in #9741) were added to SensorRegistry but
-  // were missing here, which shifted every following value out of sync with the
-  // registry index.
-  SceneCaptureCamera_WideAngleLens,
-  DepthCamera_WideAngleLens,
-  InstanceSegmentationCamera_WideAngleLens,
-  SemanticSegmentationCamera_WideAngleLens,
-  CameraGBufferUint8,
-  CameraGBufferFloat,
-  HSSLidar,
-  // V2X sensors have no ROS2 dispatch, but they occupy registry slots, so
-  // they need entries to keep the following values aligned.
-  V2XSensor,
-  CustomV2XSensor,
-  // Autoware vehicle interface (appended at the END, matching the
-  // SensorRegistry append).
-  VehicleStatusSensor,
-  AutowareGnssSensor,
-  SceneCaptureCamera_RayTracedLensDistance,
-  SceneCaptureCamera_RayTracedLensInstance,
-  // tier4 additions (SensorRegistry appends them after every upstream entry).
-  InertialMeasurementUnitHighPrecision,
-  RGLLidar
-};
-
-// Fail the build if ESensors drifts from the SensorRegistry order again.
-#define CARLA_ROS2_CHECK_SENSOR_ID(Entry, Type)                                \
-  static_assert(ESensors::Entry == carla::sensor::SensorRegistry::get<Type *>::index, \
-                "ESensors::" #Entry " does not match the SensorRegistry index of " #Type)
-CARLA_ROS2_CHECK_SENSOR_ID(CollisionSensor, ACollisionSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(DepthCamera, ADepthCamera);
-CARLA_ROS2_CHECK_SENSOR_ID(NormalsCamera, ANormalsCamera);
-CARLA_ROS2_CHECK_SENSOR_ID(DVSCamera, ADVSCamera);
-CARLA_ROS2_CHECK_SENSOR_ID(GnssSensor, AGnssSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(InertialMeasurementUnit, AInertialMeasurementUnit);
-CARLA_ROS2_CHECK_SENSOR_ID(LaneInvasionSensor, ALaneInvasionSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(ObstacleDetectionSensor, AObstacleDetectionSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(OpticalFlowCamera, AOpticalFlowCamera);
-CARLA_ROS2_CHECK_SENSOR_ID(Radar, ARadar);
-CARLA_ROS2_CHECK_SENSOR_ID(RayCastSemanticLidar, ARayCastSemanticLidar);
-CARLA_ROS2_CHECK_SENSOR_ID(RayCastLidar, ARayCastLidar);
-CARLA_ROS2_CHECK_SENSOR_ID(RssSensor, ARssSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera, ASceneCaptureCamera);
-CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera_RayTracedLens, ASceneCaptureCamera_RayTracedLens);
-CARLA_ROS2_CHECK_SENSOR_ID(SemanticSegmentationCamera, ASemanticSegmentationCamera);
-CARLA_ROS2_CHECK_SENSOR_ID(InstanceSegmentationCamera, AInstanceSegmentationCamera);
-CARLA_ROS2_CHECK_SENSOR_ID(WorldObserver, FWorldObserver);
-CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera_WideAngleLens, ASceneCaptureCamera_WideAngleLens);
-CARLA_ROS2_CHECK_SENSOR_ID(DepthCamera_WideAngleLens, ADepthCamera_WideAngleLens);
-CARLA_ROS2_CHECK_SENSOR_ID(InstanceSegmentationCamera_WideAngleLens, AInstanceSegmentationCamera_WideAngleLens);
-CARLA_ROS2_CHECK_SENSOR_ID(SemanticSegmentationCamera_WideAngleLens, ASemanticSegmentationCamera_WideAngleLens);
-CARLA_ROS2_CHECK_SENSOR_ID(CameraGBufferUint8, FCameraGBufferUint8);
-CARLA_ROS2_CHECK_SENSOR_ID(CameraGBufferFloat, FCameraGBufferFloat);
-CARLA_ROS2_CHECK_SENSOR_ID(HSSLidar, AHSSLidar);
-CARLA_ROS2_CHECK_SENSOR_ID(V2XSensor, AV2XSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(CustomV2XSensor, ACustomV2XSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(VehicleStatusSensor, AVehicleStatusSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(AutowareGnssSensor, AAutowareGnssSensor);
-CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera_RayTracedLensDistance, ASceneCaptureCamera_RayTracedLensDistance);
-CARLA_ROS2_CHECK_SENSOR_ID(SceneCaptureCamera_RayTracedLensInstance, ASceneCaptureCamera_RayTracedLensInstance);
-CARLA_ROS2_CHECK_SENSOR_ID(InertialMeasurementUnitHighPrecision, AInertialMeasurementUnitHighPrecision);
-CARLA_ROS2_CHECK_SENSOR_ID(RGLLidar, ARGLLidar);
-#undef CARLA_ROS2_CHECK_SENSOR_ID
-static_assert(ESensors::RGLLidar + 1 == carla::sensor::SensorRegistry::size(),
-              "ESensors must list every SensorRegistry entry");
-
 bool ROS2::Enable(bool enable, Middleware middleware, int domain_id) {
   // Select the ROS 2 middleware before any publisher or subscriber is created.
   // SetActiveMiddleware is the DDS-free bridge that resolves availability inside
@@ -180,11 +89,29 @@ bool ROS2::Enable(bool enable, Middleware middleware, int domain_id) {
     log_info("ROS2: using middleware '", MiddlewareToString(middleware),
         "', domain id: ", resolved.id, " (", domain_source, ")");
   }
+  // The clock publisher is the first entity created, so it is the one that
+  // brings the middleware up (DDS participant or Zenoh session).
+  auto clock_publisher = std::make_shared<CarlaClockPublisher>();
+  if (enable && !clock_publisher->IsReady()) {
+    log_error("**********************************************************************");
+    log_error("ROS2: middleware", MiddlewareToString(middleware),
+              "FAILED TO START. ROS2 is DISABLED for this session:");
+    log_error("ROS2: no topic will be published and no ROS 2 control will be received.");
+    const char *config_var =
+        (middleware == Middleware::CycloneDDS) ? "CYCLONEDDS_URI"
+        : (middleware == Middleware::FastDDS)  ? "FASTRTPS_DEFAULT_PROFILES_FILE"
+                                               : "ZENOH_SESSION_CONFIG_URI / ZENOH_CONFIG_OVERRIDE";
+    log_error("ROS2: the errors above give the cause. Check the", config_var,
+              "configuration, the domain id and the network interfaces.");
+    log_error("**********************************************************************");
+    _enabled = false;
+    return false;
+  }
   _enabled = enable;
   log_info("ROS2 enabled: ", _enabled.load());
   {
     std::lock_guard<std::mutex> lock(_mutex);
-    _clock_publisher = std::make_shared<CarlaClockPublisher>();
+    _clock_publisher = std::move(clock_publisher);
   }
 #if defined(WITH_ROS2_DEMO)
   _basic_publisher = std::make_shared<BasicPublisher>();
@@ -322,7 +249,7 @@ void ROS2::RegisterVehicle(
     _autoware_vehicles.insert(actor);
     _subscribers.insert({actor, std::make_shared<AutowareControlSubscriber>(
         actor, std::move(frame_id),
-        autoware_control_qos.value_or(QosProfile::ReliableTransientLocal()))});
+        autoware_control_qos.value_or(QosProfile::ReliableVolatile()))});
   } else if (enable_ackermann_control) {
     _subscribers.insert({actor, std::make_shared<AckermannControlSubscriber>(actor, base_topic_name, std::move(frame_id))});
   } else {

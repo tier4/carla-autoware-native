@@ -36,7 +36,7 @@ namespace ros2 {
   /// Control decoded from Autoware's /control/command/control_cmd:
   /// longitudinal acceleration [m/s^2] + steer, the commanded tire angle [rad]
   /// in CARLA's sign convention (positive to the right). The vehicle turns it
-  /// into its normalized steer input with its own steering model.
+  /// into its normalized steer input with the selected steering map.
   struct VehicleAccelerationControl
   {
     float acceleration;

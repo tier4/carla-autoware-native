@@ -125,9 +125,9 @@ void AVehicleStatusSensor::CollectAndStream(float /*DeltaSeconds*/)
   // Control flags (b0 = reverse, b1 = manual gear shift)
   const auto& Control = Vehicle->GetVehicleControl();
 
-  // Steering as a tire angle [rad, CARLA sign], from this vehicle's own
-  // steering model (the inverse of the mapping applied to Autoware's command).
-  const float SteerTireAngleRad = Vehicle->GetTireAngleForSteerInput(Control.Steer);
+  // Convert the normalized input with the selected map before serialization.
+  // Both modes send a tire angle [rad, CARLA sign], so ROS 2 only flips its sign.
+  const float SteerTireAngleRad = Vehicle->GetAutowareTireAngle(Control.Steer);
   const auto Flags = (Control.bReverse ? 0x01 : 0) | (Control.bManualGearShift ? 0x02 : 0);
 
   // Turn mask (b0 = left blinker, b1 = right blinker, b2 = hazards)

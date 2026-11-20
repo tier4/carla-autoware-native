@@ -176,6 +176,16 @@ public:
   /// TireAngleRad (radians, positive to the right). Game thread only.
   float GetSteerInputForTireAngle(float TireAngleRad) const;
 
+  /// Select the per-vehicle Chaos table for both Autoware steering paths.
+  /// The default uses the upstream steering compensation table.
+  void SetAutowareSteeringMap(bool bPerVehicle) { bUsePerVehicleAutowareSteeringMap = bPerVehicle; }
+
+  /// Tire angle [rad, positive right] to normalized steer, using the selected map.
+  float GetAutowareSteerInput(float TireAngleRad) const;
+
+  /// Normalized steer to tire angle [rad, positive right], using the selected map.
+  float GetAutowareTireAngle(float Steer) const;
+
   /// @}
   // ===========================================================================
   /// @name AI debug state
@@ -797,6 +807,19 @@ public:
   UFUNCTION(Category = "CARLA Wheeled Vehicle", BlueprintCallable)
   void RecordDoorChange(const EVehicleDoor DoorIdx, const bool bIsOpen); 
 
+  /// Number of doors this vehicle can open (its configured door constraints).
+  int32 GetDoorCount() const
+  {
+    return ConstraintsComponents.Num();
+  }
+
+  /// Bit i set when door i (an EVehicleDoor below All) is open: OpenDoorPhys
+  /// opened it and CloseDoorPhys has not closed it since.
+  uint8 GetOpenDoorMask() const
+  {
+    return OpenDoorMask;
+  }
+
   /// Every door open now (a physics body of its own while open), by door
   /// index, with its pose relative to the vehicle.
   TArray<TPair<int32, FTransform>> GetOpenDoorPoses() const;
@@ -864,7 +887,15 @@ public:
  
 private:
 
+  bool bUsePerVehicleAutowareSteeringMap = false;
+
   bool bHasMirroredMotion = false;
+
+  /// Set while ResetConstraints cycles the doors, which is not a door change.
+  bool bResettingDoorConstraints = false;
+
+  /// What GetOpenDoorMask returns.
+  uint8 OpenDoorMask = 0u;
 
   FVector MirroredVelocity = FVector::ZeroVector;
 
@@ -907,6 +938,10 @@ private:
 
   /// GetWheelPose for every wheel.
   TArray<FWheelAnimationData> GetWheelPoses() const;
+
+  /// World location, in cm, of the centre of the wheel at WheelIndex as shown:
+  /// its resting position plus the suspension travel of GetWheelPose.
+  FVector GetWheelWorldLocation(int32 WheelIndex) const;
 
   /// Sets the Chaos wheels to these poses, so that they do not jump when Chaos
   /// takes over the wheels again.

@@ -36,8 +36,8 @@ rt/vehicle/status/hazard_lights_status
 ```
 
 `AutowareControlSubscriber` — base `rt/control/command`, QoS
-`QosProfile::ReliableTransientLocal()` ("so the latest latched command survives a
-late join"):
+`QosProfile::ReliableVolatile()` by default (matching both VOLATILE and
+TRANSIENT_LOCAL command writers):
 
 ```
 rt/control/command/control_cmd
@@ -48,9 +48,10 @@ rt/control/command/emergency_cmd
 rt/vehicle/engage
 ```
 
-Note the asymmetry in durability. Status is volatile because a stale velocity is
-worse than none; commands are latched because a simulator that restarts mid-run
-must not sit unengaged waiting for the next command.
+Commands stream at the control rate. A VOLATILE reader matches both command
+gates used by Autoware but does not receive samples from before it joined.
+Set `ros2_autoware_control_qos` before spawning to override the six command
+readers; see `Docs/autoware.md` for the policy list.
 
 `AutowareGNSSPublisher` publishes on the **sensor's own** base topic rather than
 a fixed name, so its topic follows the `ros_name` / `ros_topic_name` you give

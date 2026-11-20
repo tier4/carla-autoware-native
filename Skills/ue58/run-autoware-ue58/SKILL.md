@@ -35,10 +35,10 @@ The pieces are ue58-only. `AutowareGNSSPublisher`,
 the UE4 tree, and neither do the `sensor.other.autoware_gnss` /
 `sensor.other.vehicle_status` blueprints.
 
-`steering_tire_angle` (command and report) is mapped to and from each vehicle's
-normalized steer input by `ACarlaWheeledVehicle::GetSteerInputForTireAngle` /
-`GetTireAngleForSteerInput`, from that vehicle's own steering model in Chaos;
-there is no per-vehicle steering calibration to do.
+`steering_tire_angle` (command and report) uses the upstream fixed compensation
+table by default. Set the vehicle attribute `ros2_autoware_steering_map` to
+`per_vehicle` before spawning to use its own Chaos steering model in both
+directions. See `Docs/autoware.md` for the differences and limits.
 
 ## Instructions
 
@@ -74,12 +74,10 @@ them, so it cannot drift from your build. Measured contract:
 | `rt/vehicle/status/turn_indicators_status` | `rt/control/command/emergency_cmd` |
 | `rt/vehicle/status/hazard_lights_status` | `rt/vehicle/engage` |
 
-Status is `RELIABLE / VOLATILE / KEEP_LAST 1`; commands are `RELIABLE /
-TRANSIENT_LOCAL / KEEP_LAST 1` by default, so a late-joining simulator still
-receives the last command. An Autoware that publishes its commands VOLATILE
-never matches those readers (the ego does not move): set the vehicle attribute
-`ros2_autoware_control_qos` to a VOLATILE profile, listing all eight policies
-(see `Docs/autoware.md`). A ROS 2 node sees these without the `rt/` prefix.
+Status and commands are `RELIABLE / VOLATILE / KEEP_LAST 1` by default. Command
+readers match both VOLATILE and TRANSIENT_LOCAL publishers. Set the vehicle
+attribute `ros2_autoware_control_qos` before spawning to override all six command
+readers (see `Docs/autoware.md`).
 
 `sensors` confirms the rig's blueprints exist and prints each one's ROS
 attributes. Both `ros_name` (a topic *segment*) and `ros_topic_name` (the exact

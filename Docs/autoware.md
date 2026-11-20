@@ -143,9 +143,9 @@ CARLA subscribes to these:
 | `/control/command/emergency_cmd` | `tier4_vehicle_msgs/VehicleEmergencyStamped` | Received, not applied. |
 | `/vehicle/engage` | `autoware_vehicle_msgs/Engage` | Received, not applied. |
 
-CARLA publishes the status topics as RELIABLE and VOLATILE with depth 1. By default it subscribes to the topics above as RELIABLE and TRANSIENT_LOCAL with depth 1, so a publisher to them must offer TRANSIENT_LOCAL durability, for example `ros2 topic pub --qos-durability transient_local ...`.
+CARLA publishes the status topics as RELIABLE and VOLATILE with depth 1. By default it subscribes to the topics above as RELIABLE and VOLATILE with depth 1, which matches both Autoware's `vehicle_cmd_gate` (TRANSIENT_LOCAL) and its replacement `control_command_gate` (VOLATILE).
 
-An Autoware version that publishes its commands VOLATILE does not match those readers: set the `ros2_autoware_control_qos` attribute before spawning to give all six command subscribers another QoS. The value is a comma-separated list of the eight ROS 2 QoS policies:
+Set the `ros2_autoware_control_qos` vehicle attribute before spawning to override the QoS of all six command subscribers. The value is a comma-separated list of the eight ROS 2 QoS policies:
 
 ```py
 ego_bp.set_attribute('ros2_autoware_control_qos',
@@ -168,7 +168,19 @@ A key left out keeps the default of that policy (RELIABLE, VOLATILE, KEEP_LAST, 
 
 The `-ros2-camera-qos=`, `-ros2-lidar-qos=` and `-ros2-imu-qos=` server options take the same list, or the short form `<reliable|best_effort>[:<depth>]`.
 
-The steering tire angle in `control_cmd` and `steering_status` is the front wheels' angle in a bicycle model. CARLA maps it to and from each vehicle's steer input with that vehicle's own steering model in the physics engine (its wheels' maximum steer angles, its steering type and its wheel layout), so a vehicle needs no steering calibration of its own. The mapping assumes a flat steering curve, which `ros2_autoware_control` sets when the vehicle spawns, and leaves out tire slip.
+The steering tire angle in `control_cmd` and `steering_status` is in radians, positive to the left. The `ros2_autoware_steering_map` vehicle attribute selects the conversion in both directions; set it before spawning:
+
+```py
+ego_bp.set_attribute('ros2_autoware_steering_map', 'per_vehicle')
+```
+
+| Value | Command and status conversion |
+| --- | --- |
+| `upstream` (default) | Uses the upstream fixed steering compensation table. Commands map tire angle to normalized steer; status maps normalized steer back to tire angle. The table saturates at normalized steer 0.7 and tire angle 0.628645 rad. |
+| `per_vehicle` | Uses a table built from the vehicle's Chaos steering model: the wheels' maximum steer angles, steering type and wheel layout. Commands invert this table; status uses the same table to report the front wheels' bicycle-model angle. The full normalized steer range is available, with a linear fallback if the wheel setup is unusable. |
+
+Both modes assume a flat steering curve, which `ros2_autoware_control` sets when the vehicle spawns. The fixed table is an empirical calibration for one reference vehicle; the per-vehicle table models steering geometry and leaves out tire slip. The modes can therefore produce different angles on the same vehicle. Other values, including an empty string, fail the spawn. The attribute also selects the conversion for an attached `sensor.other.vehicle_status`, even when the vehicle is driven through another control interface. It does not change the direct vehicle or Ackermann command interfaces.
+
 
 `autoware_demo.py` publishes the sensor kit on these topics:
 

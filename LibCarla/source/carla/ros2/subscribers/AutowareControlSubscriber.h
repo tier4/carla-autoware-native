@@ -22,8 +22,8 @@ namespace ros2 {
 // (superseded).
 //
 // Topics (fixed absolute names, DDS "rt/" prefix, QoS RELIABLE /
-// TRANSIENT_LOCAL / KEEP_LAST depth 1 per tier4 unless the caller passes
-// another profile, which then applies to all six):
+// VOLATILE / KEEP_LAST depth 1 by default, matching TRANSIENT_LOCAL and
+// VOLATILE writers. A caller-supplied profile applies to all six):
 //   /control/command/control_cmd         autoware_control_msgs/Control
 //   /control/command/gear_cmd            autoware_vehicle_msgs/GearCommand
 //   /control/command/turn_indicators_cmd autoware_vehicle_msgs/TurnIndicatorsCommand
@@ -35,7 +35,7 @@ namespace ros2 {
 // longitudinal.acceleration drives the vehicle (velocity/jerk intentionally
 // ignored — pure acceleration control); steer = -steering_tire_angle, a tire
 // angle in radians in CARLA's sign convention, which the vehicle maps to its
-// normalized steer input with its own steering model; steer_speed
+// normalized steer input with the selected steering map; steer_speed
 // = -steering_tire_rotation_rate when defined, else 0. The remaining commands
 // are drained each frame but not yet applied (tier4 TODO preserved for the
 // Unreal phase).
@@ -43,7 +43,7 @@ class AutowareControlSubscriber : public BaseSubscriber {
 public:
   AutowareControlSubscriber(
       void *vehicle, std::string frame_id,
-      const QosProfile &qos = QosProfile::ReliableTransientLocal());
+      const QosProfile &qos = QosProfile::ReliableVolatile());
   ~AutowareControlSubscriber() override;
 
   /// Drains the six command topics once per frame (called from
