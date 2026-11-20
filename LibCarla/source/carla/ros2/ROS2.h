@@ -17,6 +17,7 @@
 #include "carla/streaming/detail/Types.h"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -187,6 +188,20 @@ public:
   // time_offset_seconds before the current frame stamp, so several samples per
   // frame (one per physics substep) carry their own time.
   void ProcessDataFromIMUStamped(
+      double time_offset_seconds,
+      uint64_t sensor_type,
+      carla::streaming::detail::stream_id_type stream_id,
+      const carla::geom::Transform sensor_transform,
+      carla::geom::Vector3D accelerometer,
+      carla::geom::Vector3D gyroscope,
+      float compass,
+      void *actor = nullptr);
+  // The same publish split in two, for paced publishing: called on the game
+  // thread, this resolves the stamp (from the current frame stamp), the
+  // publishers and the frame names now; the returned task only writes and
+  // publishes, so it may run later on another thread, even after the actor is
+  // gone (it holds the publishers it needs).
+  std::function<void()> PrepareIMUStamped(
       double time_offset_seconds,
       uint64_t sensor_type,
       carla::streaming::detail::stream_id_type stream_id,

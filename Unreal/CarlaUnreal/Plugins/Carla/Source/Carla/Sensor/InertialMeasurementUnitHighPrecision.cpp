@@ -292,6 +292,7 @@ void AInertialMeasurementUnitHighPrecision::UnregisterSubstepCallback()
 void AInertialMeasurementUnitHighPrecision::EndPlay(EEndPlayReason::Type EndPlayReason)
 {
   UnregisterSubstepCallback();
+  StopRos2Pacing();
   StopRawSink();
   Super::EndPlay(EndPlayReason);
 }
@@ -299,6 +300,7 @@ void AInertialMeasurementUnitHighPrecision::EndPlay(EEndPlayReason::Type EndPlay
 void AInertialMeasurementUnitHighPrecision::BeginDestroy()
 {
   // Actors destroyed without EndPlay must not leave a sink thread running.
+  StopRos2Pacing();
   StopRawSink();
   Super::BeginDestroy();
 }
@@ -343,19 +345,26 @@ void AInertialMeasurementUnitHighPrecision::PublishSubstepSample(
     TRACE_CPUPROFILER_EVENT_SCOPE_STR("ROS2 Send");
     auto StreamId = carla::streaming::detail::token_type(GetToken()).get_stream_id();
     AActor* ParentActor = GetAttachParentActor();
+    FTransform SensorFTransform = DataStream.GetSensorTransform();
     if (ParentActor)
     {
-      FTransform LocalTransformRelativeToParent =
+      SensorFTransform =
           GetActorTransform().GetRelativeTransform(ParentActor->GetActorTransform());
-      ROS2->ProcessDataFromIMUStamped(
+    }
+    const carla::geom::Transform SensorTransform(SensorFTransform);
+    if (Ros2Pacer)
+    {
+      // Paced: stamp and publishers are resolved now, the publish itself runs
+      // on the pacer thread at its release time (SubmitRos2Batch).
+      Ros2Batch.push_back(ROS2->PrepareIMUStamped(
           TimeOffsetSeconds, DataStream.GetSensorType(), StreamId,
-          LocalTransformRelativeToParent, Accelerometer, Gyroscope, Compass, this);
+          SensorTransform, Accelerometer, Gyroscope, Compass, this));
     }
     else
     {
       ROS2->ProcessDataFromIMUStamped(
           TimeOffsetSeconds, DataStream.GetSensorType(), StreamId,
-          DataStream.GetSensorTransform(), Accelerometer, Gyroscope, Compass, this);
+          SensorTransform, Accelerometer, Gyroscope, Compass, this);
     }
   }
   #endif
@@ -395,7 +404,87 @@ static void EmitZOHSamples(
 // PostPhysTick: mode-dispatch to substep path, upsample ZOH path, or fallback.
 // =========================================================================
 
+// =========================================================================
+// Paced ROS 2 publish (-ros2-imu-pacing).
+// =========================================================================
+
+void AInertialMeasurementUnitHighPrecision::StartRos2PacingOnce()
+{
+  if (bRos2PacingTried)
+  {
+    return;
+  }
+  bRos2PacingTried = true;
+  auto *GameInstance = UCarlaStatics::GetGameInstance(GetWorld());
+  if (GameInstance == nullptr)
+  {
+    return;
+  }
+  const FString Text = GameInstance->GetCarlaSettings().ROS2ImuPacing;
+  carla::ros2::ImuPacingConfig Config;
+  if (!carla::ros2::ImuPacingConfig::Parse(std::string(TCHAR_TO_UTF8(*Text)), Config))
+  {
+    UE_LOG(LogCarla, Error,
+        TEXT("%s: -ros2-imu-pacing='%s' is not off, substep or a whole number of "
+             "microseconds; publishing without pacing."),
+        *GetName(), *Text);
+    return;
+  }
+  if (Config.mode == carla::ros2::ImuPacingConfig::Mode::Off)
+  {
+    return;
+  }
+  Ros2Pacing = Config;
+  Ros2Pacer = std::make_unique<carla::ros2::ImuPacer>();
+  Ros2Pacer->Start();
+  UE_LOG(LogCarla, Log, TEXT("%s: ROS 2 publish paced (%s)"), *GetName(), *Text);
+}
+
+void AInertialMeasurementUnitHighPrecision::StopRos2Pacing()
+{
+  // Drops what is not published yet; the pacer thread is joined.
+  if (Ros2Pacer)
+  {
+    Ros2Pacer->Stop();
+    Ros2Pacer.reset();
+  }
+  Ros2Batch.clear();
+}
+
+void AInertialMeasurementUnitHighPrecision::SubmitRos2Batch(float DeltaTime)
+{
+  if (!Ros2Pacer || Ros2Batch.empty())
+  {
+    Ros2Batch.clear();
+    return;
+  }
+  // The batch holds the frame's samples, spaced DeltaTime / N apart in
+  // simulation time (the substep when they come from the substep path).
+  const std::size_t Count = Ros2Batch.size();
+  const double SampleSpacingS = static_cast<double>(DeltaTime) / static_cast<double>(Count);
+  const std::vector<double> Offsets =
+      carla::ros2::ImuPacingOffsets(Ros2Pacing, Count, SampleSpacingS, LastFrameSpanS);
+  Ros2Pacer->SubmitBatch(std::move(Ros2Batch), Offsets);
+  Ros2Batch.clear();
+}
+
 void AInertialMeasurementUnitHighPrecision::PostPhysTick(
+    UWorld* World, ELevelTick TickType, float DeltaTime)
+{
+  const double NowS = FPlatformTime::Seconds();
+  if (LastPostPhysWallS >= 0.0)
+  {
+    LastFrameSpanS = NowS - LastPostPhysWallS;
+  }
+  LastPostPhysWallS = NowS;
+
+  StartRos2PacingOnce();
+  Ros2Batch.clear();
+  PostPhysTickSamples(World, TickType, DeltaTime);
+  SubmitRos2Batch(DeltaTime);
+}
+
+void AInertialMeasurementUnitHighPrecision::PostPhysTickSamples(
     UWorld* World, ELevelTick TickType, float DeltaTime)
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(AInertialMeasurementUnitHighPrecision::PostPhysTick);

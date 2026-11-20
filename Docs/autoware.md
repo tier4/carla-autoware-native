@@ -168,6 +168,8 @@ A key left out keeps the default of that policy (RELIABLE, VOLATILE, KEEP_LAST, 
 
 The `-ros2-camera-qos=`, `-ros2-lidar-qos=` and `-ros2-imu-qos=` server options take the same list, or the short form `<reliable|best_effort>[:<depth>]`.
 
+`sensor.other.imu_highprecision` computes the samples of a frame together (one per physics substep) and by default publishes them back to back. A subscriber that keeps only the newest message (history depth 1, as a driver of a real IMU allows, since it publishes evenly) then misses most of them. The `-ros2-imu-pacing=` server option spreads those publishes over wall time: `substep` spaces them by the substep, as a real IMU driver would, and a whole number gives a fixed spacing in microseconds; `off`, the default, keeps them back to back. The header stamps do not change. A frame's samples are published within the wall time the previous frame took, so a later sample of a frame leaves up to that long after the frame's physics step.
+
 The steering tire angle in `control_cmd` and `steering_status` is the front wheels' angle in a bicycle model. CARLA maps it to and from each vehicle's steer input with that vehicle's own steering model in the physics engine (its wheels' maximum steer angles, its steering type and its wheel layout), so a vehicle needs no steering calibration of its own. The mapping assumes a flat steering curve, which `ros2_autoware_control` sets when the vehicle spawns, and leaves out tire slip.
 
 `autoware_demo.py` publishes the sensor kit on these topics:
