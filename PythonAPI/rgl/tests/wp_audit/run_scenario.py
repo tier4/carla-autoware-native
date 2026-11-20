@@ -239,15 +239,23 @@ def wait_rpc(carla, port, proc):
 
 # ---------------------------------------------------------------- geometry
 class Path:
-    """Polyline with arc-length lookup. Ping-pong when `pingpong` is set."""
+    """Polyline with arc-length lookup. Ping-pong when `pingpong` is set.
 
-    def __init__(self, route, pingpong=False):
+    The yaw is the heading of the current segment, so it switches in one step at a route vertex (the default,
+    used by every gate and baseline run). With yaw_blend_m > 0 (opt-in, --continuous-yaw-m) the yaw turns linearly
+    from the previous segment's heading to the new one over the first yaw_blend_m metres after each vertex; the
+    positions do not change. Not available with ping-pong."""
+
+    def __init__(self, route, pingpong=False, yaw_blend_m=0.0):
+        if yaw_blend_m < 0.0 or (yaw_blend_m > 0.0 and pingpong):
+            raise ValueError("yaw_blend_m must be >= 0, and 0 with ping-pong")
         self.pts = [tuple(map(float, p)) for p in route]
         self.cum = [0.0]
         for a, b in zip(self.pts[:-1], self.pts[1:]):
             self.cum.append(self.cum[-1] + math.dist(a, b))
         self.length = self.cum[-1]
         self.pingpong = pingpong
+        self.yaw_blend_m = float(yaw_blend_m)
 
     def pose(self, s):
         """(x, y, z, pitch_deg, yaw_deg) at arc length s (clamped, or folded for ping-pong)."""
@@ -271,7 +279,21 @@ class Path:
             dx, dy, dz = -dx, -dy, -dz
         yaw = math.degrees(math.atan2(dy, dx))
         pitch = math.degrees(math.atan2(dz, math.hypot(dx, dy)))
+        into = d - self.cum[i - 1]
+        if self.yaw_blend_m > 0.0 and i >= 2 and into < self.yaw_blend_m:
+            pa, pb = self.pts[i - 2], self.pts[i - 1]
+            prev = math.degrees(math.atan2(pb[1] - pa[1], pb[0] - pa[0]))
+            yaw = prev + ((yaw - prev + 180.0) % 360.0 - 180.0) * (into / self.yaw_blend_m)
         return p[0], p[1], p[2], pitch, yaw
+
+
+def check_continuous_yaw(sc, blend_m):
+    """--continuous-yaw-m applies to the moving route drive only: refused for ping-pong (S5), the load_world cycle
+    (S7) and STATIC, where it would be ignored or meaningless."""
+    if blend_m < 0.0:
+        raise ValueError("--continuous-yaw-m must be >= 0")
+    if blend_m > 0.0 and (sc.pingpong or sc.name == "S7" or sc.hold):
+        raise ValueError("--continuous-yaw-m is not available for scenario %s" % sc.name)
 
 
 # ---------------------------------------------------------------- carla helpers
@@ -472,7 +494,7 @@ def spawn_npc(world, bp_lib, tf):
 
 
 def drive(carla, world, bp_lib, sc, route, out, with_raycast, tick_log, deadline, opts):
-    path = Path(route, sc.pingpong)
+    path = Path(route, sc.pingpong, yaw_blend_m=getattr(opts, "continuous_yaw_m", 0.0))
     n_ticks = sc_mod.scenario_ticks(sc, route)
     saver = make_raycast_saver(out, opts.raycast_every) if with_raycast else None
     pose0 = path.pose(opts.hold_s if opts.hold_s is not None else 0.0)
@@ -603,6 +625,9 @@ def main(argv):
                     help="STATIC only: park the ego at the route point nearest to (x, y); write --hold-near=-1,2")
     ap.add_argument("--settle-ticks", type=int, default=200, help="STATIC: ticks before the hold (default %(default)s)")
     ap.add_argument("--hold-ticks", type=int, default=20, help="STATIC: ticks of the hold (default %(default)s)")
+    ap.add_argument("--continuous-yaw-m", type=float, default=0.0, metavar="M",
+                    help="opt-in diagnostic: turn the ego yaw over the first M metres after each route vertex instead of "
+                         "switching it in one tick (default 0 = switch; never used by the gate or baseline runs)")
     a = ap.parse_args(merge_dash_values(argv))
 
     if a.hold_near is not None and a.scenario != "STATIC":
@@ -638,6 +663,10 @@ def main(argv):
             ap.error("--fixed-dt must be in [0.001, 0.1]")
         sc_mod.FIXED_DT = a.fixed_dt   # every user reads sc_mod.FIXED_DT at call time
     sc = apply_max_route(sc, a.max_route_m)
+    try:
+        check_continuous_yaw(sc, a.continuous_yaw_m)
+    except ValueError as e:
+        ap.error(str(e))
     if sc.hold:
         sc = dataclasses.replace(sc, fixed_ticks=a.settle_ticks + a.hold_ticks)
     dump_every = (a.raycast_every if a.with_raycast else a.hit_dump_every) if (a.with_raycast or a.hit_dump) else None
@@ -664,7 +693,7 @@ def main(argv):
             except (OSError, ValueError) as e:
                 raise RunInvalid("layout_invalid:%s" % str(e).replace(" ", "_")[:120])
         opts = types.SimpleNamespace(det=a.det, layout=layout, npc_cycle=a.npc_cycle, hold_s=None,
-                                     raycast_every=a.raycast_every, info=info)
+                                     raycast_every=a.raycast_every, info=info, continuous_yaw_m=a.continuous_yaw_m)
         route = sc_mod.route_for(sc.name, a.map, sc)
         if sc.name == "S7":
             if not (sc_mod.route_is_set(sc_mod.ROUTES.get("Town15")) and
@@ -725,7 +754,7 @@ def main(argv):
                    ego_bp=info["ego_bp"], ego_bp_fallback=info["ego_bp_fallback"],
                    udp_port_offset=a.udp_port_offset if a.sensor_layout else 0,
                    hit_dump_every=dump_every or 0, npc_cycle=int(a.npc_cycle), hold_at_m=info["hold_at_m"], late_sensor_tick=info["late_sensor_tick"],
-                   server_args=",".join(server_extra) or "none")
+                   server_args=",".join(server_extra) or "none", continuous_yaw_m="%.1f" % a.continuous_yaw_m)
         extra = dict(ticks=ticks, elapsed_s="%.1f" % (time.time() - t_start),
                      server_stopped=stopped, pkg=a.pkg)
         if reason:

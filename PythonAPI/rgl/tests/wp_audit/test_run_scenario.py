@@ -106,6 +106,44 @@ def test_static_scenario_length_and_pose():
     assert sc_mod.scenario_ticks(s1, route) == int(100.0 / 10.0 / sc_mod.FIXED_DT + 0.999999)
 
 
+_CORNER = ((0.0, 0.0, 0.0), (100.0, 0.0, 0.0), (100.0, 100.0, 0.0))
+
+
+def test_yaw_switches_at_a_route_vertex_by_default():
+    # The original motion is kept: the heading of the new segment from the first metre after the vertex.
+    p = run_scenario.Path(_CORNER)
+    assert p.pose(99.0)[4] == pytest.approx(0.0)
+    assert p.pose(100.5)[4] == pytest.approx(90.0)
+    assert run_scenario.Path(_CORNER, yaw_blend_m=0.0).pose(100.5) == p.pose(100.5)
+
+
+def test_continuous_yaw_blends_the_heading_after_a_vertex():
+    p, q = run_scenario.Path(_CORNER), run_scenario.Path(_CORNER, yaw_blend_m=10.0)
+    for s in (50.0, 100.0, 102.5, 105.0, 110.0, 150.0):
+        assert q.pose(s)[:4] == pytest.approx(p.pose(s)[:4])   # positions and pitch are untouched
+    assert q.pose(100.0)[4] == pytest.approx(0.0)
+    assert q.pose(105.0)[4] == pytest.approx(45.0)
+    assert q.pose(110.0)[4] == pytest.approx(90.0)
+    assert q.pose(150.0)[4] == pytest.approx(90.0)
+    # the shorter way round across +-180 degrees
+    wrap = ((0.0, 0.0, 0.0), (-10.0, 1.0, 0.0), (-20.0, -1.0, 0.0))
+    y0, y1 = run_scenario.Path(wrap).pose(5.0)[4], run_scenario.Path(wrap).pose(15.0)[4]
+    mid = run_scenario.Path(wrap, yaw_blend_m=10.0).pose(10.05 + 5.0)[4]
+    assert abs((mid - 180.0 + 180.0) % 360.0 - 180.0) < abs((y0 - y1 + 180.0) % 360.0 - 180.0)
+
+
+def test_continuous_yaw_is_refused_where_it_would_be_ignored():
+    with pytest.raises(ValueError):
+        run_scenario.Path(_CORNER, pingpong=True, yaw_blend_m=10.0)
+    with pytest.raises(ValueError):
+        run_scenario.Path(_CORNER, yaw_blend_m=-1.0)
+    run_scenario.check_continuous_yaw(sc_mod.SCENARIOS["S1"], 10.0)
+    run_scenario.check_continuous_yaw(sc_mod.SCENARIOS["S7"], 0.0)
+    for name in ("S7", "S5", "STATIC"):
+        with pytest.raises(ValueError):
+            run_scenario.check_continuous_yaw(sc_mod.SCENARIOS[name], 10.0)
+
+
 def test_dash_values_are_merged_for_argparse():
     assert run_scenario.merge_dash_values(["--server-arg", "-rgl-x=1", "--det", "--hold-near", "-5,2", "--out", "o"]) == \
         ["--server-arg=-rgl-x=1", "--det", "--hold-near=-5,2", "--out", "o"]
