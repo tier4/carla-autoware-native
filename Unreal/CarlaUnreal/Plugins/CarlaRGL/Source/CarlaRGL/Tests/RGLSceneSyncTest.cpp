@@ -7,9 +7,11 @@
 // sensor's R syncs (P5), the instances of Static ISMs are re-evaluated against the sensor spheres (P3), the name
 // rule leaves out sky domes and spheres only (N1), and the mesh cache is keyed by the asset's identity (P2).
 // Then the warning for a sensor whose range is not streamed in on a World Partition map (P4). Last, the lighter sync
-// (P7): the sky-name verdict remembered per mesh, and the sync's cost on its line. At the end, the World Partition
+// (P7): the sky-name verdict remembered per mesh, and the sync's cost on its line. Then the World Partition
 // culling of non-Static parts (7b): the policy and its seam, the original rule elsewhere, the distance rule per part and
 // per ISM instance, the protected parts, approaching parts and sensors, the budget, the contracts and the deadline.
+// At the end, the range edge (P8): the sync clock and interval, the switches and the knob lines, the distance trigger
+// capped by the margin between R and the range, and the in-range creates outside the create budget.
 
 #include <util/ue-header-guard-begin.h>
 #include "CoreMinimal.h"
@@ -40,8 +42,8 @@ namespace RGLSceneSyncTests
 using namespace RGLSceneTestUtil;
 
 // missing_steady counts a miss only inside both R spheres: around the sensor at the last sync (what that sync had
-// to register) and around the sensor now (what is still needed). The sensor moves 23 m (below the 24 m distance
-// trigger, and more than the 20 m between R and the range) with no Update, then three cubes appear:
+// to register) and around the sensor now (what is still needed). The sensor moves 23 m (more than the 20 m between R
+// and the range) with no Update, so no sync follows whatever the distance trigger is, then three cubes appear:
 // A 110 m behind the last sync point (inside the last sync's R, 133 m from the sensor = outside its current R),
 // B 50 m ahead (inside both), and C whose bounds start 122 m ahead of the last sync point (outside the last sync's
 // R, 99 m from the sensor = inside its current R and its range): only B is a steady miss. An audit that used the
@@ -57,7 +59,6 @@ bool FSceneSyncMissingSteadyNeedsBothSpheresTest::RunTest(const FString& Paramet
     F.Sync();                                    // the last sync: R = 120 m around P0 = Base
 
     const float MoveCm = 2300.f;
-    TestTrue(TEXT("the move stays below the distance trigger (0.2 R)"), MoveCm < 0.2f * kRegistrationCm);
     TestTrue(TEXT("the move is larger than the gap between R and the range"), MoveCm > kRegistrationCm - kRangeCm);
     F.SensorPos = Base + FVector(MoveCm, 0.f, 0.f);
     F.Refresh();                                 // no Update: the last sync's sphere stays at P0
@@ -2712,6 +2713,10 @@ bool FSceneSyncSceneSwitchesParseTest::RunTest(const FString& Parameters)
     FFloatCVarGuard G16(TEXT("rgl.Scene.MovableEntityBudgetMs"));
     FCVarGuard G17(TEXT("rgl.Scene.SyncClock"));
     FFloatCVarGuard G18(TEXT("rgl.Scene.SyncIntervalSeconds"));
+    FFloatCVarGuard G19(TEXT("rgl.Scene.SyncTriggerRatio"));
+    FFloatCVarGuard G20(TEXT("rgl.Scene.SyncTriggerMarginSlackM"));
+    FCVarGuard G21(TEXT("rgl.Scene.InRangeCreatesPerUpdate"));
+    FFloatCVarGuard G22(TEXT("rgl.Scene.InRangeCreateBudgetMs"));
     FRGLSceneManager::ApplySceneSwitches(
         TEXT("-rgl-scene-max-mesh-creates-per-update=3 -rgl-scene-create-budget-ms=2.5 -rgl-scene-unload-distance-factor=1.5 "
              "-rgl-scene-idle-mesh-cache-max=7 -rgl-scene-max-ism-instance-changes-per-update=64 -rgl-scene-audit=5 "
@@ -2719,7 +2724,9 @@ bool FSceneSyncSceneSwitchesParseTest::RunTest(const FString& Parameters)
              "-rgl-scene-movable-min-margin-m=25 -rgl-scene-movable-sensor-speed-bound-mps=30 "
              "-rgl-scene-movable-object-speed-bound-mps=35 -rgl-scene-movable-max-update-gap-seconds=0.25 "
              "-rgl-scene-movable-create-latency-seconds=2 -rgl-scene-max-movable-entity-changes-per-update=128 "
-             "-rgl-scene-movable-entity-budget-ms=6 -rgl-scene-sync-clock=0 -rgl-scene-sync-interval-seconds=2.5"),
+             "-rgl-scene-movable-entity-budget-ms=6 -rgl-scene-sync-clock=0 -rgl-scene-sync-interval-seconds=2.5 "
+             "-rgl-scene-sync-trigger-ratio=0.1 -rgl-scene-sync-trigger-margin-slack-m=-1 "
+             "-rgl-scene-in-range-creates-per-update=0 -rgl-scene-in-range-create-budget-ms=4"),
         ECVF_SetByCode);
     auto F = [](const TCHAR* N) { return IConsoleManager::Get().FindConsoleVariable(N)->GetFloat(); };
     auto I = [](const TCHAR* N) { return IConsoleManager::Get().FindConsoleVariable(N)->GetInt(); };
@@ -2742,6 +2749,10 @@ bool FSceneSyncSceneSwitchesParseTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("movable budget ms"), F(TEXT("rgl.Scene.MovableEntityBudgetMs")), 6.f);
     TestEqual(TEXT("sync clock"), I(TEXT("rgl.Scene.SyncClock")), 0);
     TestEqual(TEXT("sync interval"), F(TEXT("rgl.Scene.SyncIntervalSeconds")), 2.5f);
+    TestEqual(TEXT("sync trigger ratio"), F(TEXT("rgl.Scene.SyncTriggerRatio")), 0.1f);
+    TestEqual(TEXT("sync trigger margin slack"), F(TEXT("rgl.Scene.SyncTriggerMarginSlackM")), -1.f);
+    TestEqual(TEXT("in-range creates per update"), I(TEXT("rgl.Scene.InRangeCreatesPerUpdate")), 0);
+    TestEqual(TEXT("in-range create budget ms"), F(TEXT("rgl.Scene.InRangeCreateBudgetMs")), 4.f);
     // Only the interval: the clock keeps its value.
     FRGLSceneManager::ApplySceneSwitches(TEXT("-rgl-scene-sync-interval-seconds=3"), ECVF_SetByCode);
     TestEqual(TEXT("absent switch: the clock is left alone"), I(TEXT("rgl.Scene.SyncClock")), 0);
@@ -2749,9 +2760,12 @@ bool FSceneSyncSceneSwitchesParseTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// The rgl_scene_config line from the knobs: the defaults carry sync_clock=sim sync_interval_s=1.00; every key the line
-// carried before (the create queue, the ISM cap, the unload margin, the World Partition culling) is still on it, in its
-// order; other values and invalid ones (a clock other than 0/1 -> sim, an interval below 0.1 s -> 0.1 s) are shown.
+// The rgl_scene_config line from the knobs: the defaults carry sync_clock=sim sync_interval_s=1.00 and the range-edge
+// knobs (sync_trigger_ratio=0.20 sync_trigger_margin_slack_m=5.0 in_range_creates_per_update=16
+// in_range_create_budget_ms=8.00); every key the line carried before (the create queue, the ISM cap, the unload margin,
+// the World Partition culling) is still on it, in its order; other values and invalid ones (a clock other than 0/1 -> sim,
+// an interval below 0.1 s -> 0.1 s, a ratio of 0 -> 0.2, a negative in-range count -> 16, a negative in-range ms -> 8) are
+// shown.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSceneConfigLineShowsKnobsTest, "CarlaRGL.SceneSync.SceneConfigLineShowsKnobs",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncSceneConfigLineShowsKnobsTest::RunTest(const FString& Parameters)
@@ -2760,10 +2774,14 @@ bool FSceneSyncSceneConfigLineShowsKnobsTest::RunTest(const FString& Parameters)
     AddInfo(Line);
     TestTrue(TEXT("the line starts with its name and the time"), Line.StartsWith(TEXT("rgl_scene_config t=1.000 ")));
     TestTrue(TEXT("defaults: sync_clock=sim sync_interval_s=1.00"), Line.Contains(TEXT(" sync_clock=sim sync_interval_s=1.00 ")));
+    TestTrue(TEXT("defaults: the range-edge knobs"),
+             Line.Contains(TEXT(" sync_trigger_ratio=0.20 sync_trigger_margin_slack_m=5.0 in_range_creates_per_update=16 "
+                                "in_range_create_budget_ms=8.00 ")));
     const TCHAR* const Keys[] = {
         TEXT(" max_mesh_creates_per_update="), TEXT(" create_budget_ms="), TEXT(" unload_distance_factor="),
         TEXT(" idle_mesh_cache_max="), TEXT(" max_ism_instance_changes_per_update="), TEXT(" unload_margin_cm="),
-        TEXT(" sync_clock="), TEXT(" sync_interval_s="), TEXT(" wp_culling="), TEXT(" wp_movable_culling="),
+        TEXT(" sync_clock="), TEXT(" sync_interval_s="), TEXT(" sync_trigger_ratio="), TEXT(" sync_trigger_margin_slack_m="),
+        TEXT(" in_range_creates_per_update="), TEXT(" in_range_create_budget_ms="), TEXT(" wp_culling="), TEXT(" wp_movable_culling="),
         TEXT(" movable_min_margin_m="), TEXT(" movable_sensor_speed_bound_mps="), TEXT(" movable_object_speed_bound_mps="),
         TEXT(" movable_max_update_gap_seconds="), TEXT(" movable_create_latency_seconds="),
         TEXT(" max_movable_entity_changes_per_update="), TEXT(" movable_entity_budget_ms=") };
@@ -2788,12 +2806,36 @@ bool FSceneSyncSceneConfigLineShowsKnobsTest::RunTest(const FString& Parameters)
         AddInfo(L3);
         TestTrue(TEXT("clock 7 -> sim, interval 0.01 -> 0.10"), L3.Contains(TEXT(" sync_clock=sim sync_interval_s=0.10 ")));
     }
+    {
+        FFloatCVarGuard Ratio(TEXT("rgl.Scene.SyncTriggerRatio"));
+        FFloatCVarGuard Slack(TEXT("rgl.Scene.SyncTriggerMarginSlackM"));
+        FCVarGuard InRange(TEXT("rgl.Scene.InRangeCreatesPerUpdate"));
+        FFloatCVarGuard InRangeMs(TEXT("rgl.Scene.InRangeCreateBudgetMs"));
+        // The legacy values (no cap, no in-range priority) and a 4 ms cap.
+        SetFloatCVar(TEXT("rgl.Scene.SyncTriggerMarginSlackM"), -1.0f);
+        SetCVar(TEXT("rgl.Scene.InRangeCreatesPerUpdate"), 0);
+        SetFloatCVar(TEXT("rgl.Scene.InRangeCreateBudgetMs"), 4.0f);
+        const FString L4 = FRGLSceneManager::FormatSceneConfigLine(4.0, FRGLSceneManager::ReadSceneKnobs());
+        AddInfo(L4);
+        TestTrue(TEXT("slack -1, in-range 0, 4 ms"),
+                 L4.Contains(TEXT(" sync_trigger_ratio=0.20 sync_trigger_margin_slack_m=-1.0 in_range_creates_per_update=0 "
+                                  "in_range_create_budget_ms=4.00 ")));
+        // Invalid values: their defaults.
+        SetFloatCVar(TEXT("rgl.Scene.SyncTriggerRatio"), 0.0f);
+        SetCVar(TEXT("rgl.Scene.InRangeCreatesPerUpdate"), -3);
+        SetFloatCVar(TEXT("rgl.Scene.InRangeCreateBudgetMs"), -1.0f);
+        const FString L5 = FRGLSceneManager::FormatSceneConfigLine(5.0, FRGLSceneManager::ReadSceneKnobs());
+        AddInfo(L5);
+        TestTrue(TEXT("ratio 0 -> 0.20, count -3 -> 16, ms -1 -> 8.00"),
+                 L5.Contains(TEXT(" sync_trigger_ratio=0.20 sync_trigger_margin_slack_m=-1.0 in_range_creates_per_update=16 "
+                                  "in_range_create_budget_ms=8.00 ")));
+    }
     return true;
 }
 
 // The first sync of a sensor prints its effective numbers once: rgl_scene_sensor t= sensor= registration_m= range_m=
-// trigger_m= (the distance trigger: 0.2 R). The fixture's sensor: R 120 m, range 100 m -> trigger 24 m. A later sync of
-// the same sensor (a 30 m move) prints none.
+// trigger_m= (the distance trigger: min(0.2 R, (R - range) - 5 m) with the defaults). The fixture's sensor: R 120 m,
+// range 100 m -> trigger min(24 m, 15 m) = 15 m. A later sync of the same sensor (a 30 m move) prints none.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSceneSensorLineAtFirstSyncTest, "CarlaRGL.SceneSync.SceneSensorLineAtFirstSync",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneSyncSceneSensorLineAtFirstSyncTest::RunTest(const FString& Parameters)
@@ -2803,7 +2845,7 @@ bool FSceneSyncSceneSensorLineAtFirstSyncTest::RunTest(const FString& Parameters
     StepUpdate(F, World);
     TestEqual(TEXT("the sensor's first sync"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("init")));
     const FString Expected = FString::Printf(
-        TEXT("rgl_scene_sensor t=%.3f sensor=0x%llx registration_m=120.0 range_m=100.0 trigger_m=24.0"), F.T,
+        TEXT("rgl_scene_sensor t=%.3f sensor=0x%llx registration_m=120.0 range_m=100.0 trigger_m=15.0"), F.T,
         static_cast<unsigned long long>(reinterpret_cast<UPTRINT>(F.Sensor)));
     for (const FString& L : F.SM.LastSensorLines_ForTest) AddInfo(L);
     TestTrue(TEXT("the sensor line of the first sync"), F.SM.LastSensorLines_ForTest.Contains(Expected));
@@ -2811,6 +2853,216 @@ bool FSceneSyncSceneSensorLineAtFirstSyncTest::RunTest(const FString& Parameters
     StepUpdate(F, World);
     TestEqual(TEXT("a later sync"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("distance")));
     TestEqual(TEXT("no sensor line at a later sync"), F.SM.LastSensorLines_ForTest.Num(), 0);
+    return true;
+}
+
+// ============================================================================
+// P8 part 2: the distance trigger capped by the margin between R and the range (rgl.Scene.SyncTriggerRatio,
+// rgl.Scene.SyncTriggerMarginSlackM), and the queued parts inside a sensor's range created outside the create budget
+// (rgl.Scene.InRangeCreatesPerUpdate, rgl.Scene.InRangeCreateBudgetMs)
+// ============================================================================
+
+// SceneAudit.RangeEdgeGap with the defaults: range 100 m, R = 120 m, the distance trigger min(0.2 R, (R - range) - 5 m)
+// = 15 m. A cube whose bounds start 122 m ahead is outside R at the sync; the sensor's 23 m move is beyond the trigger, so
+// that Update syncs (trigger distance) and the cube, inside the range now, is registered in it: nothing missing in range.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncRangeEdgeGapClosedTest, "CarlaRGL.SceneSync.RangeEdgeGapClosed",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncRangeEdgeGapClosedTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    const FVector Base = BaseFor(48);
+    FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0B01), Base, 15300.0);
+    F.Sync();
+    const FRGLSceneAuditResult R1 = F.Audit();
+
+    const float BoundsRadiusCm = static_cast<float>(Cube->GetBounds().SphereRadius);
+    F.Keep(SpawnMeshActor(World, Cube, Base + FVector(12200.f + BoundsRadiusCm, 0.f, 0.f), EComponentMobility::Static));
+    F.Sync();
+    const FRGLSceneAuditResult D1 = Diff(R1, F.Audit());
+    TestEqual(TEXT("outside R at the sync: not registered"), D1.Registered, 0);
+    TestEqual(TEXT("outside the range: missing_in_range"), D1.MissingInRange, 0);
+
+    const float MoveCm = 2300.f;
+    TestTrue(TEXT("the move is beyond the default distance trigger (15 m)"), MoveCm > F.SM.SyncTriggerCm_ForTest(kRegistrationCm, kRangeCm));
+    TestTrue(TEXT("and below the legacy one (0.2 R)"), MoveCm < 0.2f * kRegistrationCm);
+    F.SensorPos = Base + FVector(MoveCm, 0.f, 0.f);
+    F.SM.SetSyncInterval(3600.f);   // keep the periodic sync out of this step (the fixture puts the interval back)
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    StepUpdate(F, World, 0.05);
+    TestEqual(TEXT("the move synced"), F.SM.SyncCount_ForTest - Syncs0, 1);
+    TestEqual(TEXT("trigger=distance"), F.SM.LastSyncTrigger_ForTest, FString(TEXT("distance")));
+    const FRGLSceneAuditResult R2 = F.Audit();
+    AddInfo(FRGLSceneManager::FormatAuditLine(48, F.T, R2));
+    const FRGLSceneAuditResult D2 = Diff(R1, R2);
+    TestEqual(TEXT("registered +1"), D2.Registered, 1);
+    TestEqual(TEXT("inside the range now and registered: missing_in_range"), D2.MissingInRange, 0);
+    TestEqual(TEXT("nothing waits"), D2.Pending, 0);
+    return true;
+}
+
+// The distance trigger from the knobs, for a sensor with R = 220 m and a 200 m range (a 200 m lidar): ratio x R, capped at
+// max(1 m, (R - range) - slack) when the slack is not negative. Defaults (0.2, 5 m): min(44 m, 15 m) = 15 m; slack -1 (the
+// legacy value): 44 m; slack 10 m: 10 m; ratio 0.05 with slack 5 m: min(11 m, 15 m) = 11 m; slack 25 m: the 1 m floor. A
+// range never set falls back to R - 20 m (the unload margin), as for the audit: 15 m again.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncSyncTriggerFollowsKnobsTest, "CarlaRGL.SceneSync.SyncTriggerFollowsKnobs",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncSyncTriggerFollowsKnobsTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    FRGLSceneManager& SM = FRGLSceneManager::GetInstance(World);
+    auto Fv = [](const TCHAR* N) { return IConsoleManager::Get().FindConsoleVariable(N)->GetFloat(); };
+    TestEqual(TEXT("default ratio"), Fv(TEXT("rgl.Scene.SyncTriggerRatio")), 0.2f);
+    TestEqual(TEXT("default slack"), Fv(TEXT("rgl.Scene.SyncTriggerMarginSlackM")), 5.f);
+    FFloatCVarGuard Ratio(TEXT("rgl.Scene.SyncTriggerRatio"));
+    FFloatCVarGuard Slack(TEXT("rgl.Scene.SyncTriggerMarginSlackM"));
+    TestEqual(TEXT("defaults: 15 m"), SM.SyncTriggerCm_ForTest(22000.f, 20000.f), 1500.f, 0.01f);
+    SetFloatCVar(TEXT("rgl.Scene.SyncTriggerMarginSlackM"), -1.0f);
+    TestEqual(TEXT("slack -1 (no cap): 0.2 R = 44 m"), SM.SyncTriggerCm_ForTest(22000.f, 20000.f), 4400.f, 0.01f);
+    SetFloatCVar(TEXT("rgl.Scene.SyncTriggerMarginSlackM"), 10.0f);
+    TestEqual(TEXT("slack 10 m: 20 m - 10 m = 10 m"), SM.SyncTriggerCm_ForTest(22000.f, 20000.f), 1000.f, 0.01f);
+    SetFloatCVar(TEXT("rgl.Scene.SyncTriggerMarginSlackM"), 5.0f);
+    SetFloatCVar(TEXT("rgl.Scene.SyncTriggerRatio"), 0.05f);
+    TestEqual(TEXT("ratio 0.05, slack 5 m: min(11 m, 15 m) = 11 m"), SM.SyncTriggerCm_ForTest(22000.f, 20000.f), 1100.f, 0.01f);
+    SetFloatCVar(TEXT("rgl.Scene.SyncTriggerRatio"), 0.2f);
+    SetFloatCVar(TEXT("rgl.Scene.SyncTriggerMarginSlackM"), 25.0f);
+    TestEqual(TEXT("slack 25 m: the 1 m floor"), SM.SyncTriggerCm_ForTest(22000.f, 20000.f), 100.f, 0.01f);
+    SetFloatCVar(TEXT("rgl.Scene.SyncTriggerMarginSlackM"), 5.0f);
+    TestEqual(TEXT("range never set: R - 20 m, so 15 m"), SM.SyncTriggerCm_ForTest(22000.f, -1.f), 1500.f, 0.01f);
+    return true;
+}
+
+namespace
+{
+// Static parts DistancesCm in front of the sensor of slot 45 (R 120 m, range 100 m), each on a new transient box mesh (none
+// is live, so every one needs a mesh upload), with rgl.Scene.MaxMeshCreatesPerUpdate = 1 and the create ms budget off (the
+// count decides). One periodic sync (1.5 s of simulation time after the last; interval 1 s) queues them, and the same Update
+// drains the queue. The audit difference after that Update, the sync line and the syncs it ran.
+struct FInRangeRun
+{
+    FRGLSceneAuditResult D;
+    FString SyncLine;
+    int32 Syncs = 0;
+};
+FInRangeRun RunInRangeCreates(UWorld* World, const void* SensorId, double T0, const TArray<float>& DistancesCm)
+{
+    FInRangeRun Out;
+    FCVarGuard MaxCreates(TEXT("rgl.Scene.MaxMeshCreatesPerUpdate"));
+    FFloatCVarGuard CreateMs(TEXT("rgl.Scene.CreateBudgetMs"));
+    SetCVar(TEXT("rgl.Scene.MaxMeshCreatesPerUpdate"), 1);
+    SetFloatCVar(TEXT("rgl.Scene.CreateBudgetMs"), 0.0f);
+    TArray<TStrongObjectPtr<UStaticMesh>> Meshes;
+    for (int32 i = 0; i < DistancesCm.Num(); ++i)
+    {
+        Meshes.Emplace(NewTransientBoxMesh(*FString::Printf(TEXT("P8InRange%d"), i), 100.f));
+    }
+    const FVector Base = BaseFor(45);
+    FAuditFixture F(World, SensorId, Base, T0);
+    SetCVar(TEXT("rgl.Scene.SyncClock"), 1);   // the simulation clock (the fixture puts the clock and interval back)
+    F.SM.SetSyncInterval(1.0f);
+    F.Sync();
+    const FRGLSceneAuditResult R0 = F.Audit();
+    for (int32 i = 0; i < DistancesCm.Num(); ++i)
+    {
+        F.Keep(SpawnMeshActor(World, Meshes[i].Get(), Base + FVector(DistancesCm[i], 0.f, 0.f), EComponentMobility::Static));
+    }
+    const int32 Syncs0 = F.SM.SyncCount_ForTest;
+    StepUpdate(F, World, 1.5);
+    Out.Syncs = F.SM.SyncCount_ForTest - Syncs0;
+    Out.D = Diff(R0, F.Audit());
+    Out.SyncLine = F.SM.LastSyncLine_ForTest;
+    return Out;
+}
+int32 SyncLineInt(const FString& Line, const TCHAR* Key)
+{
+    int32 V = -1;
+    FParse::Value(*Line, Key, V);
+    return V;
+}
+}
+
+// The defaults: the three queued parts inside the range (40 / 50 / 60 m) are created in the sync's Update outside the
+// create budget of 1: nothing waits, nothing is missing in range (in_range_creates=3). The ms cap is off here (it has its
+// own test; 0 keeps this one independent of the machine's speed). With a count cap of 1, one is created in range, one more
+// by the create budget, and one waits. Parts between the range and R (105 / 110 m) are not in range: after the three in-range
+// creates, the budget of 1 creates one of them and the other waits.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncInRangeCreateBypassesBudgetTest, "CarlaRGL.SceneSync.InRangeCreateBypassesBudget",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncInRangeCreateBypassesBudgetTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    TestEqual(TEXT("default in-range creates per Update"),
+              IConsoleManager::Get().FindConsoleVariable(TEXT("rgl.Scene.InRangeCreatesPerUpdate"))->GetInt(), 16);
+    TestEqual(TEXT("default in-range ms cap"),
+              IConsoleManager::Get().FindConsoleVariable(TEXT("rgl.Scene.InRangeCreateBudgetMs"))->GetFloat(), 8.f);
+    FCVarGuard InRange(TEXT("rgl.Scene.InRangeCreatesPerUpdate"));
+    FFloatCVarGuard InRangeMs(TEXT("rgl.Scene.InRangeCreateBudgetMs"));
+    SetFloatCVar(TEXT("rgl.Scene.InRangeCreateBudgetMs"), 0.0f);
+    {
+        const FInRangeRun Run = RunInRangeCreates(World, reinterpret_cast<const void*>(0x5A0B02), 15400.0, { 4000.f, 5000.f, 6000.f });
+        AddInfo(Run.SyncLine);
+        TestEqual(TEXT("one periodic sync"), Run.Syncs, 1);
+        TestEqual(TEXT("all three created in the sync's Update"), Run.D.Registered, 3);
+        TestEqual(TEXT("nothing waits"), Run.D.Pending, 0);
+        TestEqual(TEXT("nothing missing in range"), Run.D.MissingInRange, 0);
+        TestEqual(TEXT("in_range_creates=3"), SyncLineInt(Run.SyncLine, TEXT("in_range_creates=")), 3);
+    }
+    {
+        SetCVar(TEXT("rgl.Scene.InRangeCreatesPerUpdate"), 1);
+        const FInRangeRun Run = RunInRangeCreates(World, reinterpret_cast<const void*>(0x5A0B03), 15500.0, { 4000.f, 5000.f, 6000.f });
+        AddInfo(Run.SyncLine);
+        TestEqual(TEXT("count cap 1: one in range"), SyncLineInt(Run.SyncLine, TEXT("in_range_creates=")), 1);
+        TestEqual(TEXT("count cap 1: and one by the create budget"), Run.D.Registered, 2);
+        TestEqual(TEXT("count cap 1: one waits"), Run.D.Pending, 1);
+        SetCVar(TEXT("rgl.Scene.InRangeCreatesPerUpdate"), 16);
+    }
+    {
+        const FInRangeRun Run = RunInRangeCreates(World, reinterpret_cast<const void*>(0x5A0B04), 15600.0,
+                                                  { 4000.f, 5000.f, 6000.f, 10500.f, 11000.f });
+        AddInfo(Run.SyncLine);
+        TestEqual(TEXT("beyond the range: not created as in range"), SyncLineInt(Run.SyncLine, TEXT("in_range_creates=")), 3);
+        TestEqual(TEXT("beyond the range: one by the create budget"), Run.D.Registered, 4);
+        TestEqual(TEXT("beyond the range: one waits"), Run.D.Pending, 1);
+        TestEqual(TEXT("beyond the range: nothing missing in range"), Run.D.MissingInRange, 0);
+    }
+    return true;
+}
+
+// rgl.Scene.InRangeCreatesPerUpdate = 0 (the legacy value): the old budgeted drain, one create per Update; two of the three
+// parts inside the range wait, missing in range until a later Update creates them.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncInRangeCreateOffIsLegacyTest, "CarlaRGL.SceneSync.InRangeCreateOffIsLegacy",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncInRangeCreateOffIsLegacyTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    FCVarGuard InRange(TEXT("rgl.Scene.InRangeCreatesPerUpdate"));
+    SetCVar(TEXT("rgl.Scene.InRangeCreatesPerUpdate"), 0);
+    const FInRangeRun Run = RunInRangeCreates(World, reinterpret_cast<const void*>(0x5A0B05), 15700.0, { 4000.f, 5000.f, 6000.f });
+    AddInfo(Run.SyncLine);
+    TestEqual(TEXT("one periodic sync"), Run.Syncs, 1);
+    TestEqual(TEXT("the budgeted drain: one created"), Run.D.Registered, 1);
+    TestEqual(TEXT("the budgeted drain: two wait"), Run.D.Pending, 2);
+    TestEqual(TEXT("the two waiting are missing in range"), Run.D.MissingInRange, 2);
+    TestEqual(TEXT("in_range_creates=0"), SyncLineInt(Run.SyncLine, TEXT("in_range_creates=")), 0);
+    return true;
+}
+
+// The ms cap of the in-range creates (rgl.Scene.InRangeCreateBudgetMs = 0.001 ms): the first in-range create always
+// proceeds, and its upload takes longer than the cap, so the others fall back to the create budget (1): one more is
+// created, and one waits.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneSyncInRangeCreateMsCapTest, "CarlaRGL.SceneSync.InRangeCreateMsCap",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
+bool FSceneSyncInRangeCreateMsCapTest::RunTest(const FString& Parameters)
+{
+    UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
+    FFloatCVarGuard InRangeMs(TEXT("rgl.Scene.InRangeCreateBudgetMs"));
+    SetFloatCVar(TEXT("rgl.Scene.InRangeCreateBudgetMs"), 0.001f);
+    const FInRangeRun Run = RunInRangeCreates(World, reinterpret_cast<const void*>(0x5A0B06), 15800.0, { 4000.f, 5000.f, 6000.f });
+    AddInfo(Run.SyncLine);
+    TestEqual(TEXT("one periodic sync"), Run.Syncs, 1);
+    TestTrue(TEXT("at least one created"), Run.D.Registered >= 1);
+    TestTrue(TEXT("work left"), Run.D.Pending >= 1);
+    TestEqual(TEXT("the ms cap stops the in-range creates after the first"), SyncLineInt(Run.SyncLine, TEXT("in_range_creates=")), 1);
     return true;
 }
 }

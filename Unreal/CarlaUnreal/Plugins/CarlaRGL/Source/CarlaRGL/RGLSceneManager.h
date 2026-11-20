@@ -193,6 +193,10 @@ public:
         float UnloadMarginCm = 2000.0f;     // not a CVar: the manager's unload margin (LogSceneConfigIfChanged fills it in)
         int32 SyncClock = 1;                // rgl.Scene.SyncClock: 1 = simulation time, 0 = the scene Updates' world dt
         float SyncIntervalSeconds = 1.0f;   // rgl.Scene.SyncIntervalSeconds (>= 0.1)
+        float SyncTriggerRatio = 0.2f;      // rgl.Scene.SyncTriggerRatio (> 0): the distance trigger is ratio x R ...
+        float SyncTriggerMarginSlackM = 5.0f;   // rgl.Scene.SyncTriggerMarginSlackM: ... capped at (R - range) - this (m); < 0 = no cap
+        int32 InRangeCreatesPerUpdate = 16; // rgl.Scene.InRangeCreatesPerUpdate (>= 0, 0 = no in-range priority)
+        float InRangeCreateBudgetMs = 8.0f; // rgl.Scene.InRangeCreateBudgetMs (>= 0, 0 = no ms cap)
         int32 WpMap = 0;                    // not a CVar: the culling applies to this world (LogSceneConfigIfChanged fills it in)
         int32 WpMovableCulling = 1;
         float MovableMinMarginM = 20.0f;
@@ -202,8 +206,8 @@ public:
         float MovableCreateLatencySeconds = 1.0f;
         int32 MaxMovableEntityChangesPerUpdate = 512;
         float MovableEntityBudgetMs = 4.0f;
-        bool operator==(const FSceneKnobs& O) const;
-        bool operator!=(const FSceneKnobs& O) const { return !(*this == O); }
+        /// Every member compared (a member added later cannot be left out of the comparison).
+        bool operator==(const FSceneKnobs& O) const = default;
     };
     /// The rgl.Scene.* CVars through their range checks (an invalid value: its default, with one warning line).
     static FSceneKnobs ReadSceneKnobs();
@@ -297,7 +301,8 @@ public:
     /// The old rule: "sky" (case-insensitive) in the owner's, the component's or the static mesh's name.
     static bool IsLegacySkyName(const UStaticMeshComponent* Component);
 
-    /// Range (cm) the sensor's rays reach, for missing_in_range / ghost_in_range. Call after RegisterSensor().
+    /// Range (cm) the sensor's rays reach: for missing_in_range / ghost_in_range, the stream check, the cap of the distance
+    /// trigger and the in-range creates. Call after RegisterSensor().
     /// Never set (or negative): RegistrationDistanceCm minus the 20 m unload margin.
     void SetSensorAuditRange(const void* SensorId, float RangeCm);
 
@@ -411,6 +416,8 @@ public:
     FString LastConfigLine_ForTest;
     /// The rgl_scene_sensor lines of the last Update that synced (one per sensor synced for the first time; empty if none).
     TArray<FString> LastSensorLines_ForTest;
+    /// SyncTriggerCm with the current knobs for a sensor of RegistrationCm (R) whose range is RangeCm (< 0 = never set).
+    float SyncTriggerCm_ForTest(float RegistrationCm, float RangeCm) const;
     /// Entities added / removed by the WP queue in the last Update.
     int32 WpAddedLastUpdate_ForTest = 0;
     int32 WpRemovedLastUpdate_ForTest = 0;
@@ -464,6 +471,8 @@ private:
     /// RadiusScale > 1 is the unload hysteresis (rgl.Scene.UnloadDistanceFactor).
     bool IsWithinAnySensor(const FVector& CenterCm, float BoundsRadiusCm, float ExtraCm, float RadiusScale = 1.0f) const;
     bool IsComponentWithinAnySensor(UStaticMeshComponent* Component, float ExtraCm, float RadiusScale = 1.0f) const;
+    /// The bounding sphere reaches some sensor's range sphere (SensorRangeCm: the rays reach it), as the audit's in-range test.
+    bool IsWithinAnySensorRange(const FVector& CenterCm, float BoundsRadiusCm) const;
     /// An ISM instance's sphere: its location, and the mesh's bounds radius times its largest absolute scale.
     bool IsInstanceWithinAnySensor(
         const UInstancedStaticMeshComponent* Component,
@@ -522,6 +531,8 @@ private:
         int32 RegisteredCached = 0; // queued components registered on an already live mesh
         int32 Dropped = 0;          // queued components that became stale, ineligible or out of range
         double Ms = 0.0;            // wall time of the drain step
+        int32 InRangeCreates = 0;   // creations (uploads or idle reactivations) of parts inside a range, outside the budget
+        double InRangeMs = 0.0;     // their wall time (failed attempts in range included)
     };
 
     /// Scan world for new/removed components since last update. Components whose mesh has live entities
@@ -529,7 +540,10 @@ private:
     void SyncWorldComponents(UWorld* World, FSceneSyncStats& OutStats);
 
     /// Create queued meshes under the rgl.Scene.MaxMeshCreatesPerUpdate / rgl.Scene.CreateBudgetMs budget
-    /// (bUnlimited ignores both). Removal is never deferred; only creation is.
+    /// (bUnlimited ignores both). A queued part whose bounds reach some sensor's range at the drain (the rays reach it) is
+    /// created first, outside that budget, up to rgl.Scene.InRangeCreatesPerUpdate and rgl.Scene.InRangeCreateBudgetMs
+    /// (its own wall time; at least one proceeds); beyond those caps it waits for the budget like any other. The budget's
+    /// ms do not count the in-range creations. Removal is never deferred; only creation is.
     void DrainPendingCreates(bool bUnlimited, FDrainStats& OutStats);
 
     /// Per-Update counters of one step of the ISM re-evaluation (P3).
@@ -564,8 +578,8 @@ private:
     void TrimIdleMeshes(int32 MaxIdle);
     void PurgeIdleMeshes();
 
-    /// Print an rgl_scene_config line when any rgl.Scene.* knob differs from the last printed value.
-    void LogSceneConfigIfChanged();
+    /// Print an rgl_scene_config line when any rgl.Scene.* knob differs from the last printed value. Returns the knobs read.
+    FSceneKnobs LogSceneConfigIfChanged();
 
     // ---- Skeletal mesh path (spec 2026-09-10-rgl-skeletal-mesh-design.md) ----
     struct FSkeletalEntityInfo
@@ -786,8 +800,9 @@ private:
         FVector LastSyncPosition = FVector::ZeroVector;
         bool    bLastSyncValid = false;
         double  LastUpdateTime = 0.0;              // sim time of last RegisterSensor()
-        // Scene audit (SetSensorAuditRange / SetSensorAuditParent).
+        // Range of the rays (SetSensorAuditRange): audit, stream check, the distance trigger's cap, in-range creates.
         float   AuditRangeCm = -1.0f;              // < 0 = RegistrationDistanceCm - UnregistrationHysteresisCm
+        // Scene audit (SetSensorAuditParent).
         TWeakObjectPtr<AActor> AuditParent;        // root of the sensor's attach chain; null = not attached
         // Stream coverage warning (P4, CheckStreamCoverage).
         double  UncoveredSinceSimTime = -1.0;      // sim time of the first check of the current not-streamed-in run; -1 = none
@@ -817,9 +832,11 @@ private:
     /// set, RegistrationDistanceCm minus UnregistrationHysteresisCm. A sensor that only calls RegisterSensor is served.
     float SensorRangeCm(const FSensorRegistration& S) const;
 
-    /// The distance trigger (cm): a sensor that moved farther than this since the last sync syncs now. 0.2 x
-    /// RegistrationDistanceCm. Printed as trigger_m= on the sensor's rgl_scene_sensor line.
-    float SyncTriggerCm(const FSensorRegistration& S) const;
+    /// The distance trigger (cm): a sensor that moved farther than this since the last sync syncs now. K.SyncTriggerRatio
+    /// x R (RegistrationDistanceCm); with K.SyncTriggerMarginSlackM >= 0, at most max(1 m, (R - SensorRangeCm) - slack): the
+    /// sync comes before a part just outside R at the last sync can reach the range. Printed as trigger_m= on the sensor's
+    /// rgl_scene_sensor line.
+    float SyncTriggerCm(const FSensorRegistration& S, const FSceneKnobs& K) const;
 
     /// Radius (cm) that RootParent's World Partition streaming source loads around the actor: the largest radius among
     /// its shapes that do not use the grid's loading range. -1 = no actor, no source, or no such shape. CARLA puts the

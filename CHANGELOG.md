@@ -1,5 +1,7 @@
 ## LATEST Changes
 
+* Closed the RGL scene's range-edge gap: the distance trigger of the scene sync now stays below the margin between a sensor's registration radius and its range (`rgl.Scene.SyncTriggerRatio`, `rgl.Scene.SyncTriggerMarginSlackM`), and queued static parts already inside a sensor's range are created outside the per-Update create budget (`rgl.Scene.InRangeCreatesPerUpdate`, `rgl.Scene.InRangeCreateBudgetMs`); each has a `-rgl-scene-*` switch, and the legacy values restore the original behaviour.
+
 * Made the RGL scene's periodic sync clock and interval configurable (`rgl.Scene.SyncClock`, `rgl.Scene.SyncIntervalSeconds` and their `-rgl-scene-*` switches); the sync now counts simulation time by default, and `-rgl-scene-sync-clock=0` restores the original per-Update timer.
 
 * Reduced non-Static RGL scene entities on World Partition maps with sensor-distance culling and speed-dependent margins; non-World-Partition registration is unchanged.

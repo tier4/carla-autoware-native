@@ -108,15 +108,22 @@ bool FSceneAuditMissingBeforeSyncTest::RunTest(const FString& Parameters)
     return true;
 }
 
-// P8: range 100 m, R = 120 m, distance trigger 0.2 R = 24 m. A cube whose bounds start at 122 m is outside R
-// at the sync; a 23 m move brings it inside the range without triggering a sync: missing in range, while the
-// registration rule (the sphere at the last sync) had nothing to register.
+// P8 with the legacy values of the range-edge knobs (rgl.Scene.SyncTriggerMarginSlackM = -1: the distance trigger is
+// 0.2 R with no cap; rgl.Scene.InRangeCreatesPerUpdate = 0: no in-range priority), so the old behaviour stays reachable:
+// range 100 m, R = 120 m, distance trigger 0.2 R = 24 m. A cube whose bounds start at 122 m is outside R at the sync; a
+// 23 m move brings it inside the range without triggering a sync: missing in range, while the registration rule (the
+// sphere at the last sync) had nothing to register. SceneSync.RangeEdgeGapClosed is the same with the defaults.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSceneAuditRangeEdgeGapTest, "CarlaRGL.SceneAudit.RangeEdgeGap",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::ProductFilter)
 bool FSceneAuditRangeEdgeGapTest::RunTest(const FString& Parameters)
 {
     UWorld* World = GetGameWorld(); if (!TestNotNull(TEXT("game world"), World)) return false;
     UStaticMesh* Cube = LoadMeshReady(kCube); if (!TestNotNull(TEXT("cube"), Cube)) return false;
+    // Before the fixture: its clean-up sync still runs with these values, then the guards put the defaults back.
+    FFloatCVarGuard SlackGuard(TEXT("rgl.Scene.SyncTriggerMarginSlackM"));
+    FCVarGuard InRangeGuard(TEXT("rgl.Scene.InRangeCreatesPerUpdate"));
+    SetFloatCVar(TEXT("rgl.Scene.SyncTriggerMarginSlackM"), -1.0f);
+    SetCVar(TEXT("rgl.Scene.InRangeCreatesPerUpdate"), 0);
     const FVector Base = BaseFor(3);
     FAuditFixture F(World, reinterpret_cast<const void*>(0x5A0004), Base, 5300.0);
     F.Sync();
@@ -131,7 +138,8 @@ bool FSceneAuditRangeEdgeGapTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("outside the range: missing_in_range"), D1.MissingInRange, 0);
 
     const float MoveCm = 2300.f;
-    TestTrue(TEXT("the move stays below the distance trigger (0.2 R)"), MoveCm < 0.2f * kRegistrationCm);
+    TestTrue(TEXT("the move stays below the legacy distance trigger (0.2 R)"),
+             MoveCm < F.SM.SyncTriggerCm_ForTest(kRegistrationCm, kRangeCm) && MoveCm < 0.2f * kRegistrationCm);
     F.SensorPos = Base + FVector(MoveCm, 0.f, 0.f);
     F.T += 0.05;
     F.Refresh();
