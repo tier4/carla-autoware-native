@@ -146,3 +146,24 @@ def test_npc_blueprint_falls_back_when_the_default_car_is_missing():
 
     npc = run_scenario.spawn_npc(World(), Lib(["vehicle.kia.niro"]), None)
     assert npc.bp.id == "vehicle.kia.niro" and npc.bp.attrs["role_name"] == "npc_cycle"
+
+
+def test_scenarios_late_sensors():
+    for name, event in (("S6b", "distant_sensor_at_tick_600"), ("S6c", "slow_sensor_ahead")):
+        sc = sc_mod.SCENARIOS[name]
+        assert sc.map == "Town15" and sc.ego_role == "hero" and sc.sensor_mode == "ego"
+        assert sc.tile_stream_m == 3000 and sc.actor_active_m == 2000
+        assert sc.max_route_m == 1500.0 and sc.min_route_m == 1500.0
+        assert sc.events == (event,)
+        assert sc.radius_expected_m == 3000.0
+
+
+def test_slow_sensor_schedule():
+    # S6b: tick 600 at 8 m/s -> the ego is at 240 m, the sensor 300 m ahead of it (540 m of arc)
+    assert run_scenario.late_sensor_event("distant_sensor_at_tick_600") == (600, "HesaiPandar128E4X", None, None)
+    assert run_scenario.late_sensor_arc_m(600, 8.0, sc_mod.FIXED_DT) == pytest.approx(240.0 + 300.0)
+    # S6c: tick 10, VLP16, range 100 m, sensor_tick 6.0 s (stale after 5 s, back at the next measurement)
+    assert run_scenario.late_sensor_event("slow_sensor_ahead") == (10, "VelodyneVLP16", 100.0, 6.0)
+    assert run_scenario.late_sensor_arc_m(10, 8.0, sc_mod.FIXED_DT) == pytest.approx(4.0 + 300.0)
+    assert run_scenario.late_sensor_event("teleport_back") is None
+    assert run_scenario.late_sensor_event("second_sensor_at_tick_10") is None

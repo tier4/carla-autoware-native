@@ -2,7 +2,7 @@
 """World Partition scene-audit scenario runner (stage 0).
 
   run_scenario.py --pkg <dir> --map <Odaiba|Town15|Town10HD_Opt>
-                  --scenario <S1|S1p|S2|S3|S4|S5|S6|S7|STATIC|CONTROL> --out <dir>
+                  --scenario <S1|S1p|S2|S3|S4|S5|S6|S6b|S6c|S7|STATIC|CONTROL> --out <dir>
                   [--no-audit] [--with-raycast] [--seed N] [--port 4000] [--speed-mps V] [--fixed-dt DT]
                   [--det] [--server-arg=<switch>]... [--hit-dump] [--hit-dump-every N] [--raycast-every N]
                   [--max-route-m M] [--npc-cycle] [--sensor-layout <json>] [--udp-port-offset N]
@@ -300,6 +300,34 @@ def make_lidar_bp(bp_lib, kind, det=False):
     return bp
 
 
+LATE_SENSOR_AHEAD_M = 300.0
+# event name -> (tick, lidar model, range_m or None = the preset's, sensor_tick s or None = 0.1)
+LATE_SENSOR_EVENTS = {
+    "distant_sensor_at_tick_600": (600, "HesaiPandar128E4X", None, None),
+    "slow_sensor_ahead": (10, "VelodyneVLP16", 100.0, 6.0),
+}
+
+
+def late_sensor_event(event):
+    """(tick, model, range_m, sensor_tick_s) of a late-sensor event name, else None."""
+    return LATE_SENSOR_EVENTS.get(event)
+
+
+def late_sensor_arc_m(tick, speed_mps, dt):
+    """Arc length of the parentless late sensor: the ego's arc at that tick plus 300 m."""
+    return speed_mps * tick * dt + LATE_SENSOR_AHEAD_M
+
+
+def make_model_lidar_bp(bp_lib, model, det=False, range_m=None, sensor_tick=None):
+    from lidar_models import apply_preset
+    bp = bp_lib.find("sensor.lidar.rgl")
+    apply_preset(bp, model, **lidar_preset_kwargs(det))
+    if range_m is not None:
+        bp.set_attribute("range", str(range_m))
+    bp.set_attribute("sensor_tick", str(sensor_tick if sensor_tick is not None else 0.1))
+    return bp
+
+
 def pick_ego_blueprint(bp_lib, wanted=None):
     """-> (blueprint, id, fallback). A wanted id that the package does not have falls back to the default car."""
     if wanted:
@@ -475,6 +503,14 @@ def drive(carla, world, bp_lib, sc, route, out, with_raycast, tick_log, deadline
                 actors.append(world.spawn_actor(
                     make_lidar_bp(bp_lib, "rgl", opts.det),
                     carla.Transform(carla.Location(x=0.5, z=sc_mod.LIDAR_Z)), attach_to=ego))
+            for ev in sc.events:
+                late = late_sensor_event(ev)
+                if late is not None and k == late[0]:   # no parent: 300 m ahead of the ego on the route
+                    lx, ly, lz, _, _ = path.pose(late_sensor_arc_m(k, sc.speed_mps, sc_mod.FIXED_DT))
+                    actors.append(world.spawn_actor(
+                        make_model_lidar_bp(bp_lib, late[1], opts.det, late[2], late[3]),
+                        carla.Transform(carla.Location(lx, ly, lz + sc_mod.LIDAR_Z))))
+                    opts.info["late_sensor_tick"] = k
             if opts.hold_s is not None:
                 s = opts.hold_s        # STATIC: the ego never moves
             else:
@@ -615,7 +651,7 @@ def main(argv):
     base = dict(scenario=a.scenario, map=a.map, seed=a.seed, port=a.port,
                 no_audit=int(a.no_audit), with_raycast=int(a.with_raycast),
                 radius_expected_m=exp_str, speed_mps="%.1f" % sc.speed_mps, fixed_dt="%.3f" % sc_mod.FIXED_DT)
-    info = dict(ego_bp="na", ego_bp_fallback=0, hold_at_m="na")
+    info = dict(ego_bp="na", ego_bp_fallback=0, hold_at_m="na", late_sensor_tick="na")
     t_start = time.time()
     proc, pgid = None, None
     tick_log = []
@@ -688,7 +724,7 @@ def main(argv):
         new = dict(det=int(a.det), layout=os.path.basename(a.sensor_layout) if a.sensor_layout else "none",
                    ego_bp=info["ego_bp"], ego_bp_fallback=info["ego_bp_fallback"],
                    udp_port_offset=a.udp_port_offset if a.sensor_layout else 0,
-                   hit_dump_every=dump_every or 0, npc_cycle=int(a.npc_cycle), hold_at_m=info["hold_at_m"],
+                   hit_dump_every=dump_every or 0, npc_cycle=int(a.npc_cycle), hold_at_m=info["hold_at_m"], late_sensor_tick=info["late_sensor_tick"],
                    server_args=",".join(server_extra) or "none")
         extra = dict(ticks=ticks, elapsed_s="%.1f" % (time.time() - t_start),
                      server_stopped=stopped, pkg=a.pkg)
