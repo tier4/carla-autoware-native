@@ -188,6 +188,8 @@ void ARGLLidar::CreateRGLGraph()
 
     FRGLSessionConfig Config;
     Config.LidarDesc = Description;
+    Config.ScanDeltaSeconds = GetActorTickInterval();
+    Config.SensorName = GetName();
 
     auto TopicAttr = GetAttribute(TEXT("rgl_lidar_topic_name"));
     if (TopicAttr.has_value()) Config.Ros2Topic = TopicAttr->Value;
@@ -218,6 +220,7 @@ void ARGLLidar::CreateRGLGraph()
     }
 
     bGraphCreated = true;
+    bRglSelfCutoutReported = false; // A recreated session needs its attachment vehicle again.
     bRglRos2Active = !Config.Ros2Topic.IsEmpty();
     UE_LOG(LogCarla, Log, TEXT("ARGLLidar: Session created via CarlaRGL backend"));
 }
@@ -253,7 +256,7 @@ void ARGLLidar::SimulateLidar(float DeltaSeconds)
     // repack it each scan for nobody.
     const bool bNeedResults = AreStreamClientsListening() || bRglShowLidarPoints;
 
-    if (RglSelfCutoutRadius > 0.0f)
+    if (RglSelfCutoutRadius > 0.0f || Description.RglScanTiming == TEXT("velocity_distortion"))
     {
         UpdateRglSelfCutoutVehicle(*Backend);
     }

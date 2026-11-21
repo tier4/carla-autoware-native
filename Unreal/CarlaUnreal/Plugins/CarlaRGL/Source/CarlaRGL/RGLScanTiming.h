@@ -6,29 +6,26 @@
 
 #include "RGLUdpExtensionShim.h"
 
-// Values of the rgl_scan_timing attribute of sensor.lidar.rgl. RGL captures a
-// scan's points at one time, the scene time of the frame.
-//   firing (default): RGL stamps each UDP packet as the real sensor would
-//       fire it, over one rotation from that time. The stamps then run up to
-//       one rotation ahead of the points, and a driver's motion compensation
-//       moves points that did not move.
-//   instant: every UDP packet carries the capture time, so the stamps match
-//       the points.
+// Values of the rgl_scan_timing attribute of sensor.lidar.rgl.
+// firing (default) captures at frame time, with packet times advancing from it.
+// velocity_distortion applies sensor motion over the preceding rotation;
+// packet times advance from frame time minus one rotation. Both use firing times.
 namespace RGLScanTiming
 {
     inline const TCHAR* Firing() { return TEXT("firing"); }
-    inline const TCHAR* Instant() { return TEXT("instant"); }
+    inline const TCHAR* VelocityDistortion() { return TEXT("velocity_distortion"); }
 
     inline bool IsValid(const FString& Timing)
     {
-        return Timing == Firing() || Timing == Instant();
+        return Timing == Firing() || Timing == VelocityDistortion();
     }
 
-    /// The UDP option bits a scan timing adds.
-    inline uint32 UdpOptions(const FString& Timing)
+    /// The UDP option bits a scan timing adds. Neither timing adds any: both keep the model's
+    /// advancing packet times (velocity_distortion moves the packet epoch through the scene time
+    /// instead). The timing stays a parameter so that the session code and the UDP options test
+    /// keep naming the timing they configure.
+    inline uint32 UdpOptions(const FString& /*Timing*/)
     {
-        return Timing == Instant()
-            ? static_cast<uint32>(RGL_UDP_SAME_TIMESTAMP_FOR_PACKETS)
-            : static_cast<uint32>(RGL_UDP_NO_ADDITIONAL_OPTIONS);
+        return static_cast<uint32>(RGL_UDP_NO_ADDITIONAL_OPTIONS);
     }
 }

@@ -30,6 +30,8 @@
 #include <util/ue-header-guard-end.h>
 
 #include "RGLSelfCutout.h"
+#include "RGLScanTimingDiagnostics.h"
+#include "RGLVehicleIgnore.h"
 
 // Forward declarations
 class UWorld;
@@ -57,6 +59,16 @@ public:
     /// Get the RGL scene handle. Pass to rgl_node_raytrace().
     /// Returns nullptr which RGL treats as the default scene.
     rgl_scene_t GetScene() const { return Scene; }
+
+    /// Frame time last passed to RGL, including Update()'s simulation-time fallback.
+    uint64 GetSceneTimeNs() const { return SceneTimeNs; }
+    /// The scene time set for the frame before the current one; false until two frames were set.
+    bool GetPrevSceneTimeNs(uint64& Out) const { Out = PrevSceneTimeNs; return bHasPrevSceneTime; }
+
+    /// A failed scan-time restoration quarantines the shared scene until recreation (one stdout line
+    /// naming this manager's world).
+    bool IsSceneTimeUsable() const { return bSceneTimeUsable; }
+    void InvalidateSceneTime() { RGLScanTiming::DisableSceneTime(bSceneTimeUsable, WorldName.c_str(), "restore_failed"); }
 
     /// Synchronize UE5 world geometry with RGL scene.
     /// Should be called each frame before raytrace.
@@ -97,6 +109,13 @@ public:
 
     /// Remove a sensor when its session is destroyed (defined in .cpp; tears skeletal state down when none remain).
     void UnregisterSensor(const void* SensorId);
+
+    /// Share one raytrace id among velocity-distortion sensors on a vehicle.
+    int32 SetVelocityDistortionVehicle(const void* SensorId, AActor* Vehicle);
+    /// Bring existing entities' ignore ids up to date (attachment can change). Returns at once
+    /// without velocity-distortion sensors; otherwise scans at most once per frame, again only
+    /// after the registry changed. False when an RGL call failed (retried in the next frame).
+    bool RefreshVehicleIgnores();
 #if !UE_BUILD_SHIPPING
     // Test seams: bypass the per-frame guard and the wall-clock sync timer; set scene time like Update() does.
     void SyncSkeletalNow_ForTest(UWorld* World, double SimTime);
@@ -114,6 +133,19 @@ public:
 #endif
 
 private:
+    /// Ignore id of the vehicle Owner belongs to (attachment / owner chain); 0 = none.
+    int32 VehicleIgnoreId(AActor* Owner) const;
+    /// Set an entity's ignore id (from VehicleIgnoreId of its component's owner).
+    bool ApplyVehicleIgnore(rgl_entity_t Entity, int32 Id, bool bNewEntity = false);
+    RGLVehicleIgnore::Registry<FObjectKey> VehicleIgnoreRegistry;
+    /// Entities carrying a vehicle id; the others have RGL's default visibility.
+    TMap<rgl_entity_t, int32> EntityIgnoreIds;
+    TSet<rgl_entity_t> IgnoreLive; // scratch of RefreshVehicleIgnores, reused across scans
+    uint64 IgnoreScanFrame = 0;
+    uint64 IgnoreScanRevision = 0;
+    bool bIgnoreScanned = false;
+    bool bIgnoreScanSucceeded = true;
+
     FRGLSceneManager();
 
     // Non-copyable
@@ -288,6 +320,13 @@ private:
 
     /// RGL scene handle (nullptr = default scene).
     rgl_scene_t Scene = nullptr;
+    uint64 SceneTimeNs = 0;
+    uint64 PrevSceneTimeNs = 0;
+    bool bSceneTimeUsable = true;
+    /// Path name of the world this manager was created for (stdout lines; PIE worlds differ by package).
+    std::string WorldName;
+    bool bHasSceneTime = false;
+    bool bHasPrevSceneTime = false;
 
     /// Cache: UStaticMesh* -> rgl_mesh_t (avoids duplicate uploads).
     /// Uses TMap for UE5 compatibility and safe iteration.

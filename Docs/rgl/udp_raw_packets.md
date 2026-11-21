@@ -123,7 +123,7 @@ rest of the LiDAR continues to operate normally.
 | `rgl_udp_hesai_enable_udp_sequence` | bool | `false` | Add UDP sequence-number field |
 | `rgl_udp_hesai_blockage_detection` | bool | `false` | Up-close blockage detection (HesaiQT128C2X only) |
 | `rgl_udp_hesai_pandar_driver_compat` | bool | `false` | Pandar driver compatibility (HesaiPandarQT only) |
-| `rgl_scan_timing` | string | `"firing"` | How a scan's points are timed: `firing` or `instant` (see below) |
+| `rgl_scan_timing` | string | `"firing"` | How a scan's points are timed: `firing` or `velocity_distortion` (see below) |
 
 UDP publishing activates only when `rgl_udp_enabled = true` **and**
 `rgl_udp_dest_ip` is non-empty. With either condition unsatisfied UDP
@@ -131,24 +131,180 @@ stays off regardless of the other attributes.
 
 ### Scan timing
 
-RGL captures all the points of a scan at one time: the simulation time of
-the frame that triggers the scan. `rgl_scan_timing` sets the time the UDP
-packets carry.
+`rgl_scan_timing` selects how sensor motion is modeled and how the scan's
+UDP packet times relate to the simulation frame that triggers capture.
 
-| Value | Packet time | Use |
-|---|---|---|
-| `firing` (default) | Each packet is stamped as the real sensor would fire it, over one rotation from the capture time. | Drivers and tools that expect the real sensor's packet timing. |
-| `instant` | Every packet carries the capture time. | Stacks that compensate motion per point, such as Autoware. |
+| Value | Motion and packet time |
+|---|---|
+| `firing` (default) | Captures all rays at frame time T. Packet times advance over one rotation starting at T. Existing behavior is unchanged. |
+| `velocity_distortion` | Uses RGL velocity distortion to approximate sensor motion over the preceding rotation. Packet times retain firing intervals, starting at max(0, T − P), where P is the rotation period. For T ≥ P, the nominal azimuth-step window covers the preceding rotation. |
 
 With `firing`, the points do not move during the rotation, but their times
 do. A driver that compensates motion per point, such as Autoware's distortion
 corrector, then shifts them by the vehicle speed times their time offset: up to
-one rotation of travel (about 1 m at 10 m/s and 10 Hz). The packet times also
-run up to one rotation ahead of the simulation time when they arrive. With
-`instant`, every point carries the time it was captured at, so such a driver
-leaves the points where they are.
+one rotation of travel (about 1 m at 10 m/s and 10 Hz). Packet times also run
+up to one rotation ahead of the simulation time when they arrive.
 
-In Python, `apply_preset(..., scan_timing="instant")` sets the attribute.
+With `velocity_distortion`, rays use negative time offsets from −P toward
+zero, in azimuth order. Linear velocity and RPY angular rates are estimated
+from successive capture poses in the current sensor frame. This approximates
+only the sensor's own motion; moving objects remain at their current frame
+poses. During the first rotation after simulation start (T < P), distortion
+is disabled and the packet epoch stays at zero, even if capture history is
+already available. The first capture without pose history also uses zero
+velocity, but still shifts the packet epoch to max(0, T − P).
+
+A velocity-distortion LiDAR ignores the vehicle it is attached to, including
+its registered body, wheels, attached components and child actors. All
+velocity-distortion LiDARs on that vehicle share an ignore id. LiDARs on
+other vehicles can still see it. A `firing` LiDAR keeps its default id,
+including when it shares a vehicle with a velocity-distortion LiDAR.
+The existing `rgl_self_cutout_radius` behavior is retained.
+
+Everything attached to the vehicle, directly or through other actors, or
+owned by it is ignored as well: a trailer, a towed vehicle or a prop attached
+to the ego vehicle is invisible to that vehicle's velocity-distortion LiDARs
+(LiDARs on other vehicles and `firing` LiDARs still see it). The search from
+an object's actor through its attachment parents and owners looks at no more
+than 16 actors; an object whose vehicle lies beyond that is not ignored and
+stays visible.
+
+Ignoring the vehicle also removes its occlusion: rays can reach surfaces
+behind the body. If Autoware's self crop removes the real sensor's body
+returns, the remaining difference is visibility into that body shadow.
+This does not reproduce physical body occlusion; body-shadow masking is
+future work.
+
+A ray from a sensor inside or on a vehicle crosses many faces of its body.
+`velocity_distortion` therefore needs an RGL library that exports
+`rgl_get_ignored_faces_limit`, one that lets a beam sample pass 64 or more
+faces of ignored entities. RobotecAI's RGL (the `develop` branch that
+`RglSetup.sh` clones by default, 0.21.0 at the time of writing) does not have
+it yet: it continues a ray behind an ignored face with nested traces, which
+can exceed the ray tracing pipeline's trace depth when the ray crosses a whole
+vehicle (in our tests, an illegal memory access). With such a library,
+`velocity_distortion` session creation is rejected
+(`reason=rgl_ignored_faces_limit_insufficient ignored_faces_limit=missing`,
+see below), and `firing` LiDARs work as before. `RglSetup.sh prepare` can
+point at an RGL that has the change with `--rgl-repo` and `--rgl-branch`. Such a library passes up
+to the limit it reports (256 at the time of writing); a beam sample that
+crosses more ignored faces than that is a non-hit.
+
+Non-increasing capture times or gaps greater than 2.5 rotations use zero
+velocity. Translation speed above 70 m/s or angular-rate magnitude above
+3 rad/s is treated as a teleport and uses zero velocity. A pose with scale,
+shear or reflection is invalid for velocity estimation and also uses zero
+velocity; rotation columns must have unit length within 1e-3, be mutually
+orthogonal within 1e-3, and have a positive determinant.
+
+For UDP output, this mode supports **HesaiPandar128E4X in standard mode**
+and **HesaiQT128C2X**, with single or dual returns. The rotation period divided
+by the actual number of CARLA azimuth steps must match the model's interval
+within **1%**:
+
+| Model | Ray entries per CARLA step | Model step interval | Example at 10 Hz |
+|---|---:|---:|---:|
+| HesaiPandar128E4X | 128 | 55.556 µs | 1800 steps |
+| HesaiQT128C2X | 192 | 222.220 µs | 450 steps |
+
+Pandar's standard block interval is 2 × 27778 ns. QT128C2X uses two
+96-firing sequences per CARLA step; each sequence advances by 111110 ns.
+The QT128C2X preset (864000 points/s, 192 ray entries, 10 Hz) with
+`sensor_tick=0.1` meets this constraint. At 20 Hz, 900 Pandar steps are
+accepted. At 10 Hz, 900 or 3600 Pandar steps are rejected.
+
+Ray offsets distribute the configured rotation period across its azimuth
+steps, keeping them in [−P, 0). The preset QT128C2X ray interval is
+222.222222 µs, differing from its packet interval by about 1 µs per rotation.
+All entries in a CARLA step share one time. Sequence, channel and return
+firing delays within a step are omitted; exact per-point timing agreement
+with a decoder is not guaranteed. The QT128C2X decoder also assigns
+single-return block offsets in reverse block order.
+
+The sweep must cover 360° per capture (`horizontal_fov=360` and an effective
+capture interval of at least one rotation). Other models, the HighRes mode,
+partial sweeps and incompatible step timing are rejected at session creation
+with an error reason. The velocity-distortion and sensor-ignore APIs must
+both be available in the loaded RGL library. With UDP disabled, there is no
+model-specific constraint on step count and rotation period, and partial
+FoV scans are allowed.
+
+Set **`sensor_tick` to `1/rotation_frequency`** (0.1 at 10 Hz) on a
+`velocity_distortion` LiDAR. The capture interval is checked at session
+creation and again against the actual first ray pattern. With
+`sensor_tick=0` the world's frame delta at that moment is used instead, so
+the same configuration can be accepted or rejected depending on when the
+sensor is created and on the frame step.
+
+The results are written to stdout, one line each, also in Shipping builds.
+Every value is a token without spaces or quotes, so a line can be split on
+spaces; descriptions stay in the engine log. `name` is the sensor actor's
+name, `sensor` its session handle and `world` the path name of the world
+whose scene time was disabled.
+
+```text
+rgl_scan_timing_rejected sensor=... name=... model=... reason=... [ignored_faces_limit=<n|missing|error>]
+rgl_scan_timing sensor=... name=... mode=velocity_distortion model=... steps=... step_us=... ignore=<id|none>
+rgl_scan_timing_ignore sensor=... name=... ignore=<id>
+rgl_scan_timing_warning sensor=... name=... reason=no_parent_vehicle
+rgl_scan_timing_stopped sensor=... name=... mode=<firing|velocity_distortion> reason=...
+rgl_scene_time_disabled world=... reason=restore_failed
+```
+
+A rejection is written when the session is created, or once at the first
+capture whose actual ray pattern is incompatible (the pattern is generated
+and checked again on later captures until one is compatible). For
+`reason=rgl_ignored_faces_limit_insufficient`, `ignored_faces_limit` is
+`missing` when the library does not export `rgl_get_ignored_faces_limit`,
+`error` when the call fails, and otherwise the limit it reported.
+
+The accepted line follows the first capture whose graph run succeeds: the
+vehicle to ignore is known only once the sensor is attached, and RGL checks
+its node inputs when the graph runs. `step_us` reports the model interval
+for UDP. `ignore=none` means that no vehicle was found up the sensor's
+attachment chain: the LiDAR then sees its own vehicle, and the warning line
+is written once. If a vehicle is found later, `rgl_scan_timing_ignore` is
+written once with its id.
+
+When a capture ends early for one of the following reasons,
+`rgl_scan_timing_stopped` is written once per sensor and reason; a different
+reason is written again: `scene_time_disabled`, `scene_time_restore_failed`
+(see below), `vehicle_ignore_refresh_failed`, `raytrace_id_failed`,
+`sensor_id_exhausted`, `ray_pattern_failed`, `ray_time_offsets_failed`,
+`velocity_failed`, `scan_time_failed` or `graph_run_failed`. Except for the
+two scene-time reasons, the capture is tried again at the next tick, and a
+recovery is not written. A failure to update the vehicle's ignore ids only
+skips `velocity_distortion` captures. A `velocity_distortion` sensor with no
+accepted, rejected or stopped line has not completed a capture yet; a few
+other early returns (for example an empty ray pattern) are not reported.
+
+Direct RGL ROS 2 PointCloud2 output cannot be combined with
+`velocity_distortion`, regardless of the point format or whether UDP is
+also enabled. Leave **`rgl_lidar_topic_name` empty**; with a non-empty
+value, session creation is rejected
+(`reason=direct_ros2_output_unsupported`). This avoids exporting the
+internal negative ray offsets as point timestamps.
+
+Per-point motion compensation, such as Autoware's, can approximately restore
+static shapes when its motion estimate and firing-time model agree with the
+simulated sensor. This is not an exact firing simulation: channel microsecond
+delays, within-scan acceleration and moving-object distortion are not modeled.
+The 1% step-time tolerance also permits a small residual mismatch. Decoded
+channel times can slightly exceed T; T is not a strict upper timestamp bound.
+
+Each sensor temporarily changes RGL's shared scene time around its graph run.
+When available, the previous frame time is set before both the scan epoch and
+the restored frame time. The first frame only sets the scan epoch, then the
+frame time. Restoration retries the complete sequence up to four times. If
+it still fails, capture history is not updated and further captures using
+that shared scene stop until the scene is recreated; an error is logged,
+`rgl_scene_time_disabled` is written once for the scene and
+`rgl_scan_timing_stopped` once for each sensor that stops.
+These time changes synchronize graph execution, so multiple sensors can be
+processed serially. The performance impact has not been measured. Sharing
+this scene with object-velocity or radar consumers needs integration testing.
+
+In Python, `apply_preset(..., scan_timing="velocity_distortion")` sets the attribute.
 
 ## Smoke test
 

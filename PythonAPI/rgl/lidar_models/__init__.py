@@ -143,7 +143,7 @@ def list_models():
 
 
 # Values of the rgl_scan_timing blueprint attribute.
-SCAN_TIMINGS = ("firing", "instant")
+SCAN_TIMINGS = ("firing", "velocity_distortion")
 
 
 def apply_preset(
@@ -186,8 +186,10 @@ def apply_preset(
             "firing": UDP packets are stamped as the real sensor fires them,
                 over one rotation from the capture time; the points are
                 still captured at that one time.
-            "instant": every UDP packet carries the capture time, so the
-                stamps match the points.
+            "velocity_distortion": apply RGL sensor velocity distortion over
+                the preceding rotation. Packet times retain firing intervals,
+                starting one rotation before the frame time. Only sensor motion
+                is modeled; moving objects are not rewound.
     """
     if model_name not in MODEL_REGISTRY:
         available = ", ".join(sorted(MODEL_REGISTRY.keys()))

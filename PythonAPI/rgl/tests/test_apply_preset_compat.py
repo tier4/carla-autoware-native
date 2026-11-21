@@ -116,8 +116,8 @@ def test_scan_timing_default_leaves_attribute_unset():
 
 
 def test_scan_timing_values_are_passed_through():
-    """scan_timing 'instant' / 'firing' → rgl_scan_timing set to that value."""
-    for value in ("instant", "firing"):
+    """scan_timing 'velocity_distortion' / 'firing' → rgl_scan_timing set to that value."""
+    for value in ("velocity_distortion", "firing"):
         bp = FakeBlueprint()
         apply_preset(bp, "HesaiPandar128E4X", scan_timing=value)
         assert bp.attrs.get("rgl_scan_timing") == value, (
@@ -135,6 +135,17 @@ def test_scan_timing_rejects_unknown_value():
     raise AssertionError("Expected ValueError for scan_timing='bogus'")
 
 
+def test_scan_timing_rejects_removed_value():
+    """The removed scan timing is rejected before any attribute is set."""
+    bp = FakeBlueprint()
+    try:
+        apply_preset(bp, "HesaiPandar128E4X", scan_timing="instant")
+    except ValueError:
+        assert not bp.attrs, f"No attribute should be set, got {sorted(bp.attrs)}"
+        return
+    raise AssertionError("Expected ValueError for the removed scan timing")
+
+
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
@@ -150,6 +161,7 @@ def main():
         test_scan_timing_default_leaves_attribute_unset,
         test_scan_timing_values_are_passed_through,
         test_scan_timing_rejects_unknown_value,
+        test_scan_timing_rejects_removed_value,
     ]
     failures = []
     for fn in tests:

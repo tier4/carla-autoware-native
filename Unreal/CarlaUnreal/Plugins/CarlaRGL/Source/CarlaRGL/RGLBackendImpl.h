@@ -9,6 +9,8 @@
 
 #ifdef WITH_RGL
 
+#include "RGLScanTimingDiagnostics.h"
+
 #include <util/disable-ue4-macros.h>
 #include <rgl/api/core.h>
 #include <rgl/api/extensions/ros2.h>
@@ -31,6 +33,7 @@ struct FRGLSession
     rgl_node_t UseRaysNode = nullptr;
     rgl_node_t SetRangeNode = nullptr;
     rgl_node_t SetRingIdsNode = nullptr;
+    rgl_node_t SetTimeOffsetsNode = nullptr;
     rgl_node_t RaysTransformNode = nullptr;
     rgl_node_t RaytraceNode = nullptr;
     rgl_node_t CompactNode = nullptr;
@@ -54,6 +57,16 @@ struct FRGLSession
     bool bRayPatternCached = false;
     int32 CachedTotalRays = 0;
 
+    // ---- Motion history (RGL sensor-to-world pose and capture time) ----
+    bool bHasPreviousCapture = false;
+    bool bVelocityFallbackLogged = false;
+    rgl_mat3x4f PreviousSensorTf{};
+    uint64 PreviousCaptureTimeNs = 0;
+    int32 RaytraceSensorId = 0; // Default visibility until a vehicle is registered.
+
+    // ---- stdout lines of capture (accepted, rejected pattern, stopped), each once ----
+    RGLScanTiming::CaptureDiagnostics Capture;
+
     // ---- Configuration (copied from CreateSession) ----
     FRGLSessionConfig Config;
 
@@ -73,7 +86,8 @@ struct FRGLSession
     bool AllNodesValid() const
     {
         return UseRaysNode && SetRangeNode && RaysTransformNode && RaytraceNode &&
-               CompactNode && ToSensorNode && YieldNode;
+               CompactNode && ToSensorNode && YieldNode &&
+               (Config.LidarDesc.RglScanTiming != TEXT("velocity_distortion") || SetTimeOffsetsNode);
         // Optional nodes (not validated here):
         //   FormatNode, Ros2PublishNode (only when ROS2 topic is set)
         //   UdpPublishNode               (only when UDP is enabled and the

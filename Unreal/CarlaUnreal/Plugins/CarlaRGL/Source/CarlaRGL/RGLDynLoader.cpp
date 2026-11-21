@@ -54,6 +54,25 @@ static fn_rgl_scene_set_time_t fn_rgl_scene_set_time = nullptr;
 typedef rgl_status_t (*fn_rgl_node_rays_from_mat3x4f_t)(rgl_node_t*, const rgl_mat3x4f*, int32_t);
 static fn_rgl_node_rays_from_mat3x4f_t fn_rgl_node_rays_from_mat3x4f = nullptr;
 
+// Velocity distortion (optional for firing mode).
+typedef rgl_status_t (*fn_rgl_node_rays_set_time_offsets_t)(rgl_node_t*, const float*, int32_t);
+static fn_rgl_node_rays_set_time_offsets_t fn_rgl_node_rays_set_time_offsets = nullptr;
+typedef rgl_status_t (*fn_rgl_node_raytrace_configure_velocity_t)(rgl_node_t, const rgl_vec3f*, const rgl_vec3f*);
+static fn_rgl_node_raytrace_configure_velocity_t fn_rgl_node_raytrace_configure_velocity = nullptr;
+typedef rgl_status_t (*fn_rgl_node_raytrace_configure_distortion_t)(rgl_node_t, bool);
+static fn_rgl_node_raytrace_configure_distortion_t fn_rgl_node_raytrace_configure_distortion = nullptr;
+
+typedef rgl_status_t (*fn_rgl_entity_set_ignored_by_sensor_t)(rgl_entity_t, int32_t);
+static fn_rgl_entity_set_ignored_by_sensor_t fn_rgl_entity_set_ignored_by_sensor = nullptr;
+
+typedef rgl_status_t (*fn_rgl_node_raytrace_configure_id_t)(rgl_node_t, int32_t);
+static fn_rgl_node_raytrace_configure_id_t fn_rgl_node_raytrace_configure_id = nullptr;
+
+// Optional: faces of ignored entities one beam sample may pass. Exported only by RGL
+// libraries that continue rays behind ignored faces in a loop; resolved without a warning.
+typedef rgl_status_t (*fn_rgl_get_ignored_faces_limit_t)(int32_t*);
+static fn_rgl_get_ignored_faces_limit_t fn_rgl_get_ignored_faces_limit = nullptr;
+
 // 9. rgl_node_rays_set_ring_ids
 typedef rgl_status_t (*fn_rgl_node_rays_set_ring_ids_t)(rgl_node_t*, const int32_t*, int32_t);
 static fn_rgl_node_rays_set_ring_ids_t fn_rgl_node_rays_set_ring_ids = nullptr;
@@ -232,6 +251,37 @@ rgl_status_t rgl_node_rays_from_mat3x4f(rgl_node_t* node, const rgl_mat3x4f* ray
 {
     if (!fn_rgl_node_rays_from_mat3x4f) return RGL_INVALID_STATE;
     return fn_rgl_node_rays_from_mat3x4f(node, rays, ray_count);
+}
+
+rgl_status_t rgl_entity_set_ignored_by_sensor(rgl_entity_t entity, int32_t sensor_id)
+{
+    if (!fn_rgl_entity_set_ignored_by_sensor) return RGL_INVALID_STATE;
+    return fn_rgl_entity_set_ignored_by_sensor(entity, sensor_id);
+}
+
+rgl_status_t rgl_node_raytrace_configure_id(rgl_node_t node, int32_t id)
+{
+    if (!fn_rgl_node_raytrace_configure_id) return RGL_INVALID_STATE;
+    return fn_rgl_node_raytrace_configure_id(node, id);
+}
+
+rgl_status_t rgl_node_rays_set_time_offsets(rgl_node_t* node, const float* offsets, int32_t offsets_count)
+{
+    if (!fn_rgl_node_rays_set_time_offsets) return RGL_INVALID_STATE;
+    return fn_rgl_node_rays_set_time_offsets(node, offsets, offsets_count);
+}
+
+rgl_status_t rgl_node_raytrace_configure_velocity(rgl_node_t node, const rgl_vec3f* linear_velocity,
+                                                const rgl_vec3f* angular_velocity)
+{
+    if (!fn_rgl_node_raytrace_configure_velocity) return RGL_INVALID_STATE;
+    return fn_rgl_node_raytrace_configure_velocity(node, linear_velocity, angular_velocity);
+}
+
+rgl_status_t rgl_node_raytrace_configure_distortion(rgl_node_t node, bool enable)
+{
+    if (!fn_rgl_node_raytrace_configure_distortion) return RGL_INVALID_STATE;
+    return fn_rgl_node_raytrace_configure_distortion(node, enable);
 }
 
 // 9. rgl_node_rays_set_ring_ids
@@ -465,6 +515,11 @@ bool RGLDynLoader::Load(const char* LibPath)
     LOAD_FN(rgl_entity_set_transform)
     LOAD_FN(rgl_scene_set_time)
     LOAD_FN(rgl_node_rays_from_mat3x4f)
+    LOAD_FN(rgl_entity_set_ignored_by_sensor)
+    LOAD_FN(rgl_node_raytrace_configure_id)
+    LOAD_FN(rgl_node_rays_set_time_offsets)
+    LOAD_FN(rgl_node_raytrace_configure_velocity)
+    LOAD_FN(rgl_node_raytrace_configure_distortion)
     LOAD_FN(rgl_node_rays_set_ring_ids)
     LOAD_FN(rgl_node_rays_set_range)
     LOAD_FN(rgl_node_rays_transform)
@@ -491,6 +546,8 @@ bool RGLDynLoader::Load(const char* LibPath)
     LOAD_FN(rgl_mesh_set_bone_weights)
     LOAD_FN(rgl_mesh_set_restposes)
     LOAD_FN(rgl_entity_set_pose_world)
+    fn_rgl_get_ignored_faces_limit =
+        (fn_rgl_get_ignored_faces_limit_t)dlsym(Handle, "rgl_get_ignored_faces_limit");
 
     if (!allResolved)
     {
@@ -519,6 +576,12 @@ void RGLDynLoader::Unload()
     fn_rgl_entity_set_transform = nullptr;
     fn_rgl_scene_set_time = nullptr;
     fn_rgl_node_rays_from_mat3x4f = nullptr;
+    fn_rgl_entity_set_ignored_by_sensor = nullptr;
+    fn_rgl_node_raytrace_configure_id = nullptr;
+    fn_rgl_get_ignored_faces_limit = nullptr;
+    fn_rgl_node_rays_set_time_offsets = nullptr;
+    fn_rgl_node_raytrace_configure_velocity = nullptr;
+    fn_rgl_node_raytrace_configure_distortion = nullptr;
     fn_rgl_node_rays_set_ring_ids = nullptr;
     fn_rgl_node_rays_set_range = nullptr;
     fn_rgl_node_rays_transform = nullptr;
@@ -550,6 +613,28 @@ void RGLDynLoader::Unload()
 bool RGLDynLoader::IsLoaded()
 {
     return Handle != nullptr;
+}
+
+bool RGLDynLoader::IsSensorIgnoreApiAvailable()
+{
+    return fn_rgl_entity_set_ignored_by_sensor && fn_rgl_node_raytrace_configure_id;
+}
+
+bool RGLDynLoader::HasIgnoredFacesLimit()
+{
+    return fn_rgl_get_ignored_faces_limit != nullptr;
+}
+
+bool RGLDynLoader::GetIgnoredFacesLimit(int32_t& OutLimit)
+{
+    OutLimit = 0;
+    return fn_rgl_get_ignored_faces_limit && fn_rgl_get_ignored_faces_limit(&OutLimit) == RGL_SUCCESS;
+}
+
+bool RGLDynLoader::IsVelocityDistortionApiAvailable()
+{
+    return fn_rgl_node_rays_set_time_offsets && fn_rgl_node_raytrace_configure_velocity &&
+           fn_rgl_node_raytrace_configure_distortion;
 }
 
 bool RGLDynLoader::IsSkeletalApiAvailable()

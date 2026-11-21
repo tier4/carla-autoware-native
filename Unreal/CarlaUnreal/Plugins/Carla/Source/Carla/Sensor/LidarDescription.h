@@ -203,6 +203,6 @@ struct CARLA_API FLidarDescription
   /// How a scan's points are timed (rgl_scan_timing): "firing" (default)
   /// stamps each UDP packet as the real sensor fires it, over one rotation
   /// from the capture time, while the points are captured at that one time;
-  /// "instant" stamps every packet with the capture time.
+  /// "velocity_distortion" applies sensor motion over the preceding rotation.
   FString RglScanTiming = TEXT("firing");
 };

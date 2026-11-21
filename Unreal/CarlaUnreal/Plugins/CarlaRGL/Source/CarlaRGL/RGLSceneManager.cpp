@@ -266,6 +266,7 @@ FRGLSceneManager& FRGLSceneManager::GetInstance(UWorld* World)
     }
 
     FRGLSceneManager* NewInstance = new FRGLSceneManager();
+    NewInstance->WorldName = World ? TCHAR_TO_UTF8(*World->GetPathName()) : "";
     Instances.Add(World, NewInstance);
     return *NewInstance;
 }
@@ -403,6 +404,10 @@ void FRGLSceneManager::Update(UWorld* World, double SimulationTime)
     const double SceneTime = (SimulationTime >= 0.0) ? SimulationTime : World->GetTimeSeconds();
     const uint64 TimeNs = static_cast<uint64>(SceneTime * 1e9);
     RGL_CHECK(rgl_scene_set_time(Scene, TimeNs));
+    PrevSceneTimeNs = SceneTimeNs;
+    bHasPrevSceneTime = bHasSceneTime;
+    SceneTimeNs = TimeNs;
+    bHasSceneTime = true;
 
     // Update only dynamic entity transforms (static entities skip after first set)
     UpdateTransforms();
@@ -1438,6 +1443,13 @@ bool FRGLSceneManager::RegisterComponent(UStaticMeshComponent* Component)
         return false;
     }
 
+    if (!ApplyVehicleIgnore(Entity, VehicleIgnoreId(Component->GetOwner()), true))
+    {
+        rgl_entity_destroy(Entity);
+        ReleaseMeshReference(StaticMesh);
+        return false;
+    }
+
     // Set initial transform
     const FTransform WorldTransform = Component->GetComponentTransform();
     rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(WorldTransform);
@@ -1524,6 +1536,7 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
 
     int32 SuccessCount = 0;
     int32 RangeSkippedCount = 0;
+    const int32 IgnoreId = VehicleIgnoreId(Component->GetOwner()); // shared by all instances
     for (int32 i = 0; i < NumInstances; ++i)
     {
         FTransform InstanceTransform;
@@ -1556,6 +1569,11 @@ bool FRGLSceneManager::RegisterISMComponent(UInstancedStaticMeshComponent* Compo
         rgl_mat3x4f RGLTransform = RGLCoord::ToRGL(InstanceTransform);
         RGL_CHECK(rgl_entity_set_transform(Entity, &RGLTransform));
 
+        if (!ApplyVehicleIgnore(Entity, IgnoreId, true))
+        {
+            rgl_entity_destroy(Entity);
+            continue;
+        }
         Group.Entities.Add(Entity);
         ++SuccessCount;
     }
@@ -2040,9 +2058,91 @@ void FRGLSceneManager::RglDestroyChecked(rgl_status_t Status, const TCHAR* Api)
     }
 }
 
+int32 FRGLSceneManager::SetVelocityDistortionVehicle(const void* SensorId, AActor* Vehicle)
+{
+    if (!IsValid(Vehicle))
+    {
+        VehicleIgnoreRegistry.Remove(SensorId);
+        return 0;
+    }
+    return VehicleIgnoreRegistry.Register(SensorId, FObjectKey(Vehicle));
+}
+
+int32 FRGLSceneManager::VehicleIgnoreId(AActor* Owner) const
+{
+    if (VehicleIgnoreRegistry.IsEmpty()) return 0; // firing-only scenes: no chain walk
+    return RGLVehicleIgnore::FindSensorId(Owner,
+        [](AActor* Actor) {
+            return IsValid(Actor)
+                ? std::array<AActor*, 2>{{Actor->GetAttachParentActor(), Actor->GetOwner()}}
+                : std::array<AActor*, 2>{{nullptr, nullptr}};
+        },
+        [this](AActor* Actor) {
+            return IsValid(Actor) ? VehicleIgnoreRegistry.Find(FObjectKey(Actor)) : 0;
+        });
+}
+
+bool FRGLSceneManager::ApplyVehicleIgnore(rgl_entity_t Entity, int32 Id, bool bNewEntity)
+{
+    if (!Entity) return true;
+    if (bNewEntity) EntityIgnoreIds.Remove(Entity); // RGL may reuse a destroyed handle.
+    const int32* Applied = EntityIgnoreIds.Find(Entity);
+    // Fresh entities are visible to all sensors, including on older libraries: no call needed.
+    const RGLVehicleIgnore::IgnoreCall Call = RGLVehicleIgnore::PlanEntityIgnore(
+        Applied ? *Applied : 0, Id, static_cast<int32>(RGL_SENSOR_ID_NONE));
+    if (!Call.bNeeded) return true;
+    const rgl_status_t Status = rgl_entity_set_ignored_by_sensor(Entity, Call.SensorId);
+    // Keep the previous record on failure, so that the next refresh retries.
+    if (Status != RGL_SUCCESS) { RGL_CHECK(Status); return false; }
+    if (Id != 0) EntityIgnoreIds.Add(Entity, Id);
+    else EntityIgnoreIds.Remove(Entity);
+    return true;
+}
+
+bool FRGLSceneManager::RefreshVehicleIgnores()
+{
+    const uint64 Frame = GFrameCounter;
+    const uint64 Revision = VehicleIgnoreRegistry.Revision();
+    switch (RGLVehicleIgnore::PlanRefresh(VehicleIgnoreRegistry.IsEmpty(), EntityIgnoreIds.Num() > 0,
+        bIgnoreScanned, Frame, IgnoreScanFrame, Revision, IgnoreScanRevision))
+    {
+    case RGLVehicleIgnore::RefreshStep::Nothing: return true;
+    case RGLVehicleIgnore::RefreshStep::Cached: return bIgnoreScanSucceeded;
+    case RGLVehicleIgnore::RefreshStep::Scan: break;
+    }
+    bool bSuccess = true;
+    IgnoreLive.Reset();
+    const auto Apply = [this, &bSuccess](rgl_entity_t Entity, int32 Id) {
+        if (!Entity) return;
+        if (!ApplyVehicleIgnore(Entity, Id)) bSuccess = false;
+        if (EntityIgnoreIds.Contains(Entity)) IgnoreLive.Add(Entity);
+    };
+    // One owner lookup per component; the instances of an ISM component share it.
+    for (const auto& Pair : EntityMap)
+        if (auto* Comp = Pair.Value.Component.Get()) Apply(Pair.Value.Entity, VehicleIgnoreId(Comp->GetOwner()));
+    for (const auto& Pair : ISMCEntityMap)
+        if (auto* Comp = Pair.Value.Component.Get())
+        {
+            const int32 Id = VehicleIgnoreId(Comp->GetOwner());
+            for (rgl_entity_t Entity : Pair.Value.Entities) Apply(Entity, Id);
+        }
+    for (const auto& Pair : SkeletalEntityMap)
+        if (auto* Comp = Pair.Value.Component.Get()) Apply(Pair.Value.Entity, VehicleIgnoreId(Comp->GetOwner()));
+    // Forget destroyed entities.
+    for (auto It = EntityIgnoreIds.CreateIterator(); It; ++It)
+        if (!IgnoreLive.Contains(It.Key())) It.RemoveCurrent();
+    bIgnoreScanned = true;
+    IgnoreScanFrame = Frame;
+    IgnoreScanRevision = Revision;
+    bIgnoreScanSucceeded = bSuccess;
+    return bSuccess;
+}
+
 void FRGLSceneManager::UnregisterSensor(const void* SensorId)
 {
     RegisteredSensors.Remove(SensorId);
+    VehicleIgnoreRegistry.Remove(SensorId);
+    RefreshVehicleIgnores();
     // Update() only runs from sensor ticks; with no sensor left nothing would restore tick policies or free entities.
     if (RegisteredSensors.Num() == 0 && SkeletalEntityMap.Num() > 0) TeardownSkeletal();
 }
@@ -2259,6 +2359,11 @@ void FRGLSceneManager::UpdateSkeletalPoses()
             if (!M || !*M) { ToRemove.Add(Pair.Key); continue; }
             rgl_entity_t E = nullptr;
             if (rgl_entity_create(&E, Scene, *M) != RGL_SUCCESS || !E) { WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("rgl_entity_create failed; pending")); continue; }
+            if (!ApplyVehicleIgnore(E, VehicleIgnoreId(Comp->GetOwner()), true))
+            {
+                RglDestroyChecked(rgl_entity_destroy(E), TEXT("rgl_entity_destroy"));
+                continue;
+            }
             Info.Entity = E;   // identity transform; world-space poses follow. Never call rgl_entity_set_transform.
         }
         if (rgl_entity_set_pose_world(Info.Entity, Info.PoseScratch.GetData(), Info.RawBoneNum) != RGL_SUCCESS)
@@ -2466,6 +2571,11 @@ bool FRGLSceneManager::UpdateCutoutEntity(USkeletalMeshComponent* Comp, FSkeleta
             WarnSkeletalOnce(Comp, Info.SkeletalMesh, TEXT("self cutout: rgl_entity_create failed; pending"));
             return false;
         }
+        if (!ApplyVehicleIgnore(E, VehicleIgnoreId(Comp->GetOwner()), true))
+        {
+            RglDestroyChecked(rgl_entity_destroy(E), TEXT("rgl_entity_destroy"));
+            return false;
+        }
         Info.Entity = E;   // identity transform; world-space poses follow. Never call rgl_entity_set_transform.
     }
     if (rgl_entity_set_pose_world(Info.Entity, Info.PoseScratch.GetData(), Info.RawBoneNum) != RGL_SUCCESS)
@@ -2572,6 +2682,10 @@ void FRGLSceneManager::UpdateSkeletalPosesNow_ForTest(double SimTime)
     CurrentSimTime = SimTime;
     const uint64 TimeNs = static_cast<uint64>(SimTime * 1e9);
     RGL_CHECK(rgl_scene_set_time(Scene, TimeNs));      // mirrors Update(): time before poses
+    PrevSceneTimeNs = SceneTimeNs;
+    bHasPrevSceneTime = bHasSceneTime;
+    SceneTimeNs = TimeNs;
+    bHasSceneTime = true;
     if (SkeletalEnabled()) UpdateSkeletalPoses();
 }
 int32 FRGLSceneManager::GetSkeletalLiveEntityCount_ForTest() const { int32 N = 0; for (const auto& P : SkeletalEntityMap) N += (P.Value.Entity != nullptr); return N; }

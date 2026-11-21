@@ -54,7 +54,7 @@ typedef enum : uint32_t
     RGL_UDP_UP_CLOSE_BLOCKAGE_DETECTION     = 1u << 2,
     RGL_UDP_FIT_QT64_TO_HESAI_PANDAR_DRIVER = 1u << 3,
     // Stamp every packet with the scene time instead of the firing time
-    // (optional for every supported model). Used by rgl_scan_timing=instant.
+    // (optional for every supported model). Not used by rgl_scan_timing.
     RGL_UDP_SAME_TIMESTAMP_FOR_PACKETS      = 1u << 4,
 } rgl_udp_options_t;
 

@@ -9,6 +9,10 @@ using FRGLSessionHandle = void*;
 struct FRGLSessionConfig
 {
     FLidarDescription LidarDesc;
+    // Configured sensor_tick; zero uses the world's current frame delta.
+    double ScanDeltaSeconds = 0.0;
+    // Actor name of the sensor, written to stdout to tell sensors apart.
+    FString SensorName;
     FString Ros2Topic;
     FString Ros2FrameId;
     FString Ros2Reliability;

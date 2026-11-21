@@ -9,6 +9,10 @@
 #include "RGLCoordinateUtils.h"
 #include "RGLUdpExtensionShim.h"
 #include "RGLScanTiming.h"
+#include "RGLScanTimingDiagnostics.h"
+#include "RGLVelocityDistortion.h"
+#include "RGLVehicleIgnore.h"
+#include "RGLDynLoader.h"
 
 #include <util/disable-ue4-macros.h>
 #include <rgl/api/core.h>
@@ -23,6 +27,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 // ============================================================================
 // Helper macros
@@ -46,6 +51,70 @@
         }                                                                     \
     } while (0)
 #endif
+
+namespace
+{
+// Shifts the scene time to the start of the scan for one graph run.
+// rgl_scene_set_time synchronizes graph execution, so the shifted time remains
+// visible to asynchronous UDP publishing until the graph has finished.
+// Preserve the previous/frame pair when available. The first frame has no
+// previous timestamp, so it only sets scan start and then frame time.
+class FScopedRGLSceneTime
+{
+public:
+    FScopedRGLSceneTime(bool bEnable, rgl_scene_t InScene, uint64 PrevFrameTimeNs, uint64 ScanTimeNs,
+                       uint64 FrameTimeNs, bool bInHasPreviousFrame = true,
+                       bool* OutRestoreFailed = nullptr)
+        : bEnabled(bEnable), bHasPreviousFrame(bInHasPreviousFrame), Scene(InScene),
+          PrevTimeNs(PrevFrameTimeNs), RestoreTimeNs(FrameTimeNs), RestoreFailure(OutRestoreFailed)
+    {
+        if (RestoreFailure) *RestoreFailure = false;
+        if (bEnabled)
+        {
+            if (bHasPreviousFrame) Status = rgl_scene_set_time(Scene, PrevTimeNs);
+            if (Status == RGL_SUCCESS) Status = rgl_scene_set_time(Scene, ScanTimeNs);
+            RGL_CHECK(Status);
+        }
+    }
+    ~FScopedRGLSceneTime() { Restore(); }
+
+    // Idempotent: callers can inspect the result while the scope is still alive.
+    void Restore()
+    {
+        if (!bEnabled || bRestoreAttempted) return;
+        bRestoreAttempted = true;
+        constexpr int MaxRestoreAttempts = 4;
+        for (int Attempt = 0; Attempt < MaxRestoreAttempts; ++Attempt)
+        {
+            rgl_status_t RestoreStatus = RGL_SUCCESS;
+            if (bHasPreviousFrame) RestoreStatus = rgl_scene_set_time(Scene, PrevTimeNs);
+            if (RestoreStatus == RGL_SUCCESS)
+                RestoreStatus = rgl_scene_set_time(Scene, RestoreTimeNs);
+            if (RestoreStatus == RGL_SUCCESS) return;
+            RGL_CHECK(RestoreStatus);
+            // Synchronization errors may be consumed one at a time. Retry the
+            // whole pair, including when only the final frame set failed.
+        }
+        bRestoreFailed = true;
+        if (RestoreFailure) *RestoreFailure = true;
+    }
+    bool IsValid() const { return Status == RGL_SUCCESS; }
+    bool RestoreFailed() const { return bRestoreFailed; }
+    FScopedRGLSceneTime(const FScopedRGLSceneTime&) = delete;
+    FScopedRGLSceneTime& operator=(const FScopedRGLSceneTime&) = delete;
+
+private:
+    bool bEnabled;
+    bool bHasPreviousFrame;
+    bool bRestoreAttempted = false;
+    bool bRestoreFailed = false;
+    rgl_scene_t Scene;
+    uint64 PrevTimeNs;
+    uint64 RestoreTimeNs;
+    bool* RestoreFailure;
+    rgl_status_t Status = RGL_SUCCESS;
+};
+}
 
 // ============================================================================
 // Point cloud format definitions
@@ -168,12 +237,78 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
     Session->Config = Config;
 
     const FLidarDescription& Desc = Config.LidarDesc;
+    const bool bVelocityDistortion = Desc.RglScanTiming == RGLScanTiming::VelocityDistortion();
+    RGLScanTiming::SessionDiagnostics TimingDiagnostics(bVelocityDistortion, Session,
+        TCHAR_TO_UTF8(*Config.SensorName), TCHAR_TO_UTF8(*Desc.RglLidarModelName));
+    Session->Capture = RGLScanTiming::CaptureDiagnostics(Session,
+        TCHAR_TO_UTF8(*Config.SensorName), TCHAR_TO_UTF8(*Desc.RglLidarModelName), bVelocityDistortion);
+    const auto RejectTiming = [&TimingDiagnostics](const char* Reason) { TimingDiagnostics.Reject(Reason); };
+    if (bVelocityDistortion &&
+        (!RGLDynLoader::IsVelocityDistortionApiAvailable() || !RGLDynLoader::IsSensorIgnoreApiAvailable()))
+    {
+        const char* Reason = !RGLDynLoader::IsVelocityDistortionApiAvailable()
+            ? "missing_velocity_distortion_api" : "missing_sensor_ignore_api";
+        RejectTiming(Reason);
+        UE_LOG(LogTemp, Error, TEXT("RGL: session rejected: %s"), UTF8_TO_TCHAR(Reason));
+        delete Session;
+        return nullptr;
+    }
+    if (bVelocityDistortion)
+    {
+        // Rays from inside the vehicle cross many of its ignored faces; libraries that continue
+        // with nested traces do not export the limit and cannot pass a whole vehicle.
+        using RGLVehicleIgnore::FacesLimitQuery;
+        int32_t FacesLimit = 0;
+        const FacesLimitQuery Query = !RGLDynLoader::HasIgnoredFacesLimit() ? FacesLimitQuery::Missing
+            : RGLDynLoader::GetIgnoredFacesLimit(FacesLimit) ? FacesLimitQuery::Available : FacesLimitQuery::Error;
+        if (!RGLVehicleIgnore::AcceptsIgnoredFacesLimit(Query, FacesLimit))
+        {
+            const std::string Field = RGLVehicleIgnore::IgnoredFacesLimitField(Query, FacesLimit);
+            TimingDiagnostics.Reject(RGLVehicleIgnore::IgnoredFacesLimitReason, Field.c_str());
+            UE_LOG(LogTemp, Error, TEXT("RGL: session rejected: the loaded RGL library does not let a ray pass enough faces of ignored entities (%s, at least %d required)."),
+                UTF8_TO_TCHAR(Field.c_str()), RGLVehicleIgnore::MinIgnoredFacesLimit);
+            delete Session;
+            return nullptr;
+        }
+    }
+    if (bVelocityDistortion &&
+        (!std::isfinite(Desc.RotationFrequency) || Desc.RotationFrequency <= 0 ||
+         !std::isfinite(Desc.HorizontalFov) || Desc.HorizontalFov <= 0 || Desc.HorizontalFov > 360))
+    {
+        RejectTiming("invalid_rotation_frequency_or_fov");
+        UE_LOG(LogTemp, Error, TEXT("RGL: invalid velocity_distortion rotation frequency or FoV"));
+        delete Session;
+        return nullptr;
+    }
 
     if (!World)
     {
+        if (bVelocityDistortion) RejectTiming("missing_world");
         UE_LOG(LogTemp, Error, TEXT("RGLBackendImpl: No world available during session creation"));
         delete Session;
         return nullptr;
+    }
+
+    if (bVelocityDistortion)
+    {
+        const double ScanDelta = Config.ScanDeltaSeconds > 0
+            ? Config.ScanDeltaSeconds : World->GetDeltaSeconds();
+        const auto Steps = RGLVelocityDistortion::ScanSteps(
+            Desc.PointsPerSecond, Desc.Channels, ScanDelta, Desc.RotationFrequency);
+        const char* Reason = RGLVelocityDistortion::ValidateOutput(
+            Desc.UdpEnabled, !Config.Ros2Topic.IsEmpty(), TCHAR_TO_UTF8(*Desc.RglLidarModelName),
+            Steps, Desc.RotationFrequency,
+            std::fmin(static_cast<double>(Desc.HorizontalFov),
+                Desc.RotationFrequency * static_cast<double>(Desc.HorizontalFov) * ScanDelta), Desc.Channels);
+        if (Reason)
+        {
+            RejectTiming(Reason);
+            UE_LOG(LogTemp, Error, TEXT("RGL: session rejected: %s [%s] (model=%s, steps=%llu, rotation_hz=%.6f)."),
+                UTF8_TO_TCHAR(RGLVelocityDistortion::Describe(Reason)), UTF8_TO_TCHAR(Reason), *Desc.RglLidarModelName,
+                static_cast<unsigned long long>(Steps), Desc.RotationFrequency);
+            delete Session;
+            return nullptr;
+        }
     }
 
     // Do not scan the world here: sensor position is not available yet, and
@@ -184,6 +319,12 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
     // 1. UseRays node
     rgl_mat3x4f DummyRay = RGLCoord::Identity();
     RGL_CHECK_RETURN(rgl_node_rays_from_mat3x4f(&Session->UseRaysNode, &DummyRay, 1), nullptr);
+
+    if (bVelocityDistortion)
+    {
+        const auto Offsets = RGLVelocityDistortion::TimeOffsetsMs(1, 1, Desc.HorizontalFov, Desc.RotationFrequency);
+        RGL_CHECK_RETURN(rgl_node_rays_set_time_offsets(&Session->SetTimeOffsetsNode, Offsets.data(), 1), nullptr);
+    }
 
     // 1.5. Set ray range (min/max in meters)
     const float MinRangeM = Desc.MinRange * RGLCoord::UE_TO_RGL;
@@ -201,6 +342,10 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
 
     // 3. Raytrace node
     RGL_CHECK_RETURN(rgl_node_raytrace(&Session->RaytraceNode, Scene), nullptr);
+    if (RGLDynLoader::IsVelocityDistortionApiAvailable())
+    {
+        RGL_CHECK_RETURN(rgl_node_raytrace_configure_distortion(Session->RaytraceNode, bVelocityDistortion), nullptr);
+    }
     RGL_CHECK(rgl_node_raytrace_configure_non_hits(Session->RaytraceNode, 0.0f, MaxRangeM));
 
     // 4. Compact node
@@ -413,8 +558,7 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
                         *M);
                 }
 
-                // rgl_scan_timing (see RGLScanTiming.h): "instant" stamps every
-                // packet with the capture time of the points.
+                // Both scan timings retain the model's advancing packet times.
                 UdpOptions |= RGLScanTiming::UdpOptions(Desc.RglScanTiming);
 
                 const FString EffSrcIp = Desc.UdpSourceIp.IsEmpty()
@@ -545,12 +689,20 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
     }
 
     // Connect graph with optional noise nodes:
-    // UseRays -> SetRange -> SetRingIds -> RaysTransform
+    // UseRays -> SetRange -> SetRingIds -> [SetTimeOffsets] -> RaysTransform
     //   -> [AngularNoiseRay] -> Raytrace -> [AngularNoiseHitpoint] -> [DistanceNoise]
     //   -> Compact -> ToSensor -> Yield
     RGL_CHECK(rgl_graph_node_add_child(Session->UseRaysNode, Session->SetRangeNode));
     RGL_CHECK(rgl_graph_node_add_child(Session->SetRangeNode, Session->SetRingIdsNode));
-    RGL_CHECK(rgl_graph_node_add_child(Session->SetRingIdsNode, Session->RaysTransformNode));
+    if (Session->SetTimeOffsetsNode)
+    {
+        RGL_CHECK(rgl_graph_node_add_child(Session->SetRingIdsNode, Session->SetTimeOffsetsNode));
+        RGL_CHECK(rgl_graph_node_add_child(Session->SetTimeOffsetsNode, Session->RaysTransformNode));
+    }
+    else
+    {
+        RGL_CHECK(rgl_graph_node_add_child(Session->SetRingIdsNode, Session->RaysTransformNode));
+    }
 
     // RaysTransform -> [AngularNoiseRay] -> Raytrace
     if (Session->AngularNoiseRayNode)
@@ -605,6 +757,10 @@ FRGLSessionHandle FRGLBackendImpl::CreateSession(const FRGLSessionConfig& Config
     // Store world reference for scene manager updates during Tick
     Session->World = World;
 
+    // The accepted line follows the first successful capture (Tick), once the vehicle to ignore is
+    // known and RGL has run the graph: CARLA attaches a sensor after spawning it, and RGL checks node
+    // inputs when the graph runs.
+    TimingDiagnostics.Accept();
     RGLLog::Info("RGLBackendImpl: RGL computation graph created successfully");
     return static_cast<FRGLSessionHandle>(Session);
 }
@@ -638,6 +794,7 @@ void FRGLBackendImpl::DestroySession(FRGLSessionHandle Handle)
 
     // Clear all handles (they're invalid after graph_destroy)
     Session->UseRaysNode = nullptr;
+    Session->SetTimeOffsetsNode = nullptr;
     Session->RaysTransformNode = nullptr;
     Session->RaytraceNode = nullptr;
     Session->CompactNode = nullptr;
@@ -727,13 +884,17 @@ int32 FRGLBackendImpl::GenerateRayPattern(FRGLSession* Session, float DeltaSecon
         * Desc.HorizontalFov * DeltaSeconds;
     AngleDistanceOfTick = FMath::Min(AngleDistanceOfTick, Desc.HorizontalFov);
 
-    // Calculate points per channel proportional to the (capped) angle coverage.
+    // Keep velocity-distortion steps identical to session validation while
+    // preserving the existing float calculation for firing mode.
     const float UnclampedAngle = Desc.RotationFrequency
         * Desc.HorizontalFov * DeltaSeconds;
     const float AngleRatio = (UnclampedAngle > 0.0f)
         ? (AngleDistanceOfTick / UnclampedAngle) : 1.0f;
-    const uint32 PointsToScanWithOneLaser = FMath::RoundHalfFromZero(
-        Desc.PointsPerSecond * DeltaSeconds / static_cast<float>(ChannelCount) * AngleRatio);
+    const uint32 PointsToScanWithOneLaser = Desc.RglScanTiming == RGLScanTiming::VelocityDistortion()
+        ? static_cast<uint32>(RGLVelocityDistortion::ScanSteps(
+            Desc.PointsPerSecond, ChannelCount, DeltaSeconds, Desc.RotationFrequency))
+        : FMath::RoundHalfFromZero(
+            Desc.PointsPerSecond * DeltaSeconds / static_cast<float>(ChannelCount) * AngleRatio);
 
     if (PointsToScanWithOneLaser <= 0)
     {
@@ -1008,10 +1169,18 @@ FRGLTickResult FRGLBackendImpl::Tick(
 
     // 1. Update scene geometry (only dynamic entities, frame-cached)
     UWorld* World = Session->World.Get();
+    FRGLSceneManager* SceneManager = nullptr;
+    const FLidarDescription& Desc = Session->Config.LidarDesc;
+    const bool bVelocityDistortion = Desc.RglScanTiming == RGLScanTiming::VelocityDistortion();
     if (World)
     {
         FRGLSceneManager& SceneMgr = FRGLSceneManager::GetInstance(World);
-        const FLidarDescription& Desc = Session->Config.LidarDesc;
+        SceneManager = &SceneMgr;
+        if (!SceneMgr.IsSceneTimeUsable())
+        {
+            Session->Capture.Stopped("scene_time_disabled");
+            return Result;
+        }
         // Keep the static scene registration close to the actual LiDAR range.
         // Large city maps contain thousands of static meshes; forcing a 300 m minimum
         // can exhaust OptiX memory before the first scan.
@@ -1033,8 +1202,43 @@ FRGLTickResult FRGLBackendImpl::Tick(
                 Session->SelfCutoutMinElevationDeg,
                 Session->SelfCutoutMaxElevationDeg);
         }
+        if (bVelocityDistortion)
+        {
+            AActor* Vehicle = Session->SelfCutoutVehicle.Get();
+            const int32 Id = SceneMgr.SetVelocityDistortionVehicle(Session, Vehicle);
+            if (IsValid(Vehicle) && Id == 0)
+            {
+                Session->Capture.Stopped("sensor_id_exhausted");
+                return Result;
+            }
+            // Zero explicitly restores default visibility after detachment.
+            if (Session->RaytraceSensorId != Id)
+            {
+                const rgl_status_t IdStatus = rgl_node_raytrace_configure_id(Session->RaytraceNode, Id);
+                if (IdStatus != RGL_SUCCESS)
+                {
+                    RGL_CHECK(IdStatus);
+                    Session->Capture.Stopped("raytrace_id_failed");
+                    return Result;
+                }
+                Session->RaytraceSensorId = Id;
+            }
+        }
         SceneMgr.Update(World, SimulationTime);
+        // Only velocity-distortion captures depend on the vehicle ignore ids; a failed
+        // refresh is retried in the next frame.
+        const bool bIgnoresApplied = SceneMgr.RefreshVehicleIgnores();
+        if (bVelocityDistortion && !bIgnoresApplied)
+        {
+            Session->Capture.Stopped("vehicle_ignore_refresh_failed");
+            return Result;
+        }
     }
+    if (bVelocityDistortion && !SceneManager) return Result;
+
+    // From here an RGL failure ends the capture and writes its reason to stdout, once per reason
+    // (also in Shipping builds).
+    const auto Stop = [Session, &Result](const char* Reason) { Session->Capture.Stopped(Reason); return Result; };
 
     // 2. Ray pattern: generate once, then cache (same DeltaSeconds = same pattern)
     if (!Session->bRayPatternCached)
@@ -1045,10 +1249,42 @@ FRGLTickResult FRGLBackendImpl::Tick(
             return Result;
         }
 
-        RGL_CHECK(rgl_node_rays_from_mat3x4f(
+        if (bVelocityDistortion)
+        {
+            // EffectiveDelta can differ from the configured interval (sensor_tick=0).
+            // Reject before publishing if the actual pattern is incompatible.
+            const char* Reason = RGLVelocityDistortion::ValidateOutput(
+                Desc.UdpEnabled, !Session->Config.Ros2Topic.IsEmpty(), TCHAR_TO_UTF8(*Desc.RglLidarModelName),
+                static_cast<std::size_t>(TotalRays) / Desc.Channels,
+                Desc.RotationFrequency,
+                std::fmin(static_cast<double>(Desc.HorizontalFov),
+                    Desc.RotationFrequency * static_cast<double>(Desc.HorizontalFov) * EffectiveDelta), Desc.Channels);
+            if (Reason)
+            {
+                // Re-checked every tick (the frame delta may change), reported once.
+                if (Session->Capture.Rejected(Reason))
+                {
+                    UE_LOG(LogTemp, Error, TEXT("RGL: capture rejected: %s [%s]"),
+                        UTF8_TO_TCHAR(RGLVelocityDistortion::Describe(Reason)), UTF8_TO_TCHAR(Reason));
+                }
+                return Result;
+            }
+        }
+
+        RGL_CHECK_RETURN(rgl_node_rays_from_mat3x4f(
             &Session->UseRaysNode,
             Session->RayTransforms.GetData(),
-            TotalRays));
+            TotalRays), Stop("ray_pattern_failed"));
+
+        if (bVelocityDistortion)
+        {
+            const auto Offsets = RGLVelocityDistortion::TimeOffsetsMs(
+                static_cast<std::size_t>(TotalRays) / Desc.Channels, Desc.Channels,
+                Desc.HorizontalFov, Desc.RotationFrequency,
+                Desc.UdpEnabled ? TCHAR_TO_UTF8(*Desc.RglLidarModelName) : nullptr);
+            RGL_CHECK_RETURN(rgl_node_rays_set_time_offsets(
+                &Session->SetTimeOffsetsNode, Offsets.data(), TotalRays), Stop("ray_time_offsets_failed"));
+        }
 
         RGL_CHECK(rgl_node_rays_set_ring_ids(
             &Session->SetRingIdsNode,
@@ -1075,6 +1311,15 @@ FRGLTickResult FRGLBackendImpl::Tick(
 
         Session->CachedTotalRays = TotalRays;
         Session->bRayPatternCached = true;
+        if (bVelocityDistortion)
+        {
+            // For the accepted line: step_us is the model interval with UDP.
+            const std::size_t Steps = Desc.Channels ? static_cast<std::size_t>(TotalRays) / Desc.Channels : 0;
+            const double StepUs = Desc.UdpEnabled
+                ? RGLVelocityDistortion::ModelStepSeconds(TCHAR_TO_UTF8(*Desc.RglLidarModelName)) * 1e6
+                : (Steps ? 1e6 / Desc.RotationFrequency / Steps * Desc.HorizontalFov / 360.0 : 0.0);
+            Session->Capture.SetRayPattern(Steps, StepUs);
+        }
     }
 
     if (Session->CachedTotalRays <= 0)
@@ -1096,17 +1341,80 @@ FRGLTickResult FRGLBackendImpl::Tick(
     rgl_mat3x4f InvTf = RGLCoord::InverseTransform(SensorWorldTransform);
     RGL_CHECK(rgl_node_points_transform(&Session->ToSensorNode, &InvTf));
 
+    const uint64 FrameTimeNs = SceneManager ? SceneManager->GetSceneTimeNs() : 0;
+    uint64 PrevFrameTimeNs = 0;
+    const bool bHasPreviousFrame = SceneManager && SceneManager->GetPrevSceneTimeNs(PrevFrameTimeNs);
+    const bool bShiftScanTime = bVelocityDistortion && SceneManager;
+    uint64 ScanTimeNs = FrameTimeNs;
+    if (bVelocityDistortion)
+    {
+        const double PeriodSeconds = 1.0 / Desc.RotationFrequency;
+        const double DeltaSeconds = FrameTimeNs >= Session->PreviousCaptureTimeNs
+            ? static_cast<double>(FrameTimeNs - Session->PreviousCaptureTimeNs) * 1e-9
+            : -static_cast<double>(Session->PreviousCaptureTimeNs - FrameTimeNs) * 1e-9;
+        const auto Timing = RGLVelocityDistortion::CaptureTiming(FrameTimeNs, Desc.RotationFrequency);
+        auto Velocity = RGLVelocityDistortion::EstimateVelocity(
+            SensorTf.value, Session->bHasPreviousCapture ? Session->PreviousSensorTf.value : nullptr,
+            DeltaSeconds, PeriodSeconds);
+        // Before one full rotation, keep all points at the current pose while
+        // the packet epoch remains clamped to zero.
+        if (Timing.ZeroVelocity) Velocity = RGLVelocityDistortion::Velocity{};
+        if (Velocity.State != RGLVelocityDistortion::Status::Valid && !Session->bVelocityFallbackLogged)
+        {
+            UE_LOG(LogTemp, Log, TEXT("RGL: velocity_distortion uses zero velocity for missing or invalid capture history (reason=%d, dt=%.6f s); logged once per sensor."),
+                static_cast<int>(Velocity.State), DeltaSeconds);
+            Session->bVelocityFallbackLogged = true;
+        }
+        const rgl_vec3f Linear = {{Velocity.Linear[0], Velocity.Linear[1], Velocity.Linear[2]}};
+        const rgl_vec3f Angular = {{Velocity.Angular[0], Velocity.Angular[1], Velocity.Angular[2]}};
+        RGL_CHECK_RETURN(rgl_node_raytrace_configure_velocity(Session->RaytraceNode, &Linear, &Angular),
+            Stop("velocity_failed"));
+        ScanTimeNs = Timing.ScanTimeNs;
+    }
+
     // 5. Run RGL graph (GPU raytrace + optional ROS2 publish)
     const double T0 = FPlatformTime::Seconds();
-    rgl_status_t RunStatus = rgl_graph_run(Session->RaytraceNode);
-    const double T1 = FPlatformTime::Seconds();
-    if (RunStatus != RGL_SUCCESS)
+    bool bRestoreFailed = false;
+    bool bScanTimeSet = false;
+    bool bGraphSucceeded = false;
     {
-        const char* _err = nullptr;
-        rgl_get_last_error_string(&_err);
-        RGLLog::Info("[RGL] rgl_graph_run failed:",
-                     _err ? _err : "unknown");
+        // Restore frame time on all exits, including graph errors. Do not update
+        // entity transforms or skeletal poses while the packet epoch is shifted.
+        FScopedRGLSceneTime ScanTime(bShiftScanTime,
+            SceneManager ? SceneManager->GetScene() : nullptr, PrevFrameTimeNs, ScanTimeNs, FrameTimeNs,
+            bHasPreviousFrame, &bRestoreFailed);
+        bScanTimeSet = ScanTime.IsValid();
+        if (bScanTimeSet)
+        {
+            const rgl_status_t RunStatus = rgl_graph_run(Session->RaytraceNode);
+            bGraphSucceeded = RunStatus == RGL_SUCCESS;
+            if (!bGraphSucceeded)
+            {
+                const char* Error = nullptr;
+                rgl_get_last_error_string(&Error);
+                RGLLog::Info("[RGL] rgl_graph_run failed:", Error ? Error : "unknown");
+            }
+        }
+    }
+    if (bRestoreFailed)
+    {
+        // Stop other sensors from using the damaged shared time state too.
+        if (SceneManager) SceneManager->InvalidateSceneTime();
+        Session->Capture.Stopped("scene_time_restore_failed");
+        UE_LOG(LogTemp, Error, TEXT("RGL: scene time restoration failed after four attempts; capture history is unchanged and this scene is disabled until recreated."));
         return Result;
+    }
+    if (!bScanTimeSet) return Stop("scan_time_failed");
+    if (!bGraphSucceeded) return Stop("graph_run_failed");
+    // The accepted line (velocity_distortion) follows the first successful run: RGL checks node
+    // inputs when the graph runs, and the vehicle is known once the sensor ticks attached.
+    const double T1 = FPlatformTime::Seconds();
+    Session->Capture.Captured(Session->RaytraceSensorId);
+    if (bVelocityDistortion)
+    {
+        Session->PreviousSensorTf = SensorTf;
+        Session->PreviousCaptureTimeNs = FrameTimeNs;
+        Session->bHasPreviousCapture = true;
     }
 
     // 6. Collect results only if caller needs them

@@ -1933,12 +1933,12 @@ void UActorBlueprintFunctionLibrary::MakeLidarDefinition(
     RglUdpHesaiPandarDriver.bRestrictToRecommended = false;
 
     // How a scan's points are timed: "firing" stamps each UDP packet as the
-    // real sensor fires it (the points are captured at one time); "instant"
-    // stamps every packet with the capture time.
+    // real sensor fires it (the points are captured at one time).
+    // "velocity_distortion" applies sensor motion over the preceding rotation.
     FActorVariation RglScanTiming;
     RglScanTiming.Id = TEXT("rgl_scan_timing");
     RglScanTiming.Type = EActorAttributeType::String;
-    RglScanTiming.RecommendedValues = { TEXT("firing"), TEXT("instant") };
+    RglScanTiming.RecommendedValues = { TEXT("firing"), TEXT("velocity_distortion") };
     RglScanTiming.bRestrictToRecommended = true;
 
     Definition.Variations.Append({
