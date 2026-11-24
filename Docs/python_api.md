@@ -619,10 +619,10 @@ Loads a new world with a basic 3D topology generated from the content of an Open
 - <a name="carla.Client.load_world"></a>**<font color="#7fb800">load_world</font>**(<font color="#00a6ed">**self**</font>, <font color="#00a6ed">**map_name**</font>, <font color="#00a6ed">**reset_settings**=True</font>, <font color="#00a6ed">**map_layers**=[carla.MapLayer.All](#carla.MapLayer.All)</font>)  
 Creates a new world with default settings using `map_name` map. All actors in the current world will be destroyed.  
     - **Parameters:**
-        - `map_name` (_str_) - Name of the map to be used in this world. Accepts both full paths and map names, e.g. '/Game/Carla/Maps/Town01_Opt' or 'Town01_Opt'. The name is matched against the map file name, ignoring case, so it has to be exact. Remember that these paths are dynamic.  
+        - `map_name` (_str_) - Name of the map to be used in this world, as `get_available_maps()` lists it, e.g. 'Town01_Opt' or 'Town13'. The name is matched against the map file name, ignoring case, so it has to be exact. A path relative to `/Game/Carla/Maps` also works ('Town13/Town13'); a full package path ('/Game/Carla/Maps/Town01_Opt') does not, and a content pack's own maps (`/<Pack>/Maps/...`) load by name only.  
         - `reset_settings` (_bool_) - Option to reset the episode setting to default values, set to false to keep the current settings. This is useful to keep sync mode when changing map and to keep deterministic scenarios.  
         - `map_layers` (_[carla.MapLayer](#carla.MapLayer)_) - Layers of the map that will be loaded. By default all layers are loaded. This parameter works like a flag mask.  
-    - **Warning:** <font color="#ED2F2F">_`map_layers` only has an effect on Town01_Opt to Town07_Opt. Town10HD_Opt has no layers (see [carla.MapLayer](#carla.MapLayer))._</font>  
+    - **Warning:** <font color="#ED2F2F">_`map_layers` only has an effect on Town01_Opt to Town07_Opt, and it only adds layers: the layers left out of the mask are loaded too. To start without some layers, load the map and then call [carla.World.unload_map_layer](#carla.World.unload_map_layer). Town10HD_Opt has no layers (see [carla.MapLayer](#carla.MapLayer))._</font>  
 - <a name="carla.Client.load_world_if_different"></a>**<font color="#7fb800">load_world_if_different</font>**(<font color="#00a6ed">**self**</font>, <font color="#00a6ed">**map_name**</font>, <font color="#00a6ed">**reset_settings**=True</font>, <font color="#00a6ed">**map_layers**=[carla.MapLayer.All](#carla.MapLayer.All)</font>)  
 Returns the current world, loading <b>map_name</b> first unless it is already the map in use.  
     - **Parameters:**
@@ -2959,6 +2959,8 @@ The function the sensor will be calling to every time the desired GBuffer textur
     - **Parameters:**
         - `gbuffer_id` (_[carla.GBufferTextureID](#carla.GBufferTextureID)_) - The ID of the target Unreal Engine GBuffer texture.  
         - `callback` (_function_) - The called function with one argument containing the received GBuffer texture.  
+    - **Warning:** <font color="#ED2F2F">_G-buffer capture needs an Unreal Engine that provides `GBufferView.h`. The Unreal Engine 5.8 fork that CARLA builds on does not, so G-buffers are not available on UE 5.8._</font>  
+    - **Raises:** RuntimeError when the server was built without G-buffer support ("GBuffer capture is not available in this build").  
 - <a name="carla.Sensor.send"></a>**<font color="#7fb800">send</font>**(<font color="#00a6ed">**self**</font>, <font color="#00a6ed">**message**</font>)  
 Instructs the sensor to send the bytes given by `message` to all other custom V2X sensors on the next tick. Only supported on the custom V2X sensor (`sensor.other.v2x_custom`).  
     - **Parameters:**
@@ -2969,6 +2971,7 @@ Commands the sensor to stop listening for data.
 Commands the sensor to stop listening for the specified GBuffer texture.  
     - **Parameters:**
         - `gbuffer_id` (_[carla.GBufferTextureID](#carla.GBufferTextureID)_) - The ID of the Unreal Engine GBuffer texture.  
+    - **Raises:** RuntimeError when the server was built without G-buffer support ("GBuffer capture is not available in this build").  
 
 ##### Dunder methods
 - <a name="carla.Sensor.__str__"></a>**<font color="#7fb800">\__str__</font>**(<font color="#00a6ed">**self**</font>)  
