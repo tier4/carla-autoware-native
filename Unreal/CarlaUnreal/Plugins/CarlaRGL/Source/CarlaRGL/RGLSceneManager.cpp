@@ -4626,10 +4626,7 @@ namespace RGLSceneAudit
         {
             return ELevelState::InTransition;
         }
-        if (World && (World->GetCurrentLevelPendingVisibility() == Level || World->GetCurrentLevelPendingInvisibility() == Level))
-        {
-            return ELevelState::InTransition;
-        }
+        // UE 5.8's deprecated pending-visibility getters return null, so their always-false check was dropped.
         return Level->bIsVisible ? ELevelState::Visible : ELevelState::Hidden;
     }
 
