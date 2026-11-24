@@ -19,6 +19,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <future>
+#include <string>
+#include <thread>
+#include <vector>
 
 using namespace std::chrono_literals;
 
@@ -446,4 +450,147 @@ TEST(streaming, stream_clients_listening_keeps_force_active) {
   EXPECT_FALSE(stream.AreStreamClientsListening());
   ASSERT_TRUE(srv.FindToken(sensor_id).has_value());
   EXPECT_TRUE(stream.AreStreamClientsListening());
+}
+
+// In synchronous mode the server waits for the previous message of a session
+// to be sent before writing the next one. A client that stops reading (a
+// listen() callback that never returns) used to keep that wait going forever,
+// on the game or render thread, and the whole server stopped answering
+// (#10233). The wait is now bounded by the session timeout: the stuck client
+// is dropped and the other clients of the same stream keep receiving.
+TEST(streaming, sync_mode_client_not_reading_does_not_block_writer) {
+  using namespace carla::streaming;
+  constexpr auto timeout = 1s;
+  // Larger than the socket buffers, so a client that does not read blocks the
+  // second write.
+  const std::string big(32u * 1024u * 1024u, 'x');
+
+  Server srv(TESTING_PORT);
+  srv.SetTimeout(timeout);
+  srv.SetSynchronousMode(true);
+  srv.AsyncRun(4u);
+  auto stream = srv.MakeStream();
+
+  std::promise<void> release;
+  std::shared_future<void> released = release.get_future().share();
+  std::atomic_size_t stuck_count{0u};
+  Client stuck;
+  stuck.AsyncRun(1u);
+  stuck.Subscribe(stream.token(), [&](auto) {
+    ++stuck_count;
+    released.wait();  // never returns until the end of the test
+  });
+
+  std::atomic_size_t healthy_count{0u};
+  Client healthy;
+  healthy.AsyncRun(1u);
+  healthy.Subscribe(stream.token(), [&](auto) { ++healthy_count; });
+
+  std::this_thread::sleep_for(200ms);  // let both sessions connect
+
+  carla::Buffer Buf(boost::asio::buffer(big.c_str(), big.size()));
+  carla::SharedBufferView BufView = carla::BufferView::CreateFrom(std::move(Buf));
+  constexpr size_t number_of_messages = 6u;
+  const auto start = std::chrono::steady_clock::now();
+  for (auto i = 0u; i < number_of_messages; ++i) {
+    carla::SharedBufferView View = BufView;
+    stream.Write(View);
+  }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+
+  // At most one bounded wait for the stuck session, then it is dropped.
+  EXPECT_LT(elapsed, 3 * timeout);
+  EXPECT_GE(stuck_count, 1u);
+  for (auto i = 0; i < 100 && healthy_count < number_of_messages - 1u; ++i) {
+    std::this_thread::sleep_for(20ms);
+  }
+  // Only the message written while the stuck session was being dropped may
+  // be lost.
+  EXPECT_GE(healthy_count, number_of_messages - 1u);
+
+  release.set_value();
+}
+
+// A client runs the callback of each stream on that stream's strand. The
+// strands of boost::asio::io_context::strand are not independent: each takes
+// one of 193 shared implementations, so two streams of one client could end
+// up serialized. A listen() callback that blocked then stopped an unrelated
+// stream too, the world snapshots for instance, and world.tick() timed out.
+// With 1000 other streams, at least one shares the blocked one's
+// implementation in 99.4 % of the runs.
+TEST(streaming, blocked_callback_does_not_stall_other_streams) {
+  using namespace carla::streaming;
+  constexpr size_t batches = 10u;
+  // Two sockets per stream in this process: stay well below the usual limit
+  // of 1024 open files.
+  constexpr size_t streams_per_batch = 100u;
+  const std::string message = "Hello client, how are you?";
+
+  auto write = [&](Stream &stream) {
+    carla::Buffer Buf(boost::asio::buffer(message.c_str(), message.size()));
+    carla::SharedBufferView View = carla::BufferView::CreateFrom(std::move(Buf));
+    stream.Write(View);
+  };
+
+  Server srv(TESTING_PORT);
+  srv.AsyncRun(4u);
+
+  std::promise<void> release;
+  std::shared_future<void> released = release.get_future().share();
+  std::atomic_bool blocked{false};
+  std::vector<std::atomic_size_t> received(batches * streams_per_batch);
+  for (auto &count : received) {
+    count = 0u;
+  }
+
+  Client c;
+  c.AsyncRun(4u);
+  // Declared after the client, so the callback is released before the
+  // client joins its threads, also when an assertion leaves the test early.
+  struct Releaser {
+    std::promise<void> &promise;
+    ~Releaser() { promise.set_value(); }
+  } releaser{release};
+
+  auto blocked_stream = srv.MakeStream();
+  c.Subscribe(blocked_stream.token(), [&blocked, released](auto) {
+    blocked = true;
+    released.wait();  // never returns until the end of the test
+  });
+  for (auto i = 0; i < 500 && !blocked; ++i) {
+    write(blocked_stream);  // lost until the session is connected
+    std::this_thread::sleep_for(10ms);
+  }
+  ASSERT_TRUE(blocked);
+
+  for (auto batch = 0u; batch < batches; ++batch) {
+    const size_t first = batch * streams_per_batch;
+    std::vector<Stream> streams;
+    streams.reserve(streams_per_batch);
+    for (auto i = 0u; i < streams_per_batch; ++i) {
+      streams.emplace_back(srv.MakeStream());
+      c.Subscribe(streams.back().token(), [&received, index = first + i](auto) {
+        ++received[index];
+      });
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    size_t silent = streams_per_batch;
+    while (silent > 0u && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(10ms);
+      silent = 0u;
+      for (auto i = 0u; i < streams_per_batch; ++i) {
+        if (received[first + i] == 0u) {
+          ++silent;
+          write(streams[i]);  // lost until the session is connected
+        }
+      }
+    }
+    ASSERT_EQ(silent, 0u) << silent << " streams of batch " << batch
+        << " delivered nothing while the callback of another stream was blocked";
+
+    for (auto &stream : streams) {
+      c.UnSubscribe(stream.token());
+    }
+  }
 }

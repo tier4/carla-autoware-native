@@ -11,6 +11,7 @@
 #include "Carla/Actor/CarlaActorFactory.h"
 #include "Carla/Game/CarlaEpisode.h"
 #include "Carla/Game/Tagger.h"
+#include "Carla/Vehicle/CarlaWheeledVehicle.h"
 #include "Carla/Vehicle/VehicleControl.h"
 
 #include <util/ue-header-guard-begin.h>
@@ -122,6 +123,16 @@ TPair<EActorSpawnResultStatus, FCarlaActor*> UActorDispatcher::SpawnActor(
   }
   #endif
 
+  const FActorAttribute *SteeringMapAttr =
+      Description.Variations.Find(TEXT("ros2_autoware_steering_map"));
+  if (SteeringMapAttr != nullptr && SteeringMapAttr->Value != TEXT("upstream") &&
+      SteeringMapAttr->Value != TEXT("per_vehicle"))
+  {
+    UE_LOG(LogCarla, Error, TEXT("Invalid ros2_autoware_steering_map '%s' for '%s'"),
+        *SteeringMapAttr->Value, *Description.Id);
+    return MakeTuple(EActorSpawnResultStatus::InvalidDescription, nullptr);
+  }
+
   Description.Class = *Class;
   FActorSpawnResult Result = SpawnFunctions[Description.UId - 1](Transform, Description);
 
@@ -134,6 +145,11 @@ TPair<EActorSpawnResultStatus, FCarlaActor*> UActorDispatcher::SpawnActor(
 
   if (Result.IsValid())
   {
+    if (ACarlaWheeledVehicle *Vehicle = Cast<ACarlaWheeledVehicle>(Result.Actor))
+    {
+      Vehicle->SetAutowareSteeringMap(
+          SteeringMapAttr != nullptr && SteeringMapAttr->Value == TEXT("per_vehicle"));
+    }
     // Tag before registering: FActorRegistry::MakeCarlaActor snapshots the
     // semantic tags into the actor info that spawn_actor/get_actors return,
     // and the OnActorSpawned tagger delegate already ran before the factory
@@ -328,7 +344,7 @@ FCarlaActor* UActorDispatcher::RegisterActor(
           // steering curve would silently rescale the command (tier4 port).
           ActorROS2Handler::FlattenSteeringCurve(&Actor);
           const carla::ros2::QosProfile EffectiveQos =
-              AutowareControlQos.value_or(carla::ros2::QosProfile::ReliableTransientLocal());
+              AutowareControlQos.value_or(carla::ros2::QosProfile::ReliableVolatile());
           UE_LOG(LogCarla, Log, TEXT("ROS2: Autoware command QoS (%s): %s"),
               AutowareControlQos.has_value() ? TEXT("ros2_autoware_control_qos") : TEXT("default"),
               UTF8_TO_TCHAR(EffectiveQos.ToString().c_str()));

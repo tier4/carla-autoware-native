@@ -55,11 +55,9 @@ AutowareControlSubscriber::AutowareControlSubscriber(
     void *vehicle, std::string frame_id, const QosProfile &qos)
   : BaseSubscriber(vehicle, "rt/control/command", std::move(frame_id)),
     _impl(std::make_shared<Impl>()) {
-  // The default (see the header) is tier4's AutowareController QoS:
-  // RELIABLE / TRANSIENT_LOCAL / KEEP_LAST 1 so the latest latched command
-  // survives a late join. A VOLATILE profile is needed when Autoware
-  // publishes the commands VOLATILE: a TRANSIENT_LOCAL reader does not
-  // match a VOLATILE writer.
+  // The default is RELIABLE / VOLATILE / KEEP_LAST 1, matching both
+  // VOLATILE and TRANSIENT_LOCAL command writers. A caller may override
+  // all six readers through the vehicle command QoS attribute.
   bool ok = true;
   ok &= _impl->control.Init("rt/control/command/control_cmd", qos);
   ok &= _impl->gear.Init("rt/control/command/gear_cmd", qos);
@@ -96,7 +94,7 @@ ROS2CallbackData AutowareControlSubscriber::GetMessage() {
   // Set lateral negative, because CARLA treats positive as right and Autoware
   // expects positive to represent left (all when moving forward).
   // The tire angle [rad] is passed on as is: the vehicle turns it into its
-  // normalized steer input with its own steering model, on the Unreal side.
+  // normalized steer input with the selected steering map, on the Unreal side.
   control_out.steer = -control_in.lateral.steering_tire_angle;
   control_out.steer_speed = 0.0f;
   if (control_in.lateral.is_defined_steering_tire_rotation_rate) {

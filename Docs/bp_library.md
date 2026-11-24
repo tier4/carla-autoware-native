@@ -38,6 +38,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.ambulance.ford` | `vehicle.ambulance.ford` | yes |
 | `ros_topic_name` | String | `vehicle.ambulance.ford` | `vehicle.ambulance.ford` | yes |
 | `special_type` | String | `emergency` |  | no |
@@ -58,6 +59,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.bh.crossbike` | `vehicle.bh.crossbike` | yes |
 | `ros_topic_name` | String | `vehicle.bh.crossbike` | `vehicle.bh.crossbike` | yes |
 | `special_type` | String | `""` |  | no |
@@ -79,6 +81,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.carlacola.actors` | `vehicle.carlacola.actors` | yes |
 | `ros_topic_name` | String | `vehicle.carlacola.actors` | `vehicle.carlacola.actors` | yes |
 | `special_type` | String | `""` |  | no |
@@ -99,6 +102,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.diamondback.century` | `vehicle.diamondback.century` | yes |
 | `ros_topic_name` | String | `vehicle.diamondback.century` | `vehicle.diamondback.century` | yes |
 | `special_type` | String | `""` |  | no |
@@ -120,6 +124,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.dodge.charger` | `vehicle.dodge.charger` | yes |
 | `ros_topic_name` | String | `vehicle.dodge.charger` | `vehicle.dodge.charger` | yes |
 | `special_type` | String | `""` |  | no |
@@ -141,6 +146,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.dodgecop.charger` | `vehicle.dodgecop.charger` | yes |
 | `ros_topic_name` | String | `vehicle.dodgecop.charger` | `vehicle.dodgecop.charger` | yes |
 | `special_type` | String | `emergency` |  | no |
@@ -162,6 +168,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.firetruck.actors` | `vehicle.firetruck.actors` | yes |
 | `ros_topic_name` | String | `vehicle.firetruck.actors` | `vehicle.firetruck.actors` | yes |
 | `special_type` | String | `emergency` |  | no |
@@ -183,6 +190,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.fuso.mitsubishi` | `vehicle.fuso.mitsubishi` | yes |
 | `ros_topic_name` | String | `vehicle.fuso.mitsubishi` | `vehicle.fuso.mitsubishi` | yes |
 | `special_type` | String | `""` |  | no |
@@ -203,6 +211,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.gazelle.omafiets` | `vehicle.gazelle.omafiets` | yes |
 | `ros_topic_name` | String | `vehicle.gazelle.omafiets` | `vehicle.gazelle.omafiets` | yes |
 | `special_type` | String | `""` |  | no |
@@ -223,6 +232,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.harley-davidson.low_rider` | `vehicle.harley-davidson.low_rider` | yes |
 | `ros_topic_name` | String | `vehicle.harley-davidson.low_rider` | `vehicle.harley-davidson.low_rider` | yes |
 | `special_type` | String | `""` |  | no |
@@ -243,6 +253,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.kawasaki.ninja` | `vehicle.kawasaki.ninja` | yes |
 | `ros_topic_name` | String | `vehicle.kawasaki.ninja` | `vehicle.kawasaki.ninja` | yes |
 | `special_type` | String | `""` |  | no |
@@ -264,6 +275,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.kia.niro` | `vehicle.kia.niro` | yes |
 | `ros_topic_name` | String | `vehicle.kia.niro` | `vehicle.kia.niro` | yes |
 | `special_type` | String | `""` |  | no |
@@ -285,6 +297,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.lincoln.mkz` | `vehicle.lincoln.mkz` | yes |
 | `ros_topic_name` | String | `vehicle.lincoln.mkz` | `vehicle.lincoln.mkz` | yes |
 | `special_type` | String | `""` |  | no |
@@ -306,6 +319,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.mini.cooper` | `vehicle.mini.cooper` | yes |
 | `ros_topic_name` | String | `vehicle.mini.cooper` | `vehicle.mini.cooper` | yes |
 | `special_type` | String | `""` |  | no |
@@ -327,6 +341,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.nissan.patrol` | `vehicle.nissan.patrol` | yes |
 | `ros_topic_name` | String | `vehicle.nissan.patrol` | `vehicle.nissan.patrol` | yes |
 | `special_type` | String | `""` |  | no |
@@ -348,6 +363,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.sprinter.mercedes` | `vehicle.sprinter.mercedes` | yes |
 | `ros_topic_name` | String | `vehicle.sprinter.mercedes` | `vehicle.sprinter.mercedes` | yes |
 | `special_type` | String | `""` |  | no |
@@ -369,6 +385,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.taxi.ford` | `vehicle.taxi.ford` | yes |
 | `ros_topic_name` | String | `vehicle.taxi.ford` | `vehicle.taxi.ford` | yes |
 | `special_type` | String | `taxi` |  | no |
@@ -390,6 +407,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.tesla.model3` | `vehicle.tesla.model3` | yes |
 | `ros_topic_name` | String | `vehicle.tesla.model3` | `vehicle.tesla.model3` | yes |
 | `special_type` | String | `electric` |  | no |
@@ -411,6 +429,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.ue4.audi.tt` | `vehicle.ue4.audi.tt` | yes |
 | `ros_topic_name` | String | `vehicle.ue4.audi.tt` | `vehicle.ue4.audi.tt` | yes |
 | `special_type` | String | `""` |  | no |
@@ -432,6 +451,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.ue4.chevrolet.impala` | `vehicle.ue4.chevrolet.impala` | yes |
 | `ros_topic_name` | String | `vehicle.ue4.chevrolet.impala` | `vehicle.ue4.chevrolet.impala` | yes |
 | `special_type` | String | `""` |  | no |
@@ -453,6 +473,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.ue4.ford.crown` | `vehicle.ue4.ford.crown` | yes |
 | `ros_topic_name` | String | `vehicle.ue4.ford.crown` | `vehicle.ue4.ford.crown` | yes |
 | `special_type` | String | `""` |  | no |
@@ -474,6 +495,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.ue4.ford.mustang` | `vehicle.ue4.ford.mustang` | yes |
 | `ros_topic_name` | String | `vehicle.ue4.ford.mustang` | `vehicle.ue4.ford.mustang` | yes |
 | `special_type` | String | `""` |  | no |
@@ -495,6 +517,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.ue4.mercedes.ccc` | `vehicle.ue4.mercedes.ccc` | yes |
 | `ros_topic_name` | String | `vehicle.ue4.mercedes.ccc` | `vehicle.ue4.mercedes.ccc` | yes |
 | `special_type` | String | `""` |  | no |
@@ -515,6 +538,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.vespa.zx125` | `vehicle.vespa.zx125` | yes |
 | `ros_topic_name` | String | `vehicle.vespa.zx125` | `vehicle.vespa.zx125` | yes |
 | `special_type` | String | `""` |  | no |
@@ -535,6 +559,7 @@ Spawnable vehicles. See the [vehicle catalogue](catalogue_vehicles.md) for image
 | `ros2_ackermann_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control` | Bool | `false` | `false` | yes |
 | `ros2_autoware_control_qos` | String | `""` | `` | yes |
+| `ros2_autoware_steering_map` | String | `upstream` | `upstream`, `per_vehicle` | yes |
 | `ros_name` | String | `vehicle.yamaha.yzf` | `vehicle.yamaha.yzf` | yes |
 | `ros_topic_name` | String | `vehicle.yamaha.yzf` | `vehicle.yamaha.yzf` | yes |
 | `special_type` | String | `""` |  | no |
@@ -1007,22 +1032,6 @@ Spawnable pedestrians. See the [pedestrian catalogue](catalogue_pedestrians.md);
 | `role_name` | String | `pedestrian` | `pedestrian` | yes |
 | `ros_name` | String | `walker.pedestrian.0043` | `walker.pedestrian.0043` | yes |
 | `ros_topic_name` | String | `walker.pedestrian.0043` | `walker.pedestrian.0043` | yes |
-| `special_type` | String | `""` |  | no |
-| `speed` | Float | `0` | `0.0`, `1.7`, `4.0` | yes |
-| `use_wheelchair` | Bool | `false` | `false` | yes |
-
-### walker.pedestrian.0044
-
-| Attribute | Type | Default | Values | Modifiable |
-| --- | --- | --- | --- | --- |
-| `age` | String | `adult` |  | no |
-| `can_use_wheelchair` | Bool | `false` |  | no |
-| `gender` | String | `female` |  | no |
-| `generation` | Int | `2` |  | no |
-| `is_invincible` | Bool | `true` | `true` | yes |
-| `role_name` | String | `pedestrian` | `pedestrian` | yes |
-| `ros_name` | String | `walker.pedestrian.0044` | `walker.pedestrian.0044` | yes |
-| `ros_topic_name` | String | `walker.pedestrian.0044` | `walker.pedestrian.0044` | yes |
 | `special_type` | String | `""` |  | no |
 | `speed` | Float | `0` | `0.0`, `1.7`, `4.0` | yes |
 | `use_wheelchair` | Bool | `false` | `false` | yes |

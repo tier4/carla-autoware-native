@@ -143,9 +143,9 @@ CARLA subscribes to these:
 | `/control/command/emergency_cmd` | `tier4_vehicle_msgs/VehicleEmergencyStamped` | Received, not applied. |
 | `/vehicle/engage` | `autoware_vehicle_msgs/Engage` | Received, not applied. |
 
-CARLA publishes the status topics as RELIABLE and VOLATILE with depth 1. By default it subscribes to the topics above as RELIABLE and TRANSIENT_LOCAL with depth 1, so a publisher to them must offer TRANSIENT_LOCAL durability, for example `ros2 topic pub --qos-durability transient_local ...`.
+CARLA publishes the status topics as RELIABLE and VOLATILE with depth 1. By default it subscribes to the topics above as RELIABLE and VOLATILE with depth 1, which matches both Autoware's `vehicle_cmd_gate` (TRANSIENT_LOCAL) and its replacement `control_command_gate` (VOLATILE).
 
-An Autoware version that publishes its commands VOLATILE does not match those readers: set the `ros2_autoware_control_qos` attribute before spawning to give all six command subscribers another QoS. The value is a comma-separated list of the eight ROS 2 QoS policies:
+Set the `ros2_autoware_control_qos` vehicle attribute before spawning to override the QoS of all six command subscribers. The value is a comma-separated list of the eight ROS 2 QoS policies:
 
 ```py
 ego_bp.set_attribute('ros2_autoware_control_qos',
@@ -170,7 +170,19 @@ The `-ros2-camera-qos=`, `-ros2-lidar-qos=` and `-ros2-imu-qos=` server options 
 
 `sensor.other.imu_highprecision` computes the samples of a frame together (one per physics substep) and by default publishes them back to back. A subscriber that keeps only the newest message (history depth 1, as a driver of a real IMU allows, since it publishes evenly) then misses most of them. The `-ros2-imu-pacing=` server option spreads those publishes over wall time: `substep` spaces them by the substep, as a real IMU driver would, and a whole number gives a fixed spacing in microseconds; `off`, the default, keeps them back to back. The header stamps do not change. A frame's samples are published within the wall time the previous frame took, so a later sample of a frame leaves up to that long after the frame's physics step. Two publishes are never closer than 1 ms (or the fixed spacing, if shorter), also when a slow frame makes the next one start early; this lowers, but cannot rule out, losses at a depth-1 subscriber. If publishing falls behind by more than 64 samples, the oldest are dropped and a warning is logged.
 
-The steering tire angle in `control_cmd` and `steering_status` is the front wheels' angle in a bicycle model. CARLA maps it to and from each vehicle's steer input with that vehicle's own steering model in the physics engine (its wheels' maximum steer angles, its steering type and its wheel layout), so a vehicle needs no steering calibration of its own. The mapping assumes a flat steering curve, which `ros2_autoware_control` sets when the vehicle spawns, and leaves out tire slip.
+The steering tire angle in `control_cmd` and `steering_status` is in radians, positive to the left. The `ros2_autoware_steering_map` vehicle attribute selects the conversion in both directions; set it before spawning:
+
+```py
+ego_bp.set_attribute('ros2_autoware_steering_map', 'per_vehicle')
+```
+
+| Value | Command and status conversion |
+| --- | --- |
+| `upstream` (default) | Uses the upstream fixed steering compensation table. Commands map tire angle to normalized steer; status maps normalized steer back to tire angle. The table saturates at normalized steer 0.7 and tire angle 0.628645 rad. |
+| `per_vehicle` | Uses a table built from the vehicle's Chaos steering model: the wheels' maximum steer angles, steering type and wheel layout. Commands invert this table; status uses the same table to report the front wheels' bicycle-model angle. The full normalized steer range is available, with a linear fallback if the wheel setup is unusable. |
+
+Both modes assume a flat steering curve, which `ros2_autoware_control` sets when the vehicle spawns. The fixed table is an empirical calibration for one reference vehicle; the per-vehicle table models steering geometry and leaves out tire slip. The modes can therefore produce different angles on the same vehicle. Other values, including an empty string, fail the spawn. The attribute also selects the conversion for an attached `sensor.other.vehicle_status`, even when the vehicle is driven through another control interface. It does not change the direct vehicle or Ackermann command interfaces.
+
 
 `autoware_demo.py` publishes the sensor kit on these topics:
 

@@ -2223,13 +2223,22 @@ void UActorBlueprintFunctionLibrary::MakeVehicleDefinition(
 
   // ROS2: QoS of the Autoware command subscribers, in the key=value form of
   // carla::ros2::QosProfile::FromString. Empty keeps the default (RELIABLE /
-  // TRANSIENT_LOCAL / KEEP_LAST 1); a value that does not parse fails the spawn.
+  // VOLATILE / KEEP_LAST 1); a value that does not parse fails the spawn.
   FActorVariation ROS2AutowareControlQos;
   ROS2AutowareControlQos.Id = TEXT("ros2_autoware_control_qos");
   ROS2AutowareControlQos.Type = EActorAttributeType::String;
   ROS2AutowareControlQos.bRestrictToRecommended = false;
   ROS2AutowareControlQos.RecommendedValues.Emplace(TEXT(""));
   Definition.Variations.Emplace(ROS2AutowareControlQos);
+
+  // Select the same steering map for Autoware commands and status reports.
+  FActorVariation ROS2AutowareSteeringMap;
+  ROS2AutowareSteeringMap.Id = TEXT("ros2_autoware_steering_map");
+  ROS2AutowareSteeringMap.Type = EActorAttributeType::String;
+  ROS2AutowareSteeringMap.bRestrictToRecommended = true;
+  ROS2AutowareSteeringMap.RecommendedValues.Emplace(TEXT("upstream"));
+  ROS2AutowareSteeringMap.RecommendedValues.Emplace(TEXT("per_vehicle"));
+  Definition.Variations.Emplace(ROS2AutowareSteeringMap);
 
   Definition.Attributes.Emplace(FActorAttribute{
       TEXT("object_type"),
