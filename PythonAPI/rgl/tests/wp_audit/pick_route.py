@@ -27,7 +27,10 @@ import xml.etree.ElementTree as ET
 DEFAULT_OSM = os.environ.get("ODAIBA_LANELET2_OSM", "")
 
 
+# Keep the calculation and evaluation order unchanged.
+# pylint: disable-next=too-many-locals
 def odaiba_centerlines(osm_path, lanelet_ids):
+    """Build the route from the requested OSM lanelet centre lines."""
     tree = ET.parse(osm_path)
     root = tree.getroot()
     nodes = {}
@@ -54,6 +57,9 @@ def odaiba_centerlines(osm_path, lanelet_ids):
 
 
 def town_mode(args):
+    """Collect a route from map waypoints on the running server."""
+    # Load optional runtime dependencies only when this path is used.
+    # pylint: disable-next=import-outside-toplevel
     import carla
     client = carla.Client("127.0.0.1", args.port)
     client.set_timeout(120.0)
@@ -85,15 +91,15 @@ def town_mode(args):
             best = run
         if len(best) * args.step >= args.length:
             break
-    print("pick_route mode=%s points=%d approx_length_m=%.0f" % (args.mode, len(best),
-                                                                  len(best) * args.step))
+    print(f"pick_route mode={args.mode} points={len(best)} approx_length_m={len(best) * args.step:.0f}")
     for p in best:
-        print("route_point x=%.2f y=%.2f z=%.2f" % (p.x, p.y, p.z))
-    print("ROUTE = (" + ", ".join("(%.2f, %.2f, %.2f)" % (p.x, p.y, p.z) for p in best) + ")")
+        print(f"route_point x={p.x:.2f} y={p.y:.2f} z={p.z:.2f}")
+    print("ROUTE = (" + ", ".join(f"({p.x:.2f}, {p.y:.2f}, {p.z:.2f})" for p in best) + ")")
     return 0 if best else 1
 
 
 def main(argv):
+    """Main."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", required=True, choices=["town15", "town10", "odaiba"])
     ap.add_argument("--port", type=int, default=4000)
@@ -110,9 +116,9 @@ def main(argv):
         cl = odaiba_centerlines(args.osm, ids)
         for i in ids:
             pts = cl.get(i, [])
-            print("lanelet id=%s points=%d" % (i, len(pts)))
+            print(f"lanelet id={i} points={len(pts)}")
             for x, y, z in pts:
-                print("local_point lanelet=%s local_x=%.3f local_y=%.3f ele=%.3f" % (i, x, y, z))
+                print(f"local_point lanelet={i} local_x={x:.3f} local_y={y:.3f} ele={z:.3f}")
         return 0 if all(cl.get(i) for i in ids) else 1
     return town_mode(args)
 

@@ -55,12 +55,12 @@ def read_dump(path):
     with open(path, "rb") as f:
         data = f.read()
     if len(data) < DUMP_HEADER.size:
-        raise ValueError("short dump %s" % path)
+        raise ValueError(f"short dump {path}")
     magic, count, sim_t, *pose = DUMP_HEADER.unpack_from(data, 0)
     if magic != DUMP_MAGIC:
-        raise ValueError("bad magic in %s" % path)
+        raise ValueError(f"bad magic in {path}")
     if len(data) < DUMP_HEADER.size + 12 * count:
-        raise ValueError("truncated dump %s" % path)
+        raise ValueError(f"truncated dump {path}")
     pts = np.frombuffer(data, dtype="<f4", count=count * 3, offset=DUMP_HEADER.size)
     return sim_t, np.array(pose, dtype=np.float64), pts.reshape(-1, 3).astype(np.float64)
 
@@ -82,7 +82,7 @@ def load_run(dump_dir):
         dumps.sort(key=lambda d: d.sim_t)
         seqs.append(dumps)
     seqs.sort(key=lambda s: tuple(np.round(s[0].pose[:3], 3)))
-    return {i: s for i, s in enumerate(seqs)}
+    return dict(enumerate(seqs))
 
 
 def match_sensors(base, cand, tol_m=TOL_M):
@@ -109,6 +109,8 @@ def _cell_hash(cells):
     return (cells[:, 0] * _HASH_MUL[0]) ^ (cells[:, 1] * _HASH_MUL[1]) ^ (cells[:, 2] * _HASH_MUL[2])
 
 
+# Keep the calculation and evaluation order unchanged.
+# pylint: disable-next=too-many-locals
 def _unmatched(src, ref, tol_m):
     """Boolean mask over src: True where no point of ref lies within tol_m."""
     if len(src) == 0:
@@ -207,12 +209,25 @@ _DIFF_KEYS = ("frames_base", "frames_cand", "matched", "identical", "near_identi
               "added_by_range", "removed_by_range")
 
 
+# Keep the calculation and evaluation order unchanged.
+# pylint: disable-next=too-many-locals
 def compare_runs(base_dir, cand_dir):
+    """Compare sensor frames and aggregate point-set differences."""
     base, cand = load_run(base_dir), load_run(cand_dir)
-    res = dict(frames_base=sum(len(s) for s in base.values()), frames_cand=sum(len(s) for s in cand.values()),
-               matched=0, identical=0, near_identical=0, differing=0, time_mismatch=0,
-               points_total_base=sum(len(d.pts) for s in base.values() for d in s),
-               max_abs_count_diff=0, max_rel_count_diff=0.0, points_added=0, points_removed=0)
+    res = {
+        "frames_base": sum(len(s) for s in base.values()),
+        "frames_cand": sum(len(s) for s in cand.values()),
+        "matched": 0,
+        "identical": 0,
+        "near_identical": 0,
+        "differing": 0,
+        "time_mismatch": 0,
+        "points_total_base": sum(len(d.pts) for s in base.values() for d in s),
+        "max_abs_count_diff": 0,
+        "max_rel_count_diff": 0.0,
+        "points_added": 0,
+        "points_removed": 0,
+    }
     add_r, rem_r = [0, 0, 0, 0], [0, 0, 0, 0]
     for bi, ci in match_sensors(base, cand):
         bs, cs = base[bi], cand[ci]
@@ -242,10 +257,11 @@ def compare_runs(base_dir, cand_dir):
 
 
 def format_diff_kv(res):
+    """Format the comparison fields as ordered key=value pairs."""
     parts = []
     for k in _DIFF_KEYS:
         v = res[k]
-        parts.append("%s=%s" % (k, ("%.4f" % v) if k == "max_rel_count_diff" else v))
+        parts.append(f"{k}={format(v, '.4f') if k == 'max_rel_count_diff' else v}")
     return " ".join(parts)
 
 
@@ -255,6 +271,8 @@ def hits_diff_kv(base_dir, cand_dir):
 
 
 # ---------------------------------------------------------------- gate
+# Keep standalone parsers independent without adding a shared dependency.
+# pylint: disable=duplicate-code
 def _parse_kv(text):
     out = {}
     for tok in text.split():
@@ -263,6 +281,7 @@ def _parse_kv(text):
             out[k] = v
     return out
 
+# pylint: enable=duplicate-code
 
 def gate_verdict(res, min_frames, cand_run_kv, base_sync, cand_sync):
     """-> list of failure reasons (empty = pass)."""
@@ -273,7 +292,7 @@ def gate_verdict(res, min_frames, cand_run_kv, base_sync, cand_sync):
         reasons.append("ego_bp_fallback")
     if res["matched"] == 0:
         reasons.append("no_match")
-    if not (res["matched"] == res["frames_base"] == res["frames_cand"]):
+    if not res["matched"] == res["frames_base"] == res["frames_cand"]:
         reasons.append("frames_mismatch")
     if res["frames_base"] < min_frames:
         reasons.append("too_few_frames")
@@ -291,6 +310,7 @@ def gate_verdict(res, min_frames, cand_run_kv, base_sync, cand_sync):
 
 # ---------------------------------------------------------------- cli
 def cmd_fingerprint(a):
+    """Write millimetre-rounded point hashes for every sensor frame."""
     run = load_run(a.dump_dir)
     rows = []
     for si in sorted(run):
@@ -299,32 +319,36 @@ def cmd_fingerprint(a):
             mm = np.round(d.pts * 1000.0).astype(np.int32)
             if len(mm):
                 mm = mm[np.lexsort((mm[:, 2], mm[:, 1], mm[:, 0]))]
+            # Preserve percent-format numeric coercion and invalid-input errors.
+            # pylint: disable-next=consider-using-f-string
             rows.append("%d,%d,%.3f,%d,%s" % (si, seq, d.sim_t - dumps[0].sim_t, len(d.pts),
                                               hashlib.sha1(np.ascontiguousarray(mm).tobytes()).hexdigest()))
     with open(a.out, "w", encoding="utf-8") as f:
         f.write("".join(r + "\n" for r in rows))
-    print("fingerprint sensors=%d dumps=%d out=%s" % (len(run), len(rows), a.out))
+    print(f"fingerprint sensors={len(run)} dumps={len(rows)} out={a.out}")
     return 0
 
 
 def cmd_diff(a):
+    """Print the point-set comparison for two runs."""
     print("hits_diff " + format_diff_kv(compare_runs(a.base, a.cand)))
     return 0
 
 
 def cmd_gate(a):
+    """Compare runs and return a nonzero status for gate failures."""
     res = compare_runs(a.base, a.cand)
     run_text = _read_lines(a.cand_run)
     run_kv = _parse_kv(" ".join(run_text)) if run_text is not None else None
     bl, cl = _read_lines(a.base_stderr), _read_lines(a.cand_stderr)
     reasons = gate_verdict(res, a.min_frames, run_kv, sync_sequence(bl or []), sync_sequence(cl or []))
-    print("gate verdict=%s reasons=%s %s" % ("fail" if reasons else "pass", ",".join(reasons) or "none",
-                                            format_diff_kv(res)))
+    print(f"gate verdict={'fail' if reasons else 'pass'} reasons={','.join(reasons) or 'none'} {format_diff_kv(res)}")
     return 1 if reasons else 0
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    """Main."""
+    ap = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("fingerprint")
     p.add_argument("dump_dir")

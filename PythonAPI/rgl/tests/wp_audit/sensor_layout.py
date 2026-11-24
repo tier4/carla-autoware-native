@@ -23,6 +23,7 @@ MAX_PORT = 65535
 
 @dataclass(frozen=True)
 class LayoutSensor:
+    """One sensor mounting and blueprint configuration."""
     name: str
     blueprint: str
     model: str
@@ -33,6 +34,7 @@ class LayoutSensor:
 
 @dataclass(frozen=True)
 class Layout:
+    """Ego and sensor mounting configuration loaded from JSON."""
     ego_blueprint: str
     role_name: str
     base_link: Tuple6
@@ -42,7 +44,7 @@ class Layout:
 
 def _need(d, key, where):
     if not isinstance(d, dict) or key not in d:
-        raise ValueError("layout: missing key %r in %s" % (key, where))
+        raise ValueError(f"layout: missing key {key!r} in {where}")
     return d[key]
 
 
@@ -50,9 +52,9 @@ def _tuple6(v, where):
     try:
         t = tuple(float(x) for x in v)
     except (TypeError, ValueError):
-        raise ValueError("layout: %s is not a list of 6 numbers" % where) from None
+        raise ValueError(f"layout: {where} is not a list of 6 numbers") from None
     if len(t) != 6:
-        raise ValueError("layout: %s needs 6 numbers (x, y, z, roll, pitch, yaw), got %d" % (where, len(t)))
+        raise ValueError(f"layout: {where} needs 6 numbers (x, y, z, roll, pitch, yaw), got {len(t)}")
     return t
 
 
@@ -66,18 +68,20 @@ def load_layout(path, udp_port_offset):
         with open(path, encoding="utf-8") as f:
             d = json.load(f)
     except json.JSONDecodeError as e:
-        raise ValueError("layout: %s is not valid JSON: %s" % (path, e)) from e
+        raise ValueError(f"layout: {path} is not valid JSON: {e}") from e
     sensors = []
     for i, s in enumerate(_need(d, "sensors", "the layout")):
-        where = "sensors[%d]" % i
+        where = f"sensors[{i}]"
         attrs = {str(k): str(v) for k, v in _need(s, "attributes", where).items()}
         if UDP_PORT_KEY in attrs:
             try:
                 port = int(attrs[UDP_PORT_KEY]) + int(udp_port_offset)
             except ValueError:
-                raise ValueError("layout: %s %s=%r is not an integer" % (where, UDP_PORT_KEY, attrs[UDP_PORT_KEY])) \
+                raise ValueError(f"layout: {where} {UDP_PORT_KEY}={attrs[UDP_PORT_KEY]!r} is not an integer") \
                     from None
             if not 0 < port <= MAX_PORT:
+                # Preserve percent-format numeric coercion and invalid-input errors.
+                # pylint: disable-next=consider-using-f-string
                 raise ValueError("layout: %s %s=%d is outside 1..%d after the offset" % (where, UDP_PORT_KEY, port,
                                                                                          MAX_PORT))
             attrs[UDP_PORT_KEY] = str(port)

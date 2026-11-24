@@ -8,11 +8,16 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Resolve sibling modules after the standalone script path setup.
+# pylint: disable-next=wrong-import-position
 import run_scenario  # noqa: E402
+# Resolve sibling modules after the standalone script path setup.
+# pylint: disable-next=wrong-import-position
 import scenarios as sc_mod  # noqa: E402
 
 
 def test_udp_port_busy_refused():
+    """Verify udp port busy refused."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
     try:
@@ -28,6 +33,7 @@ def test_udp_port_busy_refused():
 
 
 def test_udp_ports_free_when_nothing_listens():
+    """Verify udp ports free when nothing listens."""
     free = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     free.bind(("0.0.0.0", 0))
     fp = free.getsockname()[1]
@@ -37,20 +43,27 @@ def test_udp_ports_free_when_nothing_listens():
 
 
 def test_det_turns_noise_off():
+    """Verify det turns noise off."""
     assert run_scenario.lidar_preset_kwargs(True) == {"apply_noise": False}
+    # Keep the exact empty-container assertion, including its type check.
+    # pylint: disable-next=use-implicit-booleaness-not-comparison
     assert run_scenario.lidar_preset_kwargs(False) == {}
     # The deterministic set also switches off the wall-clock in-range create budget (unknown switches are ignored)
     assert run_scenario.det_server_args(True) == ["-rgl-scene-create-budget-ms=0",
                                                   "-rgl-scene-in-range-create-budget-ms=0"]
+    # Keep the exact empty-container assertion, including its type check.
+    # pylint: disable-next=use-implicit-booleaness-not-comparison
     assert run_scenario.det_server_args(False) == []
 
 
 def test_npc_cycle_schedule():
+    """Verify npc cycle schedule."""
     assert [run_scenario.npc_cycle_action(k) for k in (399, 400, 800, 801)] == [None, "spawn", "destroy", "respawn"]
     assert [run_scenario.npc_cycle_action(k) for k in (0, 401, 799, 802, 5000)] == [None] * 5
 
 
 def test_server_args_assembly():
+    """Verify server args assembly."""
     a = run_scenario.build_server_args("/pkg/run.sh", 4001, audit=False, hit_dir="/o/hits", dump_every=20,
                                        extra=["-rgl-scene-create-budget-ms=0", "-foo=1"])
     assert a[0] == "/pkg/run.sh" and "-carla-rpc-port=4001" in a
@@ -62,6 +75,7 @@ def test_server_args_assembly():
 
 
 def test_nearest_route_point():
+    """Verify nearest route point."""
     route = ((0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (10.0, 10.0, 0.0), (20.0, 10.0, 0.0))
     assert run_scenario.nearest_route_point(route, 9.0, 1.0) == (1, 10.0)
     assert run_scenario.nearest_route_point(route, 11.0, 12.0) == (2, 20.0)
@@ -71,6 +85,7 @@ def test_nearest_route_point():
 
 
 def test_parse_hold_near():
+    """Verify parse hold near."""
     assert run_scenario.parse_xy("12.5,-3") == (12.5, -3.0)
     for bad in ("1", "a,b", "1,2,3", ""):
         with pytest.raises(ValueError):
@@ -78,6 +93,7 @@ def test_parse_hold_near():
 
 
 def test_max_route_override_lowers_min_route():
+    """Verify max route override lowers min route."""
     sc = sc_mod.SCENARIOS["CONTROL"]
     out = run_scenario.apply_max_route(sc, 2000.0)
     assert out.max_route_m == 2000.0 and out.min_route_m == 2000.0
@@ -88,13 +104,17 @@ def test_max_route_override_lowers_min_route():
 
 def test_truncated_route_passes_the_length_check():
     # the cut route is as long as asked only up to float rounding; the check must not trip on that
+    """Verify truncated route passes the length check."""
     route = tuple((i * 3.7, 0.0, 0.0) for i in range(2000))
     sc = run_scenario.apply_max_route(sc_mod.SCENARIOS["CONTROL"], 2000.0)
+    # Exercise the private truncation helper directly for regression coverage.
+    # pylint: disable-next=protected-access
     cut = sc_mod._truncate(route, 2000.0)
     run_scenario.check_route(sc, cut, "Odaiba")
 
 
 def test_static_scenario_length_and_pose():
+    """Verify static scenario length and pose."""
     sc = sc_mod.SCENARIOS["STATIC"]
     assert sc.ego_role == "hero" and sc.tile_stream_m == 3000 and sc.actor_active_m == 2000 and sc.hold
     sc = dataclasses.replace(sc, fixed_ticks=220)
@@ -111,6 +131,7 @@ _CORNER = ((0.0, 0.0, 0.0), (100.0, 0.0, 0.0), (100.0, 100.0, 0.0))
 
 def test_yaw_switches_at_a_route_vertex_by_default():
     # The original motion is kept: the heading of the new segment from the first metre after the vertex.
+    """Verify yaw switches at a route vertex by default."""
     p = run_scenario.Path(_CORNER)
     assert p.pose(99.0)[4] == pytest.approx(0.0)
     assert p.pose(100.5)[4] == pytest.approx(90.0)
@@ -118,6 +139,7 @@ def test_yaw_switches_at_a_route_vertex_by_default():
 
 
 def test_continuous_yaw_blends_the_heading_after_a_vertex():
+    """Verify continuous yaw blends the heading after a vertex."""
     p, q = run_scenario.Path(_CORNER), run_scenario.Path(_CORNER, yaw_blend_m=10.0)
     for s in (50.0, 100.0, 102.5, 105.0, 110.0, 150.0):
         assert q.pose(s)[:4] == pytest.approx(p.pose(s)[:4])   # positions and pitch are untouched
@@ -133,6 +155,7 @@ def test_continuous_yaw_blends_the_heading_after_a_vertex():
 
 
 def test_continuous_yaw_is_refused_where_it_would_be_ignored():
+    """Verify continuous yaw is refused where it would be ignored."""
     with pytest.raises(ValueError):
         run_scenario.Path(_CORNER, pingpong=True, yaw_blend_m=10.0)
     with pytest.raises(ValueError):
@@ -145,40 +168,62 @@ def test_continuous_yaw_is_refused_where_it_would_be_ignored():
 
 
 def test_dash_values_are_merged_for_argparse():
-    assert run_scenario.merge_dash_values(["--server-arg", "-rgl-x=1", "--det", "--hold-near", "-5,2", "--out", "o"]) == \
-        ["--server-arg=-rgl-x=1", "--det", "--hold-near=-5,2", "--out", "o"]
-    assert run_scenario.merge_dash_values(["--server-arg=-a=1", "--hold-near=3,4"]) == ["--server-arg=-a=1", "--hold-near=3,4"]
-    assert run_scenario.merge_dash_values(["--out", "-weird"]) == ["--out", "-weird"]   # only the two options are touched
+    """Verify dash values are merged for argparse."""
+    assert run_scenario.merge_dash_values(
+        ["--server-arg", "-rgl-x=1", "--det", "--hold-near", "-5,2", "--out", "o"]
+    ) == ["--server-arg=-rgl-x=1", "--det", "--hold-near=-5,2", "--out", "o"]
+    assert run_scenario.merge_dash_values(["--server-arg=-a=1", "--hold-near=3,4"]
+                                          ) == ["--server-arg=-a=1", "--hold-near=3,4"]
+    assert run_scenario.merge_dash_values(["--out", "-weird"]) == ["--out",
+                                          "-weird"]   # only the two options are touched
 
 
 def test_npc_blueprint_falls_back_when_the_default_car_is_missing():
     """The slim package has no vehicle.lincoln.mkz_2020: spawn_npc must use the same fallback as the ego."""
+    # This object implements only the interface its callers need.
+    # pylint: disable-next=too-few-public-methods
     class BP:
+        """Bp."""
         def __init__(self, i):
             self.id = i
             self.attrs = {}
 
         def set_attribute(self, k, v):
+            """Set attribute."""
             self.attrs[k] = v
 
     class Lib:
+        """Lib."""
         def __init__(self, ids):
             self.bps = [BP(i) for i in ids]
 
         def filter(self, pat):
+            """Filter."""
             if pat.endswith("*"):
                 return [b for b in self.bps if b.id.startswith(pat[:-1])]
             return [b for b in self.bps if b.id == pat]
 
         def find(self, i):
-            raise IndexError("blueprint %r not found" % i)
+            """Find."""
+            raise IndexError(f"blueprint {i!r} not found")
 
+    # This object implements only the interface its callers need.
+    # pylint: disable-next=too-few-public-methods
     class World:
+        """World."""
+        # Keep the callable signature used by existing callers.
+        # pylint: disable-next=unused-argument
         def try_spawn_actor(self, bp, tf):
+            """Try spawn actor."""
+            # This object implements only the interface its callers need.
+            # pylint: disable-next=too-few-public-methods
             class A:
+                """A."""
                 def set_simulate_physics(self, v):
-                    pass
+                    """Accept the physics toggle in this test double."""
             a = A()
+            # Match the minimal actor test double without changing construction.
+            # pylint: disable-next=attribute-defined-outside-init
             a.bp = bp
             return a
 
@@ -187,6 +232,7 @@ def test_npc_blueprint_falls_back_when_the_default_car_is_missing():
 
 
 def test_scenarios_late_sensors():
+    """Verify scenarios late sensors."""
     for name, event in (("S6b", "distant_sensor_at_tick_600"), ("S6c", "slow_sensor_ahead")):
         sc = sc_mod.SCENARIOS[name]
         assert sc.map == "Town15" and sc.ego_role == "hero" and sc.sensor_mode == "ego"
@@ -198,6 +244,7 @@ def test_scenarios_late_sensors():
 
 def test_slow_sensor_schedule():
     # S6b: tick 600 at 8 m/s -> the ego is at 240 m, the sensor 300 m ahead of it (540 m of arc)
+    """Verify slow sensor schedule."""
     assert run_scenario.late_sensor_event("distant_sensor_at_tick_600") == (600, "HesaiPandar128E4X", None, None)
     assert run_scenario.late_sensor_arc_m(600, 8.0, sc_mod.FIXED_DT) == pytest.approx(240.0 + 300.0)
     # S6c: tick 10, VLP16, range 100 m, sensor_tick 6.0 s (stale after 5 s, back at the next measurement)

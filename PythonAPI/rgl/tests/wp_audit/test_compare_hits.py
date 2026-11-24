@@ -8,6 +8,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Resolve sibling modules after the standalone script path setup.
+# pylint: disable-next=wrong-import-position
 import compare_hits  # noqa: E402
 
 HEADER = struct.Struct("<IId6f")
@@ -17,9 +19,14 @@ SYNC = ("LogCarlaRGL: rgl_scene_sync t=%.3f trigger=%s scanned=%d added_cached=0
         "range_skipped=5 sensors=1 entities=%d ismc=10 meshes=%d idle=0")
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def write_dump(d, sensor_id, frame, sim_t, pose, pts):
+    """Write dump."""
     os.makedirs(d, exist_ok=True)
     pts = np.asarray(pts, dtype="<f4").reshape(-1, 3)
+    # Preserve percent-format numeric coercion and invalid-input errors.
+    # pylint: disable-next=consider-using-f-string
     name = "0x%x_%020d.bin" % (sensor_id, frame)
     with open(os.path.join(d, name), "wb") as f:
         f.write(HEADER.pack(MAGIC, len(pts), sim_t, *pose))
@@ -27,12 +34,15 @@ def write_dump(d, sensor_id, frame, sim_t, pose, pts):
 
 
 def cloud(seed, n=200):
+    """Cloud."""
     return np.random.default_rng(seed).uniform(-50.0, 50.0, size=(n, 3)).astype(np.float32)
 
 
 POSE = (10.0, 20.0, 2.0, 0.0, 0.0, 90.0)
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def make_run(d, sensor_id, n_dumps=2, t0=2.4, pose=POSE, frame0=1000, shift=None, extra=None):
     """n_dumps dumps of one sensor, 0.5 s apart; dump k holds cloud(k)."""
     for k in range(n_dumps):
@@ -45,6 +55,7 @@ def make_run(d, sensor_id, n_dumps=2, t0=2.4, pose=POSE, frame0=1000, shift=None
 
 
 def kvs(line):
+    """Kvs."""
     out = {}
     for tok in line.split():
         if "=" in tok:
@@ -54,32 +65,39 @@ def kvs(line):
 
 
 def run_cli(capsys, *argv):
+    """Invoke the comparison CLI and capture its final output line."""
     rc = compare_hits.main(list(argv))
     out = capsys.readouterr().out.strip().splitlines()
     return rc, out[-1]
 
 
 def diff_kv(capsys, base, cand):
-    rc, line = run_cli(capsys, "diff", str(base), str(cand))
+    """Return the parsed fields from a comparison CLI invocation."""
+    _rc, line = run_cli(capsys, "diff", str(base), str(cand))
     assert line.startswith("hits_diff ")
     return kvs(line)
 
 
 def write_run_txt(path, **kw):
+    """Write run metadata for the comparison tests."""
     kw.setdefault("status", "ok")
     kw.setdefault("ego_bp_fallback", 0)
-    with open(path, "w") as f:
-        f.write(" ".join("%s=%s" % (k, v) for k, v in kw.items()) + "\n")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(" ".join(f"{k}={v}" for k, v in kw.items()) + "\n")
 
 
 def write_stderr(path, created=(1, 2, 3), t0=2.424):
-    with open(path, "w") as f:
+    """Write scene-sync log lines for the comparison tests."""
+    with open(path, "w", encoding="utf-8") as f:
         f.write("LogTemp: unrelated\n")
         for i, c in enumerate(created):
             f.write(SYNC % (t0 + i * 1.0, "init" if i == 0 else "time", 100 + i, 0, c, 0, 50 + i, 7) + "\n")
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def gate(capsys, tmp_path, base, cand, min_frames=1, run_kw=None, cand_created=(1, 2, 3)):
+    """Gate."""
     run_kw = run_kw or {}
     write_run_txt(str(tmp_path / "run.txt"), **run_kw)
     write_stderr(str(tmp_path / "base.stderr"))
@@ -94,6 +112,7 @@ def gate(capsys, tmp_path, base, cand, min_frames=1, run_kw=None, cand_created=(
 
 
 def test_identical_dumps_match_across_sensor_ids(tmp_path):
+    """Verify identical dumps match across sensor ids."""
     make_run(tmp_path / "b", 0xAAA, frame0=100)
     make_run(tmp_path / "c", 0xBBB, frame0=9000)
     kv = compare_hits.hits_diff_kv(str(tmp_path / "b"), str(tmp_path / "c"))
@@ -101,6 +120,7 @@ def test_identical_dumps_match_across_sensor_ids(tmp_path):
 
 
 def test_shifted_sim_t_still_matched(tmp_path, capsys):
+    """Verify shifted sim t still matched."""
     make_run(tmp_path / "b", 0xAAA, t0=2.4)
     make_run(tmp_path / "c", 0xBBB, t0=2.5)             # every sim_t + 0.1 s
     kv = diff_kv(capsys, tmp_path / "b", tmp_path / "c")
@@ -108,6 +128,7 @@ def test_shifted_sim_t_still_matched(tmp_path, capsys):
 
 
 def test_relative_time_difference_is_counted(tmp_path, capsys):
+    """Verify relative time difference is counted."""
     make_run(tmp_path / "b", 0xAAA)
     for k in range(2):                                   # second dump 5 ms late
         write_dump(str(tmp_path / "c"), 0xBBB, 50 + k, 3.0 + 0.5 * k + (0.005 if k else 0.0), POSE, cloud(k))
@@ -116,6 +137,7 @@ def test_relative_time_difference_is_counted(tmp_path, capsys):
 
 
 def test_zero_matched_fails(tmp_path, capsys):
+    """Verify zero matched fails."""
     make_run(tmp_path / "b", 0xAAA)
     make_run(tmp_path / "c", 0xBBB, pose=(15.0, 20.0, 2.0, 0.0, 0.0, 90.0))   # 5 m away from every base sensor
     g = gate(capsys, tmp_path, tmp_path / "b", tmp_path / "c")
@@ -124,6 +146,7 @@ def test_zero_matched_fails(tmp_path, capsys):
 
 
 def test_too_few_frames_fails(tmp_path, capsys):
+    """Verify too few frames fails."""
     make_run(tmp_path / "b", 0xAAA, n_dumps=3)
     make_run(tmp_path / "c", 0xBBB, n_dumps=3)
     g = gate(capsys, tmp_path, tmp_path / "b", tmp_path / "c", min_frames=10)
@@ -133,15 +156,17 @@ def test_too_few_frames_fails(tmp_path, capsys):
 
 
 def test_run_status_and_fallback_fail(tmp_path, capsys):
+    """Verify run status and fallback fail."""
     make_run(tmp_path / "b", 0xAAA)
     make_run(tmp_path / "c", 0xBBB)
-    g1 = gate(capsys, tmp_path, tmp_path / "b", tmp_path / "c", run_kw=dict(status="invalid"))
-    g2 = gate(capsys, tmp_path, tmp_path / "b", tmp_path / "c", run_kw=dict(ego_bp_fallback=1))
+    g1 = gate(capsys, tmp_path, tmp_path / "b", tmp_path / "c", run_kw={'status': "invalid"})
+    g2 = gate(capsys, tmp_path, tmp_path / "b", tmp_path / "c", run_kw={'ego_bp_fallback': 1})
     assert "status_not_ok" in g1["reasons"] and "ego_bp_fallback" in g2["reasons"]
     assert "ego_bp_fallback" not in g1["reasons"] and "status_not_ok" not in g2["reasons"]
 
 
 def test_unreadable_cand_run_is_status_not_ok(tmp_path, capsys):
+    """Verify unreadable cand run is status not ok."""
     make_run(tmp_path / "b", 0xAAA)
     make_run(tmp_path / "c", 0xBBB)
     write_stderr(str(tmp_path / "s"))
@@ -152,6 +177,7 @@ def test_unreadable_cand_run_is_status_not_ok(tmp_path, capsys):
 
 
 def test_sync_sequence_mismatch_fails(tmp_path, capsys):
+    """Verify sync sequence mismatch fails."""
     make_run(tmp_path / "b", 0xAAA)
     make_run(tmp_path / "c", 0xBBB)
     g = gate(capsys, tmp_path, tmp_path / "b", tmp_path / "c", cand_created=(1, 2, 4))   # one line created=4 vs 3
@@ -161,6 +187,7 @@ def test_sync_sequence_mismatch_fails(tmp_path, capsys):
 
 
 def test_extra_point_at_180m_is_added_far(tmp_path, capsys):
+    """Verify extra point at 180m is added far."""
     make_run(tmp_path / "b", 0xAAA)
     make_run(tmp_path / "c", 0xBBB, extra=(POSE[0] + 180.0, POSE[1], POSE[2]))
     kv = diff_kv(capsys, tmp_path / "b", tmp_path / "c")
@@ -171,6 +198,7 @@ def test_extra_point_at_180m_is_added_far(tmp_path, capsys):
 
 
 def test_two_sensors_matched_by_pose(tmp_path, capsys):
+    """Verify two sensors matched by pose."""
     pa, pb = (0.0, 0.0, 2.0, 0.0, 0.0, 0.0), (0.0, 1.0, 2.0, 0.0, 0.0, 0.0)
     write_dump(str(tmp_path / "b"), 0x1, 1, 3.0, pa, cloud(1))
     write_dump(str(tmp_path / "b"), 0x2, 1, 3.0, pb, cloud(2))
@@ -181,6 +209,7 @@ def test_two_sensors_matched_by_pose(tmp_path, capsys):
 
 
 def test_sub_cm_noise_is_near_identical(tmp_path, capsys):
+    """Verify sub cm noise is near identical."""
     make_run(tmp_path / "b", 0xAAA, n_dumps=1)
     make_run(tmp_path / "c", 0xBBB, n_dumps=1, shift=0.003)          # every point +3 mm
     kv = diff_kv(capsys, tmp_path / "b", tmp_path / "c")
@@ -188,6 +217,7 @@ def test_sub_cm_noise_is_near_identical(tmp_path, capsys):
 
 
 def test_count_differences_are_reported(tmp_path, capsys):
+    """Verify count differences are reported."""
     write_dump(str(tmp_path / "b"), 0x1, 1, 3.0, POSE, cloud(1, 100))
     write_dump(str(tmp_path / "c"), 0x2, 1, 3.0, POSE, cloud(1, 100)[:90])
     kv = diff_kv(capsys, tmp_path / "b", tmp_path / "c")
@@ -197,6 +227,7 @@ def test_count_differences_are_reported(tmp_path, capsys):
 
 def test_diff_sets_voxel_boundary_neighbours():
     # two points 8 mm apart that sit in different 1 cm voxels must still pair up
+    """Verify diff sets voxel boundary neighbours."""
     base = np.array([[0.0095, 0.0, 0.0]])
     cand = np.array([[0.0175, 0.0, 0.0], [5.0, 5.0, 5.0]])
     r = compare_hits.diff_sets(base, cand, (0.0, 0.0, 0.0))
@@ -205,6 +236,7 @@ def test_diff_sets_voxel_boundary_neighbours():
 
 
 def test_match_sensors_respects_tolerance():
+    """Verify match sensors respects tolerance."""
     d = compare_hits.Dump(1.0, np.array([0, 0, 0, 0, 0, 0.0]), np.zeros((0, 3)))
     near = compare_hits.Dump(1.0, np.array([0.005, 0, 0, 0, 0, 0.0]), np.zeros((0, 3)))
     far = compare_hits.Dump(1.0, np.array([0.5, 0, 0, 0, 0, 0.0]), np.zeros((0, 3)))
@@ -213,6 +245,7 @@ def test_match_sensors_respects_tolerance():
 
 
 def test_read_dump_and_bad_magic(tmp_path):
+    """Verify read dump and bad magic."""
     write_dump(str(tmp_path), 0xAB, 3, 12.5, POSE, cloud(0, 5))
     p = sorted(tmp_path.iterdir())[0]
     t, pose, pts = compare_hits.read_dump(str(p))
@@ -224,12 +257,14 @@ def test_read_dump_and_bad_magic(tmp_path):
 
 
 def test_sync_sequence_parses_relative_time():
+    """Verify sync sequence parses relative time."""
     lines = ["noise", SYNC % (2.4244, "init", 11, 0, 3, 0, 40, 9), SYNC % (3.5, "time", 12, 1, 0, 2, 41, 9)]
     seq = compare_hits.sync_sequence(lines)
     assert seq == [(0.0, "init", 11, 0, 3, 0, 40, 9), (1.076, "time", 12, 1, 0, 2, 41, 9)]
 
 
 def test_fingerprint_rows(tmp_path):
+    """Verify fingerprint rows."""
     make_run(tmp_path / "b", 0xAAA)
     make_run(tmp_path / "c", 0xBBB, t0=9.9, frame0=5)
     out_b, out_c = tmp_path / "b.csv", tmp_path / "c.csv"
@@ -242,7 +277,8 @@ def test_fingerprint_rows(tmp_path):
     assert len(rows[0].split(",")[4]) == 40
 
 
-# ---- World Partition culling: the keys added to the sync line (wait_ms, wait_api, wp_*) do not change what the gate compares ----
+# ---- World Partition culling: the keys added to the sync line (wait_ms,
+# wait_api, wp_*) do not change what the gate compares ----
 WP_TAIL = (" scan_ms=1.00 reg_ms=0.00 remove_ms=0.00 skel_ms=0.00 wait_ms=61.20 wait_api=rgl_entity_destroy wp=1 "
            "wp_sync_bound_s=2.10 wp_create_latency_s=1.00 wp_margin_m=320.0 wp_pending=7 wp_queue_age_max_s=0.40 "
            "wp_check_n=12 wp_check_instances=900 wp_check_ms=3.10 wp_check_max_ms=3.10 wp_entity_added=5 "
@@ -251,6 +287,7 @@ WP_TAIL = (" scan_ms=1.00 reg_ms=0.00 remove_ms=0.00 skel_ms=0.00 wait_ms=61.20 
 
 
 def test_wp_keys_do_not_change_the_sync_sequence():
+    """Verify wp keys do not change the sync sequence."""
     plain = [SYNC % (2.4, "init", 11, 0, 3, 0, 40, 9), SYNC % (3.5, "time", 12, 1, 0, 2, 41, 9)]
     tailed = [ln + WP_TAIL for ln in plain]
     assert compare_hits.sync_sequence(tailed) == compare_hits.sync_sequence(plain)
@@ -258,6 +295,7 @@ def test_wp_keys_do_not_change_the_sync_sequence():
 
 
 def test_each_compared_key_still_fails_with_wp_keys():
+    """Verify each compared key still fails with wp keys."""
     base = [SYNC % (2.4, "init", 11, 0, 3, 0, 40, 9) + WP_TAIL]
     variants = {
         "trigger": SYNC % (2.4, "time", 11, 0, 3, 0, 40, 9),
@@ -276,6 +314,7 @@ def test_each_compared_key_still_fails_with_wp_keys():
 
 def test_unknown_keys_do_not_widen_what_is_ignored():
     # wp_entities_total is not entities: a change of entities still fails, a change of wp_entities_total alone does not
+    """Verify unknown keys do not widen what is ignored."""
     base = [SYNC % (2.4, "init", 11, 0, 3, 0, 40, 9) + WP_TAIL]
     other_total = [base[0].replace("wp_entities_total=12345", "wp_entities_total=999")]
     other_entities = [(SYNC % (2.4, "init", 11, 0, 3, 0, 41, 9)) + WP_TAIL]

@@ -86,7 +86,7 @@ def parse(text):
             continue
         prev = line.strip()
     if fence is not None:
-        raise ValueError("code block opened with %r is never closed" % (fence[0] * fence[1]))
+        raise ValueError(f"code block opened with {fence[0] * fence[1]!r} is never closed")
     if rows:
         tables.append(rows)
     return {"headings": headings, "blocks": blocks, "tables": tables, "links": links}
@@ -94,21 +94,24 @@ def parse(text):
 
 def _read(path):
     if not path.is_file():
-        pytest.fail("%s is missing" % path.name)
+        pytest.fail(f"{path.name} is missing")
     return path.read_text(encoding="utf-8")
 
 
-@pytest.fixture(scope="module")
-def en():
+@pytest.fixture(scope="module", name="en")
+def english_readme():
+    """Parse the English README for the structure comparisons."""
     return parse(_read(EN))
 
 
-@pytest.fixture(scope="module")
-def ja():
+@pytest.fixture(scope="module", name="ja")
+def japanese_readme():
+    """Parse the Japanese README for the structure comparisons."""
     return parse(_read(JA))
 
 
 def test_parser_rules():
+    """Verify parser rules."""
     text = "\n".join([
         "Title", "=====", "",
         "## Setup", "",
@@ -128,6 +131,7 @@ def test_parser_rules():
 
 
 def test_slug_matches_github():
+    """Verify slug matches github."""
     assert slug("Skeletal meshes (vehicle bodies, walkers)") == "skeletal-meshes-vehicle-bodies-walkers"
     assert slug("UDP Raw Packet extension (optional)") == "udp-raw-packet-extension-optional"
     assert slug("Step 1 — `prepare`") == "step-1--prepare"
@@ -135,44 +139,54 @@ def test_slug_matches_github():
 
 def test_english_structure_is_not_trivial(en):
     # A parser that saw nothing would make the comparisons below pass vacuously.
+    """Verify english structure is not trivial."""
     assert len(en["headings"]) >= 20 and len(en["blocks"]) >= 10 and len(en["tables"]) >= 5
     assert (2, "World Partition maps") in en["headings"]
 
 
 def test_headings_match(en, ja):
+    """Verify headings match."""
     levels_en = [lvl for lvl, _ in en["headings"]]
     levels_ja = [lvl for lvl, _ in ja["headings"]]
     for i, (a, b) in enumerate(zip(en["headings"], ja["headings"])):
+        # Preserve percent-format numeric coercion and invalid-input errors.
+        # pylint: disable-next=consider-using-f-string
         assert a[0] == b[0], "heading %d: level %d %r (en) vs level %d %r (ja)" % (i + 1, a[0], a[1], b[0], b[1])
-    assert len(levels_en) == len(levels_ja), "headings: %d (en) vs %d (ja)" % (len(levels_en), len(levels_ja))
+    assert len(levels_en) == len(levels_ja), f"headings: {len(levels_en)} (en) vs {len(levels_ja)} (ja)"
 
 
 def test_code_blocks_match(en, ja):
+    """Verify code blocks match."""
     assert len(en["blocks"]) == len(ja["blocks"]), \
-        "code blocks: %d (en) vs %d (ja)" % (len(en["blocks"]), len(ja["blocks"]))
+        f"code blocks: {len(en['blocks'])} (en) vs {len(ja['blocks'])} (ja)"
     for i, (a, b) in enumerate(zip(en["blocks"], ja["blocks"])):
-        assert a == b, "code block %d differs (code, commands and log lines are not translated)" % (i + 1)
+        assert a == b, f"code block {i + 1} differs (code, commands and log lines are not translated)"
 
 
 def test_table_rows_match(en, ja):
-    assert en["tables"] == ja["tables"], "rows per table: %s (en) vs %s (ja)" % (en["tables"], ja["tables"])
+    """Verify table rows match."""
+    assert en["tables"] == ja["tables"], f"rows per table: {en['tables']} (en) vs {ja['tables']} (ja)"
 
 
 @pytest.mark.parametrize("path", [EN, JA], ids=["en", "ja"])
 def test_in_page_links_resolve(path):
+    """Verify in page links resolve."""
     s = parse(_read(path))
     anchors, seen = set(), {}
     for _, title in s["headings"]:
         base = slug(title)
         n = seen.get(base, 0)
-        anchors.add(base if n == 0 else "%s-%d" % (base, n))
+        anchors.add(base if n == 0 else f"{base}-{n}")
         seen[base] = n + 1
     missing = [a for a in s["links"] if a not in anchors]
-    assert not missing, "%s: links to no heading: %s" % (path.name, missing)
+    assert not missing, f"{path.name}: links to no heading: {missing}"
 
 
 @pytest.mark.parametrize("path,other", [(EN, JA.name), (JA, EN.name)], ids=["en", "ja"])
 def test_cross_link_at_top(path, other):
+    """Verify cross link at top."""
     top = _read(path).splitlines()[:TOP_LINES]
-    assert any("](%s)" % other in line for line in top), "%s: no link to %s in its first %d lines" % (
+    # Preserve percent-format numeric coercion and invalid-input errors.
+    # pylint: disable-next=consider-using-f-string
+    assert any(f"]({other})" in line for line in top), "%s: no link to %s in its first %d lines" % (
         path.name, other, TOP_LINES)

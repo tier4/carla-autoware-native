@@ -32,9 +32,10 @@ Route length requirements (checked by run_scenario.py, `reason=route_too_short`)
   S4           : >= 1.5 km + 200 m.
 """
 import json
+import locale
 import math
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 Route = Optional[Tuple[Tuple[float, float, float], ...]]
@@ -60,7 +61,7 @@ def _load_route(map_name) -> Route:
     path = os.path.join(_ROUTE_DIR, map_name + ".json")
     if not os.path.exists(path):
         return None
-    with open(path) as f:
+    with open(path, encoding=locale.getpreferredencoding(False)) as f:
         return tuple(tuple(float(c) for c in p) for p in json.load(f))
 
 
@@ -72,7 +73,10 @@ ROUTES = {"Town15": TOWN15_ROUTE, "Odaiba": ODAIBA_ROUTE, "Town10HD_Opt": TOWN10
 
 
 @dataclass(frozen=True)
+# Preserve the existing scenario schema and constructor interface.
+# pylint: disable-next=too-many-instance-attributes
 class Scenario:
+    """Parameters for one scene-audit scenario."""
     name: str
     map: str
     speed_mps: float = SPEED_MPS
@@ -129,7 +133,8 @@ SCENARIOS = {
     "S6c": _s(name="S6c", map="Town15", tile_stream_m=3000, actor_active_m=2000,
               radius_expected_m=3000.0, min_route_m=1500.0, max_route_m=1500.0,
               events=("slow_sensor_ahead",),
-              description="3 km hero; at tick 10 a parentless slow VLP16 (sensor_tick 6 s) 300 m ahead: stale, then back"),
+              description=("3 km hero; at tick 10 a parentless slow VLP16 (sensor_tick 6 s) "
+                           "300 m ahead: stale, then back")),
     "S7": _s(name="S7", map="Town15", radius_expected_m=None, events=("load_world_cycle_3",),
              fixed_duration_s=480.0, tile_stream_m=150, actor_active_m=150,
              description="load_world Town15 <-> Odaiba, 3 round trips"),
@@ -171,10 +176,12 @@ def route_for(scenario_name, map_name, sc=None):
 
 
 def route_is_set(route):
+    """Check that a frozen route has enough vertices."""
     return bool(route) and len(route) >= 2
 
 
 def route_length(route):
+    """Return the total polyline length in metres."""
     total = 0.0
     for a, b in zip(route[:-1], route[1:]):
         total += ((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2 + (b[2] - a[2]) ** 2) ** 0.5

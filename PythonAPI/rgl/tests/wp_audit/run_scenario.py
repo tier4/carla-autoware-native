@@ -36,9 +36,14 @@ import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "..", ".."))    # PythonAPI/rgl (lidar_models); HERE = PythonAPI/rgl/tests/wp_audit
+# PythonAPI/rgl (lidar_models); HERE = PythonAPI/rgl/tests/wp_audit
+sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
+# Resolve sibling modules after the standalone script path setup.
+# pylint: disable-next=wrong-import-position
 import scenarios as sc_mod  # noqa: E402
+# Resolve sibling modules after the standalone script path setup.
+# pylint: disable-next=wrong-import-position
 import sensor_layout  # noqa: E402
 
 RPC_READY_TIMEOUT_S = 240
@@ -58,6 +63,7 @@ DET_SERVER_ARGS = ("-rgl-scene-create-budget-ms=0", "-rgl-scene-in-range-create-
 
 
 class RunInvalid(Exception):
+    """A run that cannot satisfy the measurement prerequisites."""
     def __init__(self, reason):
         super().__init__(reason)
         self.reason = reason
@@ -65,10 +71,12 @@ class RunInvalid(Exception):
 
 # ---------------------------------------------------------------- output
 def kv(**kw):
-    return " ".join("%s=%s" % (k, str(v).replace(" ", "_")) for k, v in kw.items())
+    """Format run fields as space-separated key=value pairs."""
+    return " ".join(f"{k}={str(v).replace(' ', '_')}" for k, v in kw.items())
 
 
 def write_run(out, **kw):
+    """Write the run metadata for the measurement."""
     with open(os.path.join(out, "run.txt"), "w", encoding="utf-8") as f:
         f.write(kv(**kw) + "\n")
 
@@ -96,6 +104,7 @@ def lidar_preset_kwargs(det):
 
 
 def det_server_args(det):
+    """Return the deterministic server switches when requested."""
     return list(DET_SERVER_ARGS) if det else []
 
 
@@ -104,11 +113,18 @@ def npc_cycle_action(tick):
     return {NPC_SPAWN_TICK: "spawn", NPC_DESTROY_TICK: "destroy", NPC_RESPAWN_TICK: "respawn"}.get(tick)
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def build_server_args(launcher, port, audit, hit_dir, dump_every, extra):
+    """Assemble the packaged server command and debug switches."""
+    # Preserve percent-format numeric coercion and invalid-input errors.
+    # pylint: disable-next=consider-using-f-string
     args = [launcher, "-RenderOffScreen", "-nosound", "-carla-rpc-port=%d" % port]
     if audit:
         args.append("-rgl-scene-audit=1")
     if hit_dir:
+        # Preserve percent-format numeric coercion and invalid-input errors.
+        # pylint: disable-next=consider-using-f-string
         args += ["-rgl-debug-hit-dump=" + hit_dir, "-rgl-debug-hit-dump-every=%d" % dump_every]
     return args + list(extra)
 
@@ -118,7 +134,7 @@ def merge_dash_values(argv, options=("--server-arg", "--hold-near")):
     out, i = [], 0
     while i < len(argv):
         if argv[i] in options and i + 1 < len(argv) and argv[i + 1].startswith("-"):
-            out.append("%s=%s" % (argv[i], argv[i + 1]))
+            out.append(f"{argv[i]}={argv[i + 1]}")
             i += 2
         else:
             out.append(argv[i])
@@ -127,13 +143,14 @@ def merge_dash_values(argv, options=("--server-arg", "--hold-near")):
 
 
 def parse_xy(text):
+    """Parse a comma-separated pair of floating-point coordinates."""
     parts = text.split(",")
     if len(parts) != 2:
-        raise ValueError("expected x,y: %r" % text)
+        raise ValueError(f"expected x,y: {text!r}")
     try:
         return float(parts[0]), float(parts[1])
     except ValueError:
-        raise ValueError("expected x,y numbers: %r" % text) from None
+        raise ValueError(f"expected x,y numbers: {text!r}") from None
 
 
 def nearest_route_point(route, x, y):
@@ -157,18 +174,22 @@ def apply_max_route(sc, max_route_m):
 
 # ---------------------------------------------------------------- server
 def port_listening(port):
+    """Check whether the local TCP port accepts connections."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
 def find_launcher(pkg):
+    """Find the unique shell launcher in a packaged server directory."""
     cands = sorted(glob.glob(os.path.join(pkg, "*.sh")))
     if len(cands) != 1:
-        raise RunInvalid("launcher_not_unique:%d" % len(cands))
+        raise RunInvalid(f"launcher_not_unique:{len(cands)}")
     return cands[0]
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def start_server(pkg, out, port, audit, dump_every, extra):
     """dump_every: None = no hit dump."""
     if port_listening(port):
@@ -179,9 +200,15 @@ def start_server(pkg, out, port, audit, dump_every, extra):
         hits = os.path.join(out, "hits")
         os.makedirs(hits, exist_ok=True)
     args = build_server_args(launcher, port, audit, hits, dump_every, extra)
+    # Keep the existing process and stream lifetime unchanged.
+    # pylint: disable-next=consider-using-with
     so = open(os.path.join(out, "server.stdout"), "wb")
+    # Keep the existing process and stream lifetime unchanged.
+    # pylint: disable-next=consider-using-with
     se = open(os.path.join(out, "server.stderr"), "wb")
     # new session = new process group, so the whole launcher tree is stopped by killpg
+    # Keep the existing process and stream lifetime unchanged.
+    # pylint: disable-next=consider-using-with
     proc = subprocess.Popen(args, stdout=so, stderr=se, stdin=subprocess.DEVNULL,
                             start_new_session=True)
     return proc
@@ -206,6 +233,7 @@ def stop_server(proc):
 
 
 def verify_stopped(pgid, port, wait_s=30):
+    """Wait for both the process group and RPC listener to disappear."""
     deadline = time.time() + wait_s
     while time.time() < deadline:
         try:
@@ -220,11 +248,12 @@ def verify_stopped(pgid, port, wait_s=30):
 
 
 def wait_rpc(carla, port, proc):
+    """Wait for the server RPC interface while checking its process."""
     deadline = time.time() + RPC_READY_TIMEOUT_S
     last = None
     while time.time() < deadline:
         if proc.poll() is not None:
-            raise RunInvalid("server_died_rc%s" % proc.returncode)
+            raise RunInvalid(f"server_died_rc{proc.returncode}")
         try:
             c = carla.Client("127.0.0.1", port)
             c.set_timeout(2.0)
@@ -234,10 +263,12 @@ def wait_rpc(carla, port, proc):
         except RuntimeError as e:
             last = e
             time.sleep(2.0)
-    raise RunInvalid("rpc_not_ready:%s" % type(last).__name__)
+    raise RunInvalid(f"rpc_not_ready:{type(last).__name__}")
 
 
 # ---------------------------------------------------------------- geometry
+# This object implements only the interface its callers need.
+# pylint: disable-next=too-few-public-methods
 class Path:
     """Polyline with arc-length lookup. Ping-pong when `pingpong` is set.
 
@@ -257,16 +288,18 @@ class Path:
         self.pingpong = pingpong
         self.yaw_blend_m = float(yaw_blend_m)
 
+    # Keep the calculation and evaluation order unchanged.
+    # pylint: disable-next=too-many-locals
     def pose(self, s):
         """(x, y, z, pitch_deg, yaw_deg) at arc length s (clamped, or folded for ping-pong)."""
-        L = self.length
+        length = self.length
         if self.pingpong:
-            u = s % (2 * L)
-            fwd = u <= L
-            d = u if fwd else 2 * L - u
+            u = s % (2 * length)
+            fwd = u <= length
+            d = u if fwd else 2 * length - u
         else:
             fwd = True
-            d = min(max(s, 0.0), L)
+            d = min(max(s, 0.0), length)
         i = 1
         while i < len(self.cum) - 1 and self.cum[i] < d:
             i += 1
@@ -293,11 +326,14 @@ def check_continuous_yaw(sc, blend_m):
     if blend_m < 0.0:
         raise ValueError("--continuous-yaw-m must be >= 0")
     if blend_m > 0.0 and (sc.pingpong or sc.name == "S7" or sc.hold):
-        raise ValueError("--continuous-yaw-m is not available for scenario %s" % sc.name)
+        raise ValueError(f"--continuous-yaw-m is not available for scenario {sc.name}")
 
 
 # ---------------------------------------------------------------- carla helpers
+# Keep the callable signature used by existing callers.
+# pylint: disable-next=unused-argument
 def apply_world_settings(carla, world, sc):
+    """Apply synchronous stepping and scenario streaming distances."""
     st = world.get_settings()
     st.synchronous_mode = True
     st.fixed_delta_seconds = sc_mod.FIXED_DT
@@ -307,6 +343,9 @@ def apply_world_settings(carla, world, sc):
 
 
 def make_lidar_bp(bp_lib, kind, det=False):
+    """Configure an RGL or ray-cast LiDAR blueprint for the scenario."""
+    # Load optional runtime dependencies only when this path is used.
+    # pylint: disable-next=import-outside-toplevel
     from lidar_models import apply_preset, MODEL_REGISTRY
     m = MODEL_REGISTRY[sc_mod.LIDAR_MODEL]
     if kind == "rgl":
@@ -341,6 +380,9 @@ def late_sensor_arc_m(tick, speed_mps, dt):
 
 
 def make_model_lidar_bp(bp_lib, model, det=False, range_m=None, sensor_tick=None):
+    """Configure an RGL LiDAR blueprint with the requested preset."""
+    # Load optional runtime dependencies only when this path is used.
+    # pylint: disable-next=import-outside-toplevel
     from lidar_models import apply_preset
     bp = bp_lib.find("sensor.lidar.rgl")
     apply_preset(bp, model, **lidar_preset_kwargs(det))
@@ -360,7 +402,10 @@ def pick_ego_blueprint(bp_lib, wanted=None):
     return cands[0], cands[0].id, int(bool(wanted))
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
 def spawn_ego(carla, world, bp_lib, role, pose, max_ticks=100, wanted_bp=None, info=None):
+    """Spawn the kinematic ego and record the selected blueprint."""
     bp, bp_id, fallback = pick_ego_blueprint(bp_lib, wanted_bp)
     if info is not None:
         info["ego_bp"], info["ego_bp_fallback"] = bp_id, fallback
@@ -382,8 +427,12 @@ def tf6(carla, t):
                            carla.Rotation(roll=t[3], pitch=t[4], yaw=t[5]))
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def spawn_layout_sensors(carla, world, bp_lib, layout, ego, det):
     """The bridge's chain: ego -> base_link -> sensor_kit (util.actor.empty), sensors on the actor they name."""
+    # Load optional runtime dependencies only when this path is used.
+    # pylint: disable-next=import-outside-toplevel
     from lidar_models import apply_preset
     base_link = world.spawn_actor(bp_lib.find("util.actor.empty"), tf6(carla, layout.base_link), attach_to=ego)
     actors = [base_link]
@@ -393,7 +442,7 @@ def spawn_layout_sensors(carla, world, bp_lib, layout, ego, det):
     parents = {"ego": ego, "base_link": base_link, "sensor_kit": sensor_kit}
     for ls in layout.sensors:
         if ls.attach not in parents:
-            raise RunInvalid("layout_attach:%s" % ls.attach)
+            raise RunInvalid(f"layout_attach:{ls.attach}")
         bp = bp_lib.find(ls.blueprint)
         if ls.model:
             apply_preset(bp, ls.model, **lidar_preset_kwargs(det))
@@ -403,6 +452,8 @@ def spawn_layout_sensors(carla, world, bp_lib, layout, ego, det):
     return actors
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals,unused-argument
 def spawn_sensors(carla, world, bp_lib, sc, ego, pose, out, with_raycast, saver, opts=None):
     """Returns the list of spawned sensor actors for the scenario's sensor mode."""
     det = bool(opts and opts.det)
@@ -430,7 +481,12 @@ def spawn_sensors(carla, world, bp_lib, sc, ego, pose, out, with_raycast, saver,
 
 
 def make_raycast_saver(out, every=RAYCAST_EVERY):
+    """Create a callback that saves sampled ray-cast measurements."""
+    # Load optional runtime dependencies only when this path is used.
+    # pylint: disable-next=import-outside-toplevel
     import numpy as np
+    # Load optional runtime dependencies only when this path is used.
+    # pylint: disable-next=import-outside-toplevel
     from compare_raycast import local_to_world
     d = os.path.join(out, "raycast")
     os.makedirs(d, exist_ok=True)
@@ -449,26 +505,36 @@ def make_raycast_saver(out, every=RAYCAST_EVERY):
         t = m.transform
         xyz = local_to_world(loc, (t.location.x, t.location.y, t.location.z),
                              (t.rotation.roll, t.rotation.pitch, t.rotation.yaw))
+        # Preserve percent-format numeric coercion and invalid-input errors.
+        # pylint: disable-next=consider-using-f-string
         np.savez(os.path.join(d, "%08d.npz" % m.frame), xyz=xyz.astype(np.float32), tag=tag,
                  sim_t=np.float64(m.timestamp))
     return saver
 
 
 def destroy_all(actors):
+    """Stop and destroy actors while allowing cleanup to continue."""
     for a in actors:
         try:
             if hasattr(a, "stop"):
                 a.stop()
+        # Preserve best-effort cleanup and the recorded run error contract.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             pass
         try:
             a.destroy()
+        # Preserve best-effort cleanup and the recorded run error contract.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             pass
 
 
 # ---------------------------------------------------------------- scenario bodies
+# Keep the callable signature used by existing callers.
+# pylint: disable-next=unused-argument
 def check_route(sc, route, map_name):
+    """Reject missing routes and routes too short for the scenario."""
     if not sc_mod.route_is_set(route):
         raise RunInvalid(sc_mod.TODO_MARK)
     if sc_mod.route_length(route) < sc.min_route_m - 1e-3:   # a cut route is as long as asked up to float rounding
@@ -478,12 +544,14 @@ def check_route(sc, route, map_name):
 
 
 def tick_timed(world, tick_log):
+    """Advance the world and record the tick wall time in milliseconds."""
     t0 = time.perf_counter()
     world.tick()
     tick_log.append((time.perf_counter() - t0) * 1000.0)
 
 
 def spawn_npc(world, bp_lib, tf):
+    """Spawn the NPC-cycle vehicle with physics disabled."""
     bp = pick_ego_blueprint(bp_lib)[0]   # NPC_BLUEPRINT, or the first vehicle of a slim package that lacks it
     bp.set_attribute("role_name", "npc_cycle")
     npc = world.try_spawn_actor(bp, tf)
@@ -493,7 +561,10 @@ def spawn_npc(world, bp_lib, tf):
     return npc
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches
 def drive(carla, world, bp_lib, sc, route, out, with_raycast, tick_log, deadline, opts):
+    """Drive the scenario route while collecting timing and sensor data."""
     path = Path(route, sc.pingpong, yaw_blend_m=getattr(opts, "continuous_yaw_m", 0.0))
     n_ticks = sc_mod.scenario_ticks(sc, route)
     saver = make_raycast_saver(out, opts.raycast_every) if with_raycast else None
@@ -555,6 +626,8 @@ def drive(carla, world, bp_lib, sc, route, out, with_raycast, tick_log, deadline
     return n_ticks
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals,unused-argument
 def run_load_world_cycle(carla, client, bp_lib_of, sc, out, with_raycast, tick_log, deadline, opts):
     """S7: Town15 <-> Odaiba load_world, 3 round trips."""
     ticks = 0
@@ -588,7 +661,10 @@ def run_load_world_cycle(carla, client, bp_lib_of, sc, out, with_raycast, tick_l
 
 
 # ---------------------------------------------------------------- main
+# Keep the calculation and evaluation order unchanged. Keep the existing scenario control flow unchanged.
+# pylint: disable-next=too-many-locals,too-many-branches,too-many-statements
 def main(argv):
+    """Main."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--pkg", required=True)
     ap.add_argument("--map", required=True, choices=["Odaiba", "Town15", "Town10HD_Opt"])
@@ -625,9 +701,14 @@ def main(argv):
                     help="STATIC only: park the ego at the route point nearest to (x, y); write --hold-near=-1,2")
     ap.add_argument("--settle-ticks", type=int, default=200, help="STATIC: ticks before the hold (default %(default)s)")
     ap.add_argument("--hold-ticks", type=int, default=20, help="STATIC: ticks of the hold (default %(default)s)")
-    ap.add_argument("--continuous-yaw-m", type=float, default=0.0, metavar="M",
-                    help="opt-in diagnostic: turn the ego yaw over the first M metres after each route vertex instead of "
-                         "switching it in one tick (default 0 = switch; never used by the gate or baseline runs)")
+    ap.add_argument(
+        "--continuous-yaw-m",
+        type=float,
+        default=0.0,
+        metavar="M",
+        help="opt-in diagnostic: turn the ego yaw over the first M metres after each route vertex instead of "
+        "switching it in one tick (default 0 = switch; never used by the gate or baseline runs)",
+    )
     a = ap.parse_args(merge_dash_values(argv))
 
     if a.hold_near is not None and a.scenario != "STATIC":
@@ -637,7 +718,7 @@ def main(argv):
         try:
             hold_xy = parse_xy(a.hold_near)
         except ValueError as e:
-            ap.error("--hold-near: %s" % e)
+            ap.error(f"--hold-near: {e}")
     if a.settle_ticks < 0 or a.hold_ticks < 1:
         ap.error("--settle-ticks must be >= 0 and --hold-ticks >= 1")
     if a.max_route_m is not None and a.max_route_m <= 0:
@@ -676,11 +757,19 @@ def main(argv):
     if expected is None:
         exp_str = "nan"
     else:
-        exp_str = "%.1f" % (expected if wp_map else -1.0)
-    base = dict(scenario=a.scenario, map=a.map, seed=a.seed, port=a.port,
-                no_audit=int(a.no_audit), with_raycast=int(a.with_raycast),
-                radius_expected_m=exp_str, speed_mps="%.1f" % sc.speed_mps, fixed_dt="%.3f" % sc_mod.FIXED_DT)
-    info = dict(ego_bp="na", ego_bp_fallback=0, hold_at_m="na", late_sensor_tick="na")
+        exp_str = f"{(expected if wp_map else -1.0):.1f}"
+    base = {
+        "scenario": a.scenario,
+        "map": a.map,
+        "seed": a.seed,
+        "port": a.port,
+        "no_audit": int(a.no_audit),
+        "with_raycast": int(a.with_raycast),
+        "radius_expected_m": exp_str,
+        "speed_mps": f"{sc.speed_mps:.1f}",
+        "fixed_dt": f"{sc_mod.FIXED_DT:.3f}",
+    }
+    info = {'ego_bp': "na", 'ego_bp_fallback': 0, 'hold_at_m': "na", 'late_sensor_tick': "na"}
     t_start = time.time()
     proc, pgid = None, None
     tick_log = []
@@ -691,7 +780,9 @@ def main(argv):
             try:
                 layout = sensor_layout.load_layout(a.sensor_layout, a.udp_port_offset)
             except (OSError, ValueError) as e:
-                raise RunInvalid("layout_invalid:%s" % str(e).replace(" ", "_")[:120])
+                # Preserve the existing exception chain and runner traceback output.
+                # pylint: disable-next=raise-missing-from
+                raise RunInvalid(f"layout_invalid:{str(e).replace(' ', '_')[:120]}")
         opts = types.SimpleNamespace(det=a.det, layout=layout, npc_cycle=a.npc_cycle, hold_s=None,
                                      raycast_every=a.raycast_every, info=info, continuous_yaw_m=a.continuous_yaw_m)
         route = sc_mod.route_for(sc.name, a.map, sc)
@@ -706,13 +797,15 @@ def main(argv):
         if sc.hold:
             _, hold_s = nearest_route_point(route, *(hold_xy if hold_xy is not None else route[0][:2]))
             opts.hold_s = hold_s
-            info["hold_at_m"] = "%.1f" % hold_s
+            info["hold_at_m"] = f"{hold_s:.1f}"
         deadline = t_start + duration + TIMEOUT_MARGIN_S
         if layout is not None:
             free, busy = udp_ports_free(sensor_layout.udp_ports(layout))
             if not free:
-                raise RunInvalid("udp_port_busy:%d" % busy)
+                raise RunInvalid(f"udp_port_busy:{busy}")
 
+        # Load optional runtime dependencies only when this path is used.
+        # pylint: disable-next=import-outside-toplevel
         import carla  # noqa: E402  (a python with the package wheel)
         proc = start_server(a.pkg, a.out, a.port, not a.no_audit, dump_every, server_extra)
         pgid = proc.pid
@@ -731,12 +824,18 @@ def main(argv):
             st = client.get_world().get_settings()
             st.synchronous_mode = False
             client.get_world().apply_settings(st)
+        # Preserve best-effort cleanup and the recorded run error contract.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             pass
     except RunInvalid as e:
         status, reason = "invalid", e.reason
+    # Preserve best-effort cleanup and the recorded run error contract.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:  # noqa: BLE001
-        status, reason = "error", "%s" % type(e).__name__
+        status, reason = "error", f"{type(e).__name__}"
+        # Load optional runtime dependencies only when this path is used.
+        # pylint: disable-next=import-outside-toplevel
         import traceback
         traceback.print_exc()   # the run.txt line keeps only the type; the stack goes to the runner's stderr
     finally:
@@ -749,14 +848,21 @@ def main(argv):
             if stopped == 0 and status == "ok":
                 status, reason = "invalid", "server_not_stopped"
         with open(os.path.join(a.out, "tick_ms.txt"), "w", encoding="utf-8") as f:
-            f.write("".join("%.3f\n" % v for v in tick_log))
-        new = dict(det=int(a.det), layout=os.path.basename(a.sensor_layout) if a.sensor_layout else "none",
-                   ego_bp=info["ego_bp"], ego_bp_fallback=info["ego_bp_fallback"],
-                   udp_port_offset=a.udp_port_offset if a.sensor_layout else 0,
-                   hit_dump_every=dump_every or 0, npc_cycle=int(a.npc_cycle), hold_at_m=info["hold_at_m"], late_sensor_tick=info["late_sensor_tick"],
-                   server_args=",".join(server_extra) or "none", continuous_yaw_m="%.1f" % a.continuous_yaw_m)
-        extra = dict(ticks=ticks, elapsed_s="%.1f" % (time.time() - t_start),
-                     server_stopped=stopped, pkg=a.pkg)
+            f.write("".join(f"{v:.3f}\n" for v in tick_log))
+        new = {
+            "det": int(a.det),
+            "layout": os.path.basename(a.sensor_layout) if a.sensor_layout else "none",
+            "ego_bp": info["ego_bp"],
+            "ego_bp_fallback": info["ego_bp_fallback"],
+            "udp_port_offset": a.udp_port_offset if a.sensor_layout else 0,
+            "hit_dump_every": dump_every or 0,
+            "npc_cycle": int(a.npc_cycle),
+            "hold_at_m": info["hold_at_m"],
+            "late_sensor_tick": info["late_sensor_tick"],
+            "server_args": ",".join(server_extra) or "none",
+            "continuous_yaw_m": f"{a.continuous_yaw_m:.1f}",
+        }
+        extra = {'ticks': ticks, 'elapsed_s': f"{time.time() - t_start:.1f}", 'server_stopped': stopped, 'pkg': a.pkg}
         if reason:
             extra["reason"] = reason
         write_run(a.out, status=status, **base, **new, **extra)

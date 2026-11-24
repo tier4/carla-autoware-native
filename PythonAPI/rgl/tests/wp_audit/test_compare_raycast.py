@@ -9,6 +9,8 @@ np = pytest.importorskip("numpy")
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Resolve sibling modules after the standalone script path setup.
+# pylint: disable-next=wrong-import-position
 import compare_raycast as cr  # noqa: E402
 
 
@@ -18,6 +20,7 @@ def _grid(n, x0, y0=0.0):
 
 
 def test_cell_sets_synthetic():
+    """Verify cell sets synthetic."""
     common = _grid(100, 0.0)
     rgl = np.vstack([common, _grid(5, 1000.0)])
     ray = np.vstack([common, _grid(3, 2000.0)])
@@ -32,6 +35,7 @@ def test_cell_sets_synthetic():
 
 
 def test_majority_tag_for_raycast_only():
+    """Verify majority tag for raycast only."""
     ray = np.array([[5.5, 5.5, 0.5], [5.6, 5.4, 0.5], [5.2, 5.2, 0.5]])
     tags = np.array([7, 7, 3], dtype=np.int32)
     res = cr.compare_points(np.zeros((0, 3)), ray, tags, cell=1.0)
@@ -40,6 +44,7 @@ def test_majority_tag_for_raycast_only():
 
 
 def test_mask_tags():
+    """Verify mask tags."""
     ray = np.array([[5.5, 5.5, 0.5], [8.5, 5.5, 0.5]])
     tags = np.array([22, 1], dtype=np.int32)
     res = cr.compare_points(np.zeros((0, 3)), ray, tags, cell=1.0, mask_tags={22})
@@ -48,6 +53,7 @@ def test_mask_tags():
 
 def test_negative_coordinates_floor():
     # -0.2 and +0.2 are in different 1 m cells
+    """Verify negative coordinates floor."""
     a = np.array([[-0.2, 0.5, 0.5]])
     b = np.array([[0.2, 0.5, 0.5]])
     res = cr.compare_points(a, b, np.zeros(1, dtype=np.int32), cell=1.0)
@@ -56,6 +62,7 @@ def test_negative_coordinates_floor():
 
 def test_local_to_world_yaw90():
     # CARLA left-handed: x forward, y right. yaw 90 deg turns forward (+x) into +y.
+    """Verify local to world yaw90."""
     pts = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
     w = cr.local_to_world(pts, (10.0, 20.0, 30.0), (0.0, 0.0, 90.0))
     # local (1,0,0) -> world (10, 21, 30); local (0,1,0) (right) -> world (9, 20, 30)
@@ -65,6 +72,7 @@ def test_local_to_world_yaw90():
 
 def test_local_to_world_pitch_and_roll_match_carla_formula():
     # CARLA rotation matrix (UE FRotationMatrix): pitch up (positive) raises forward vector z.
+    """Verify local to world pitch and roll match carla formula."""
     p = np.array([[1.0, 0.0, 0.0]])
     w = cr.local_to_world(p, (0, 0, 0), (0.0, 30.0, 0.0))
     assert np.allclose(w[0], [math.cos(math.radians(30)), 0.0, math.sin(math.radians(30))], atol=1e-9)

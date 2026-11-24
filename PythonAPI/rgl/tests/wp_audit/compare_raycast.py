@@ -29,6 +29,8 @@ DUMP_MAGIC = 0x52474C48
 DUMP_HEADER = struct.Struct("<IId6f")  # magic, count, sim_t, pose[6]
 
 
+# Keep the calculation and evaluation order unchanged.
+# pylint: disable-next=too-many-locals
 def local_to_world(points, location, rotation_deg):
     """Same as carla.Transform(location, Rotation(roll,pitch,yaw)).transform(p).
 
@@ -82,15 +84,19 @@ def compare_points(rgl_xyz, ray_xyz, ray_tags, cell=1.0, mask_tags=None):
 
 
 def format_counts(res):
+    """Format the occupancy-grid comparison counts."""
+    # Preserve percent-format numeric coercion and invalid-input errors.
+    # pylint: disable-next=consider-using-f-string
     return "rgl_only_cells=%d raycast_only_cells=%d both_cells=%d" % (
         res["rgl_only_cells"], res["raycast_only_cells"], res["both_cells"])
 
 
 def write_csv(path, rows):
+    """Write differing occupancy cells as a UTF-8 CSV file."""
     with open(path, "w", encoding="utf-8") as f:
         f.write("x,y,z,raycast_tag\n")
         for x, y, z, t in rows:
-            f.write("%.3f,%.3f,%.3f,%s\n" % (x, y, z, t))
+            f.write(f"{x:.3f},{y:.3f},{z:.3f},{t}\n")
 
 
 def read_rgl_dump(path):
@@ -99,12 +105,13 @@ def read_rgl_dump(path):
         data = f.read()
     magic, count, sim_t, *pose = DUMP_HEADER.unpack_from(data, 0)
     if magic != DUMP_MAGIC:
-        raise ValueError("bad magic in %s" % path)
+        raise ValueError(f"bad magic in {path}")
     body = np.frombuffer(data, dtype="<f4", count=count * 3, offset=DUMP_HEADER.size)
     return sim_t, pose, body.reshape(-1, 3).astype(np.float64)
 
 
 def read_raycast(path):
+    """Read the timestamp, coordinates and tags from a ray-cast dump."""
     z = np.load(path)
     sim_t = float(z["sim_t"]) if "sim_t" in z.files else None
     return sim_t, z["xyz"], z["tag"]
@@ -126,7 +133,10 @@ def _ray_files(d):
     return out
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
 def run(rgl_dir, ray_dir, cell, mask_tags, static, tol=0.026):
+    """Pair RGL and ray-cast frames and compare their occupied cells."""
     rg = _rgl_files(rgl_dir)
     rc = _ray_files(ray_dir)
     if not rg or not rc:
@@ -136,7 +146,7 @@ def run(rgl_dir, ray_dir, cell, mask_tags, static, tol=0.026):
     else:
         pairs = []
         for t, rxyz in rg:
-            best = min(rc, key=lambda e: abs((e[0] if e[0] is not None else 1e18) - t))
+            best = min(rc, key=lambda e, t=t: abs((e[0] if e[0] is not None else 1e18) - t))
             if best[0] is not None and abs(best[0] - t) <= tol:
                 pairs.append((rxyz, best[1], best[2]))
     if not pairs:
@@ -153,6 +163,7 @@ def run(rgl_dir, ray_dir, cell, mask_tags, static, tol=0.026):
 
 
 def main(argv):
+    """Main."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--rgl", required=True)
     ap.add_argument("--raycast", required=True)
@@ -168,6 +179,8 @@ def main(argv):
         return 1
     csv_path = a.csv or os.path.join(a.rgl, "diff_cells.csv")
     write_csv(csv_path, res["diff_rows"])
+    # Preserve percent-format numeric coercion and invalid-input errors.
+    # pylint: disable-next=consider-using-f-string
     print("%s pairs=%d csv=%s" % (format_counts(res), res["pairs"], csv_path))
     return 0
 

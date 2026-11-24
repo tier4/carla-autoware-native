@@ -29,11 +29,13 @@ SYNC_TRIGGERS = ("init", "time", "distance", "level")
 # stream_covered is not used: the audit counts only components of loaded levels, and a
 # map that never reports full coverage (S3) would otherwise have no steady line at all.
 # steady_valid = steady_rows >= 0.2 * frames. Keys missing from a line count as 0.
-# The World Partition culling adds its queue: a line with wp_pending > 0 (jobs of the World Partition culling of non-Static parts
+# The World Partition culling adds its queue: a line with wp_pending > 0 (jobs
+# of the World Partition culling of non-Static parts
 # not done yet) is not steady either.
 
 
 def parse_kv(text):
+    """Extract whitespace-separated key=value fields."""
     out = {}
     for tok in text.split():
         if "=" in tok:
@@ -59,6 +61,7 @@ def percentile(values, q):
 
 
 def parse_lines(lines):
+    """Extract scene-audit and scene-sync records from log lines."""
     audits, syncs = [], []
     for ln in lines:
         i = ln.find(AUDIT_TAG)
@@ -114,6 +117,7 @@ def _present(rows, key):
 
 
 def longest_run(flags):
+    """Return the longest consecutive sequence of true flags."""
     best = run = 0
     for f in flags:
         run = run + 1 if f else 0
@@ -121,10 +125,14 @@ def longest_run(flags):
     return best
 
 
+# Keep the existing interface, calculation order and control flow.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
 def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None, audit=True):
-    """audit=False: a --no-audit run; there is no audit line to check the radius with, so radius_mismatch is None (na)."""
+    """Summarize a run; audit=False leaves radius_mismatch as None (na)."""
     audits, syncs = parse_lines(lines)
-    g = lambda key: [_num(a, key) for a in audits]  # noqa: E731
+    def g(key):
+        """Read a numeric column from the audit rows."""
+        return [_num(a, key) for a in audits]
 
     radii = g("parent_stream_radius_m")
     # with the audit on, no audit line at all is itself invalid
@@ -196,7 +204,7 @@ def summarize_lines(lines, scenario, map_name, radius_expected_m, tick_ms=None, 
         "pending_ism_max": int(max(g("pending_ism"), default=0)),
         "pending_ism_run_max": longest_run(v > 0 for v in g("pending_ism")),
         "spline_registered_max": int(max(g("spline_registered"), default=0)),
-        "sync_triggers": ",".join("%s:%d" % (t, triggers.count(t)) for t in SYNC_TRIGGERS),
+        "sync_triggers": ",".join(f"{t}:{triggers.count(t)}" for t in SYNC_TRIGGERS),
         "stream_warnings": warnings,
         # World Partition culling of non-Static parts. Audit keys: na without audit lines or without the key.
         # missing_wp_culled_in_range is counted on every audit line, pending or not (a known part in range).
@@ -240,14 +248,16 @@ _ORDER = [
 
 
 def format_summary(r):
+    """Format the summary fields as ordered key=value pairs."""
     parts = []
     for key, fmt in _ORDER:
         v = r[key]
-        parts.append("%s=%s" % (key, "na" if v is None else fmt % v))
+        parts.append(f"{key}={'na' if v is None else fmt % v}")
     return " ".join(parts)
 
 
 def read_run_txt(path):
+    """Read run txt."""
     try:
         with open(path, encoding="utf-8") as f:
             return parse_kv(f.read())
@@ -256,6 +266,7 @@ def read_run_txt(path):
 
 
 def summarize_dir(d):
+    """Read run files and compute the audit summary."""
     run = read_run_txt(os.path.join(d, "run.txt"))
     with open(os.path.join(d, "server.stderr"), encoding="utf-8", errors="replace") as f:
         lines = f.read().splitlines()
@@ -271,6 +282,7 @@ def summarize_dir(d):
 
 
 def main(argv):
+    """Main."""
     if not argv:
         print("usage: summarize.py <out_dir>...", file=sys.stderr)
         return 2
@@ -279,7 +291,7 @@ def main(argv):
         try:
             r = summarize_dir(d)
         except OSError as e:
-            print("summary status=invalid reason=unreadable dir=%s err=%s" % (d.replace(" ", "_"), e.__class__.__name__))
+            print(f"summary status=invalid reason=unreadable dir={d.replace(' ', '_')} err={e.__class__.__name__}")
             rc = 1
             continue
         line = format_summary(r)
