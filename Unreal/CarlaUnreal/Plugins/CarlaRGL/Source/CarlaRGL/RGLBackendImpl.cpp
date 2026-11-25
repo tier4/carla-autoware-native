@@ -18,6 +18,9 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Math/UnrealMathUtility.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include <util/ue-header-guard-end.h>
 
 #include <cmath>
@@ -155,6 +158,92 @@ static const FRGLPointCloudFormat* FindFormat(const char* Name)
         }
     }
     return nullptr;
+}
+
+// ============================================================================
+// Debug hit dump (rgl.Debug.HitDumpDir / -rgl-debug-hit-dump=)
+// ============================================================================
+
+/// One grep-friendly line; Shipping compiles RGLLog::Info out, hence stderr there (as SetSelfCutout does).
+static void RglBackendEmitLine(const FString& Line)
+{
+#if UE_BUILD_SHIPPING
+    fprintf(stderr, "%s\n", TCHAR_TO_UTF8(*Line));
+#else
+    RGLLog::Info(TCHAR_TO_UTF8(*Line));
+#endif
+}
+
+/// Writes <Dir>/0x<sensor-id>_<frame>.bin, little-endian:
+///   uint32 magic = 0x52474c48, uint32 count, double sim_t,
+///   float sensor_pose[6] = x, y, z [m], roll, pitch, yaw [deg]   (carla.Transform of the sensor)
+///   count x float[3]   = hit points in CARLA world coordinates [m] (carla.Location: UE axes, left-handed).
+/// The RGL scene here is UE's world axes in metres (RGLCoord::ToRGL transposes and scales, it does not mirror),
+/// and the yield node holds sensor-frame points (ToSensorNode = inverse sensor pose); they go back to the world
+/// with the sensor pose and RGLCoord's m -> cm, then cm -> CARLA m. No Y flip: that is only the ROS 2 branch's.
+static bool RglWriteHitDump(const FRGLSession* Session, const FTransform& SensorWorldTransform, double SimTime,
+                            const FString& Dir, uint64 Frame, FString& OutPath)
+{
+    int32_t Count = 0;
+    int32_t PointSize = 0;
+    if (rgl_graph_get_result_size(Session->YieldNode, RGL_FIELD_XYZ_VEC3_F32, &Count, &PointSize) != RGL_SUCCESS)
+    {
+        return false;
+    }
+    // rgl_graph_get_result_data writes every point it has, so a clamped buffer would overflow: refuse instead.
+    if (Count < 0 || Count > 10000000)
+    {
+        return false;
+    }
+    TArray<rgl_vec3f> LocalPoints;
+    LocalPoints.SetNumUninitialized(Count);
+    if (Count > 0 &&
+        rgl_graph_get_result_data(Session->YieldNode, RGL_FIELD_XYZ_VEC3_F32, LocalPoints.GetData()) != RGL_SUCCESS)
+    {
+        return false;
+    }
+
+    TArray<uint8> Bytes;
+    Bytes.Reserve(40 + Count * 12);
+    auto Put = [&Bytes](const void* Data, SIZE_T NumBytes)
+    {
+        Bytes.Append(static_cast<const uint8*>(Data), static_cast<int32>(NumBytes));
+    };
+
+    const uint32 Magic = 0x52474c48u;
+    const uint32 NumPoints = static_cast<uint32>(Count);
+    Put(&Magic, sizeof(Magic));
+    Put(&NumPoints, sizeof(NumPoints));
+    Put(&SimTime, sizeof(SimTime));
+
+    const FVector SensorCm = SensorWorldTransform.GetLocation();
+    const FRotator SensorRot = SensorWorldTransform.Rotator();
+    const float Pose[6] = {
+        static_cast<float>(SensorCm.X * RGLCoord::UE_TO_RGL),
+        static_cast<float>(SensorCm.Y * RGLCoord::UE_TO_RGL),
+        static_cast<float>(SensorCm.Z * RGLCoord::UE_TO_RGL),
+        static_cast<float>(SensorRot.Roll),
+        static_cast<float>(SensorRot.Pitch),
+        static_cast<float>(SensorRot.Yaw)
+    };
+    Put(Pose, sizeof(Pose));
+
+    for (const rgl_vec3f& Local : LocalPoints)
+    {
+        const FVector WorldCm = SensorWorldTransform.TransformPosition(RGLCoord::ToUEVec(Local));
+        const float Xyz[3] = {
+            static_cast<float>(WorldCm.X * RGLCoord::UE_TO_RGL),
+            static_cast<float>(WorldCm.Y * RGLCoord::UE_TO_RGL),
+            static_cast<float>(WorldCm.Z * RGLCoord::UE_TO_RGL)
+        };
+        Put(Xyz, sizeof(Xyz));
+    }
+
+    IFileManager::Get().MakeDirectory(*Dir, /*Tree=*/true);
+    // Zero-padded frame so that a lexical sort of the file names is the time order.
+    OutPath = FPaths::Combine(Dir, FString::Printf(TEXT("0x%llx_%020llu.bin"),
+        static_cast<unsigned long long>(reinterpret_cast<UPTRINT>(Session)), static_cast<unsigned long long>(Frame)));
+    return FFileHelper::SaveArrayToFile(Bytes, *OutPath);
 }
 
 // ============================================================================
@@ -698,6 +787,19 @@ void FRGLBackendImpl::SetSelfCutout(FRGLSessionHandle Handle, AActor* Vehicle, f
 }
 
 // ============================================================================
+// SetAuditParent
+// ============================================================================
+
+void FRGLBackendImpl::SetAuditParent(FRGLSessionHandle Handle, AActor* RootParent)
+{
+    if (!Handle)
+    {
+        return;
+    }
+    static_cast<FRGLSession*>(Handle)->AuditParent = RootParent;
+}
+
+// ============================================================================
 // GenerateRayPattern
 // ============================================================================
 
@@ -1018,6 +1120,10 @@ FRGLTickResult FRGLBackendImpl::Tick(
             SensorWorldTransform.GetLocation(),
             RegistrationDistanceCm,
             SimulationTime);
+        // The range the rays reach and the actor the sensor rides on: the scene audit reads them, and so does the sync
+        // (the distance trigger's cap, the in-range creates, the World Partition culling and the stream warning).
+        SceneMgr.SetSensorAuditRange(static_cast<const void*>(Session), Desc.Range);
+        SceneMgr.SetSensorAuditParent(static_cast<const void*>(Session), Session->AuditParent.Get());
         if (Session->SelfCutoutRadiusCm > 0.0f)
         {
             SceneMgr.SetSensorSelfCutout(
@@ -1029,6 +1135,8 @@ FRGLTickResult FRGLBackendImpl::Tick(
                 Session->SelfCutoutMaxElevationDeg);
         }
         SceneMgr.Update(World, SimulationTime);
+        // The scene this scan will see: after Update, before the raytrace; one line per frame at most.
+        SceneMgr.MaybeEmitAudit(World, SimulationTime, GFrameCounter);
     }
 
     // 2. Ray pattern: generate once, then cache (same DeltaSeconds = same pattern)
@@ -1110,6 +1218,24 @@ FRGLTickResult FRGLBackendImpl::Tick(
     {
         CollectResults(Session, SensorWorldTransform, bNeedWorldPoints, Result);
         T2 = FPlatformTime::Seconds();
+    }
+
+    // 6b. Debug hit dump: the first scan and every N-th after it, read back even when no client listens.
+    const FString HitDumpDir = FRGLSceneManager::GetHitDumpDir();
+    if (!HitDumpDir.IsEmpty() &&
+        (Session->HitDumpScans++ % static_cast<uint64>(FRGLSceneManager::GetHitDumpEvery())) == 0)
+    {
+        const double DumpSimTime = (SimulationTime >= 0.0) ? SimulationTime : (World ? World->GetTimeSeconds() : -1.0);
+        FString DumpPath;
+        const bool bDumped = RglWriteHitDump(Session, SensorWorldTransform, DumpSimTime, HitDumpDir, GFrameCounter, DumpPath);
+        bool& bReported = bDumped ? Session->bHitDumpReported : Session->bHitDumpFailureReported;
+        if (!bReported)   // the first written file and the first failure of each sensor
+        {
+            bReported = true;
+            RglBackendEmitLine(FString::Printf(TEXT("rgl_hit_dump sensor=0x%llx ok=%d every=%d path=%s"),
+                static_cast<unsigned long long>(reinterpret_cast<UPTRINT>(Session)), bDumped ? 1 : 0,
+                FRGLSceneManager::GetHitDumpEvery(), DumpPath.IsEmpty() ? *HitDumpDir : *DumpPath));
+        }
     }
 
     // [DEBUG] Log first 10 ticks with timing breakdown

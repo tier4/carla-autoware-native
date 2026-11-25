@@ -1,6 +1,8 @@
 CARLA with RobotecGPULidar (RGL)
 ================================
 
+[日本語](README_RGL.ja.md)
+
 This document describes how to build and run CARLA with
 [RobotecGPULidar (RGL)](https://github.com/RobotecAI/RobotecGPULidar) — a
 GPU-accelerated ray-traced LiDAR simulation library. The setup is driven by
@@ -400,7 +402,7 @@ Known limits:
 * **Ego self-occlusion costs returns**: those rays used to pass through the unregistered
   ego body and hit the scene beyond it. They now terminate on the body and come back below
   the sensor's minimum range, so they are dropped rather than reported. Measured on an
-  empty Odaiba with the j6gen2 ego and its two roof Pandars, the raw cloud shrinks 17.8%
+  empty Odaiba with a test ego vehicle and its two roof Pandars, the raw cloud shrinks 17.8%
   (1,186,458 -> 975,408 points over 20 frames) with the skeletal path on. This matches a
   real vehicle, which does occlude its own lidar, but it is a large enough change that
   detector behaviour shifts: in that same scene a roadside object 82 m away went from
@@ -424,3 +426,210 @@ Measured on the Shipping package (`check_dynamic_actor_visibility.py`, same bina
 
 Tick-cost impact (7 walkers + 3 vehicles + 1 RGL lidar, 20 Hz sync, world.tick() wall
 time): +11.4% median vs skeletal OFF (within the +20% budget).
+
+## World Partition maps
+
+On World Partition maps (for example Town15), Unreal Engine loads the map in cells around streaming sources, and the RGL scene follows what is loaded. Static meshes retain their sensor-sphere selection and leave the scene when their cell unloads. What is not loaded is not in the RGL scene, just as it is not in the physics scene that `ray_cast` lidars trace. To see an area, get it loaded (see below). On maps without World Partition (for example Town10HD_Opt), non-Static parts are still registered at any distance: the distance selection of non-Static parts described below applies to World Partition maps only.
+
+The following apply to every map, with or without World Partition, so the point clouds of maps such as Town10HD_Opt change too:
+
+* Only sky domes and sky spheres are left out by name: a static mesh whose name contains `SkySphere`, `SkyDome`, `Sky_Sphere` or `Sky_Dome` (in any letter case), and a component wider than 2 km whose owner, component or mesh name contains `sky`. Before, any `sky` in those names left a component out, which also dropped CARLA's skyscraper parts (`SM_Skysc*`) and other buildings; lidars see them now.
+* An instanced static mesh (ISM) component that is unregistered (its cell is streamed out, or its owner unregisters it) leaves the RGL scene at the next scene Update instead of the next sync, so its instances leave no ghost hits.
+* The instances of a Static ISM are compared with the sensor spheres again after every sync, capped per scene Update by `rgl.Scene.MaxIsmInstanceChangesPerUpdate`, instead of being chosen once when the component is registered: instances the sensors approach are added, those they leave behind are removed.
+* A level added with static geometry inside some sensor's registration radius syncs the scene at once (at most once per 0.3 s of simulation time), so newly streamed cells do not wait for the periodic sync.
+* The periodic sync counts simulation time, and the distance trigger stays below the margin between a sensor's registration radius and its range (see the scene sync knobs below). The legacy values listed there restore the original timing.
+
+On World Partition maps only, non-Static static-mesh components (both Movable and Stationary) and ISM/HISM instances that have not been observed moving are selected against the union of all sensor spheres, with a speed-dependent registration margin. Pawn-owned, physics-driven and attached vehicle parts retain their existing registration; the protection also follows attachment ancestors, movement/skeletal owners and sensor carriers. Skeletal mesh distance, budget and self-cutout policies are unchanged. Enabling `rgl.Scene.WpMovableCulling` requires an actual World Partition world; map names and streaming coverage do not enable it. Setting it to 0 restores the old path.
+
+Each sync still scans the loaded world, including candidates previously left out. Nonzero component/owner velocity or a changed component/instance transform promotes the component to protection for its lifetime; one moving ISM instance protects the whole component. This check is at syncs, not a new full scan on every Update. Registered entity transforms continue to update before raytracing. Regular components use their bounds sphere. Each instance uses the mesh bounds origin transformed to world space and its sphere radius multiplied by the largest absolute scale, including offset pivots and negative/nonuniform scale. Registration needs an intersection with any sensor's load sphere; removal needs to be outside every unload sphere.
+
+The margin uses configured sensor and object speed bounds `V_s` and `V_o` (50 m/s each by default), including objects that may start moving after the scan. With distances in metres and times in simulation seconds, `I` is the effective sync interval setting, `d` the world dt, `U` the maximum scene Update/active sensor pose-refresh gap, and `L` the creation deadline:
+
+```text
+T_sync_max = ceil(I / d) * max(U, d) + U   (Update clock, rgl.Scene.SyncClock = 0)
+           = I + U                       (simulation clock, the default)
+H = T_sync_max + L + U
+M = max(MinMarginM, (V_s + V_o) * H)
+R_load = max(RegistrationDistance, SensorRange + M)
+R_unload = R_load * UnloadDistanceFactor + UnregistrationHysteresis
+```
+
+The default simulation clock gives `T_sync_max = 1.1 s` and a 220 m margin at any `d` with the default `I=1 s`, `U=0.1` and `L=1`. The Update clock (the original timer) advances by world dt per scene Update: `I=1 s` is about 2 s between syncs at `d=0.05`, or 4 s at `d=0.025`, when Updates are 0.1 s apart, so the bounds are 2.1/4.1 s and the margins 320/520 m. A WP-only simulation-time deadline forces a sync when `sim_now - last_wp_sync_sim + U > T_assumed + 1e-6`, using the bound saved by the last culling sync. This protects against dt shrinking between syncs. New sensors, pose jumps, time rewind and live changes to the horizon inputs also force a sync; the other triggers (time, distance, level, new sensor) work on every map as described under the scene sync knobs.
+
+Every add job whose bounds already intersect some sensor's raw range when a sync builds the queue (a part found there for the first time, or a known part that came into range) is created in that sync's Update without entity or mesh-upload caps or ms budgets. This can produce a start-up burst. Pre-emptive creation in the margin and queued removals use the WP queue, prioritizing the earliest range-arrival deadline; cached meshes and individual ISM entities also consume its entity budget. `L` includes all queue/upload/partial-creation waits and is not the 4 ms wall-time budget. That budget is checked between changes after the first change; at least one change proceeds, so it is not a hard upper bound on an Update's wall time.
+
+The continuity contract requires Update/pose gaps within `U`, speeds within the configured bounds, and covered creation jobs completed within `L`. Exceeding these records `rgl_scene_wp_cull_violation` (including `update_gap`, `pose_gap`, `sensor_speed`, `object_speed`, `queue_age` and `late_create`). Only the first interval immediately after a new sensor's init sync may exceed `U` by at most one world dt; its raw value remains in `rgl_scene_wp_cull_startup_gap`. The scene-wide exemption uses the sensors present at the interval's start, so sensors joining at its end do not invalidate that first interval. Later or larger gaps remain violations. A sensor that refreshes its pose less often than `rgl.Scene.MovableMaxUpdateGapSeconds` (0.1 s by default; for example a 5 Hz lidar, or any sensor with a `sensor_tick` above 0.1 s) breaks the `U` contract at every refresh (`pose_gap`, and `update_gap` when no faster sensor drives the scene Updates) and is outside the continuous-motion guarantee; raising `rgl.Scene.MovableMaxUpdateGapSeconds` to its refresh interval brings it back inside, at the cost of a wider margin. Start-up, new sensors, arbitrary teleports and instantaneous mass appearances have no general guarantee of both zero missing entities and a sub-100 ms tick. Unloaded objects remain outside the contract. The audit still counts known WP candidates missing within raw range, even while pending or being promoted.
+
+> [!NOTE]
+> Landscape (terrain heightfield) components are not registered in the RGL scene, while
+> `ray_cast` lidars do hit them. Where the ground is a Landscape, the RGL lidar gets no
+> ground returns.
+
+### Which areas are loaded
+
+Cells are loaded around World Partition streaming sources. On a World Partition map,
+CARLA gives every vehicle and walker it spawns a spherical streaming source:
+
+| Spawned actor | Radius of its streaming source |
+|---|---|
+| Vehicle or walker whose `role_name` contains `hero` or `ego_vehicle` (in any letter case) | `tile_stream_distance` at spawn time (default 3000 m) |
+| Any other vehicle or walker (for example `role_name` = `ego`) | 200 m |
+
+The spectator (the player controller's view) is a streaming source too. Sensors and the
+other actors CARLA spawns are not.
+
+* Attach RGL lidars to the hero vehicle. A `role_name` such as `ego` does not make a hero:
+  that vehicle loads only 200 m around it, and a sensor on it with a longer range sees
+  only what other streaming sources load beyond that.
+* `tile_stream_distance` applies to the hero only, and only when the hero spawns: the
+  radius is taken at spawn time, and changing the setting later does not resize it.
+* An `actor_active_distance` larger than `tile_stream_distance` raises
+  `tile_stream_distance` to the same value (CARLA logs a warning). The default
+  `actor_active_distance` is 2000 m, so a `tile_stream_distance` below 2 km takes effect
+  only with a smaller `actor_active_distance`. Set both before spawning the hero:
+
+  ```python
+  settings = world.get_settings()
+  settings.tile_stream_distance = 500.0   # m: the hero's streaming radius
+  settings.actor_active_distance = 500.0  # m: not larger than tile_stream_distance
+  world.apply_settings(settings)
+  # then spawn the hero (role_name='hero') and attach the lidars to it
+  ```
+
+* A roadside sensor (attached to nothing, or to an actor without a streaming source) has
+  its range loaded only when another streaming source covers it. Raise the hero's
+  `tile_stream_distance` until the hero's sphere holds the sensor's whole range (the
+  distance from the hero to the sensor plus the sensor's range is at most the radius), or
+  mount the sensor on a vehicle.
+
+### The stream warning
+
+On a World Partition map, after each static scene sync (periodic, and sooner when a sensor
+moves), the scene manager checks whether each sensor's range sphere is streamed in (its
+World Partition cells are activated). A sensor whose range stays not streamed in for 5 s
+of simulation time prints one line, once per registration of the sensor:
+
+```text
+rgl_scene_stream_warning t=12.400 sensor=0x7f3a2c001230 range_m=200 parent=BP_Car_C_1 parent_stream_radius_m=150 hint=attach_the_sensor_to_a_hero_vehicle_or_raise_tile_stream_distance
+```
+
+| Key | Meaning |
+|---|---|
+| `t` | Simulation time (s) of the check that printed the line |
+| `sensor` | Sensor id (the RGL session handle, as on the `rgl_hit_dump` line) |
+| `range_m` | Radius of the checked sphere: the sensor's range (m) |
+| `parent` | Root actor of the sensor's attachment chain, or `none` |
+| `parent_stream_radius_m` | Radius of that actor's streaming source (m); `-1` when it has none |
+| `hint` | What to do: attach the sensor to a hero vehicle, or raise `tile_stream_distance` |
+
+* No line is printed on maps without World Partition, nor while the parent's own
+  streaming source holds the whole range sphere: that is streaming still in progress (the
+  default 3 km hero radius can take more than 5 s to load at start-up), which a setting
+  cannot fix.
+* The check runs at syncs only, so the line comes at the first sync at least 5 s after
+  the first check that found the range not streamed in.
+* The line is printed once per registration of the sensor, even if the range is loaded
+  and lost again later. A sensor that stops ticking for more than 5 s is dropped from the
+  scene manager; when it ticks again it is registered anew and can print the line again.
+
+### Sync cost with the default 3 km hero radius
+
+Each sync still scans every actor of the loaded world. With the default `tile_stream_distance` (3000 m), the hero keeps a 3 km disc loaded. Measured on 2026-11-20 on an RTX 4090 workstation: Town15, one 200 m lidar on a hero driving the same route, dt 0.05 s, audit off, the World Partition knob defaults below. The first rows use the shipped defaults of every knob (three runs). The other rows come from an earlier build of this branch with the same World Partition culling but before the sync clock and the range-edge knobs existed; it behaves like the legacy values listed under the scene sync knobs (Update clock, 1 s interval, uncapped 0.2 R distance trigger, no in-range create priority), with seeds 0/1/2 and a hero streaming radius of 3000 m or 150 m. Values are sync `elapsed_ms`:
+
+| Settings / run | Hero streaming radius | p95, all syncs (ms) | Max excluding first init (ms) | Max including first init (ms) |
+|---|---|---|---|---|
+| Shipped defaults / 1 | 3000 m (default) | 33.70 | 43.01 | 166.97 |
+| Shipped defaults / 2 | 3000 m (default) | 32.88 | 42.85 | 178.89 |
+| Shipped defaults / 3 | 3000 m (default) | 32.73 | 39.36 | 181.03 |
+| Legacy sync values / 1 | 3000 m (default) | 35.73 | 38.56 | 192.75 |
+| Legacy sync values / 2 | 3000 m (default) | 36.67 | 38.54 | 180.33 |
+| Legacy sync values / 3 | 3000 m (default) | 36.26 | 40.71 | 190.65 |
+| Legacy sync values / 1 | 150 m | 25.58 | 28.22 | 185.93 |
+| Legacy sync values / 2 | 150 m | 24.51 | 26.06 | 194.25 |
+| Legacy sync values / 3 | 150 m | 23.83 | 27.31 | 199.16 |
+
+On the 3 km route the p95 was about 81 ms before the World Partition culling of non-Static parts. The p95 covers every sync. The middle column leaves out only the scene's first init sync; the init syncs of sensors added later stay in. The first init sync is the largest because it creates the parts already inside a range (the original path registered its start-up parts in `InitializeFromWorld`, outside `elapsed_ms`); the last column is that sync in each run. `wait_ms` times the first RGL API call of the sync, including both the wait for the previous raytrace and that call's own work (`wait_api=none`, 0 ms if there is no call); it is a diagnostic, and `elapsed_ms` includes it.
+
+World ticks (the client's `world.tick()` wall time) above 100 ms, over the whole run and from tick 60 on (zero-based; the first 60 ticks are the start-up). The Odaiba row drives the same lidar along a route on Odaiba, a map without World Partition:
+
+| Settings / scenario | Whole-run ticks >100 ms, runs 1/2/3 | Ticks from 60 on >100 ms, runs 1/2/3 |
+|---|---|---|
+| Shipped defaults / Town15 (3 km) | 2 / 2 / 2 | 0 / 0 / 0 |
+| Legacy sync values / Town15 (3 km) | 2 / 2 / 2 | 0 / 0 / 0 |
+| Legacy sync values / Town15 (150 m) | 2 / 2 / 2 | 0 / 0 / 0 |
+| Legacy sync values / Odaiba | 1 / 1 / 1 | 0 / 0 / 0 |
+
+The whole-run tick maxima on the 3 km route are start-up ticks: 778.57 / 794.88 / 788.35 ms with the shipped defaults and 814.32 / 803.27 / 787.76 ms with the legacy sync values; before this branch they reached 818.76 ms, with 3 / 6 / 4 ticks above 100 ms over the whole run and 1 / 4 / 2 from tick 60 on. On Odaiba (no World Partition) the sync maxima were 8.95 / 8.58 / 8.49 ms. `wp_deadline` fired in none of these runs.
+
+A separate comparison used the same binary, route segment and seed 0 with the culling off and on (the on runs also with seeds 1/2). These are p50 values of the sync line's `wp_entities_total` and `wp_nonstatic_registered`, not of its `entities` key, and not VRAM in MB:
+
+| Scenario | Total entities, off → on | Non-Static registered, off → on | Non-Static reduction |
+|---|---|---|---|
+| Town15 (3 km) | 169,968 → 28,423–28,793 | 155,514 → 14,109–14,189 | about 90.9% |
+| Town15 (150 m) | 85,400 → 27,772 | 71,035 → 13,554 | about 80.9% |
+
+Fewer entities make a smaller scene; how much VRAM that saves in MB was not measured here (mesh sharing, idle meshes and acceleration structures need their own measurement).
+
+To cut the loaded area and the sync time, lower both distances to what the sensors need:
+their range plus their distance from the hero's origin, with some margin.
+
+### Scene sync knobs
+
+The `rgl.Scene.*` and `rgl.Debug.*` knobs are CVars (see
+[Skeletal meshes](#skeletal-meshes-vehicle-bodies-walkers) for how to set CVars). A
+packaged Shipping server also takes the switch in the second column, for example
+`-rgl-scene-audit=10`. The first eleven scene controls and all eight WP controls are printed on an `rgl_scene_config` line at start-up and whenever one changes, together with the WP policy state.
+
+| CVar | Shipping switch | Default | Effect |
+|---|---|---|---|
+| `rgl.Scene.MaxMeshCreatesPerUpdate` | `-rgl-scene-max-mesh-creates-per-update=` | 8 | Most new RGL meshes (or idle reactivations) per scene Update; the rest wait in a nearest-first queue. 0 = unlimited. |
+| `rgl.Scene.CreateBudgetMs` | `-rgl-scene-create-budget-ms=` | 4 | Wall-time budget (ms) for mesh creation per scene Update. 0 = unlimited. |
+| `rgl.Scene.UnloadDistanceFactor` | `-rgl-scene-unload-distance-factor=` | 1.0 | Static meshes unload only beyond the registration radius × factor + 20 m. Values below 1 count as 1. |
+| `rgl.Scene.IdleMeshCacheMax` | `-rgl-scene-idle-mesh-cache-max=` | 0 | RGL meshes kept resident after their last entity has left, least recently idled destroyed first. 0 = destroy at once. |
+| `rgl.Scene.MaxIsmInstanceChangesPerUpdate` | `-rgl-scene-max-ism-instance-changes-per-update=` | 512 | Most Static ISM instances added to or removed from the scene per scene Update when a sync has the ISM groups re-evaluated against the sensor spheres (on the Updates without a sync; when every Update syncs, on each sync Update after its sync). 0 = unlimited. |
+| `rgl.Scene.SyncClock` | `-rgl-scene-sync-clock=` | 1 | Clock of the periodic sync: 1 = simulation time; 0 = the world dt of the scene Updates only (the original timer: with a 0.1 s lidar at dt 0.025 s, a 1 s interval took about 4 s). Other values count as 1. Legacy value: 0. |
+| `rgl.Scene.SyncIntervalSeconds` | `-rgl-scene-sync-interval-seconds=` | 1.0 | Seconds of that clock between periodic syncs, ≥0.1 (a smaller value is raised to 0.1). Legacy value: 1. |
+| `rgl.Scene.SyncTriggerRatio` | `-rgl-scene-sync-trigger-ratio=` | 0.2 | Distance trigger: a sensor that moved more than this ratio × R since the last sync syncs at once (R = its registration radius: max(50 m, range + 20 m) for an RGL lidar). >0. Legacy value: 0.2. |
+| `rgl.Scene.SyncTriggerMarginSlackM` | `-rgl-scene-sync-trigger-margin-slack-m=` | 5.0 | Caps the distance trigger at max(1 m, (R − range) − this value), so that the sync comes before a part just beyond R at the last sync can reach the range: 15 m when R = range + 20 m. Negative = no cap. Legacy value: −1. |
+| `rgl.Scene.InRangeCreatesPerUpdate` | `-rgl-scene-in-range-creates-per-update=` | 16 | Parts waiting in the create queue (static mesh components of any mobility, apart from the World Partition culling's own queue) whose bounds reach a sensor's range are created first, outside `MaxMeshCreatesPerUpdate` and `CreateBudgetMs`: at most this many per scene Update; the rest wait for that budget. ≥0, 0 = no priority. Legacy value: 0. |
+| `rgl.Scene.InRangeCreateBudgetMs` | `-rgl-scene-in-range-create-budget-ms=` | 8.0 | Wall-time cap (ms) of those in-range creations per scene Update, checked between creations; at least one proceeds. ≥0, 0 = no ms cap. Not used with the legacy values. |
+| `rgl.Scene.WpMovableCulling` | `-rgl-scene-wp-movable-culling=` | 1 | WP only: 0 = old registration, 1 = distance selection of non-Static static meshes. No effect on non-WP maps. |
+| `rgl.Scene.MovableMinMarginM` | `-rgl-scene-movable-min-margin-m=` | 20 | WP only: minimum registration margin (m), ≥20; 0 is invalid. |
+| `rgl.Scene.MovableSensorSpeedBoundMps` | `-rgl-scene-movable-sensor-speed-bound-mps=` | 50 | WP only: assumed sensor speed bound (m/s), >0; 0 is invalid. |
+| `rgl.Scene.MovableObjectSpeedBoundMps` | `-rgl-scene-movable-object-speed-bound-mps=` | 50 | WP only: assumed speed bound for map parts that may start moving (m/s), >0; 0 is invalid. Observed movement promotes protection. |
+| `rgl.Scene.MovableMaxUpdateGapSeconds` | `-rgl-scene-movable-max-update-gap-seconds=` | 0.1 | WP only: maximum scene Update and active sensor pose-refresh gap (sim s), >0; 0 is invalid. |
+| `rgl.Scene.MovableCreateLatencySeconds` | `-rgl-scene-movable-create-latency-seconds=` | 1.0 | WP only: covered job completion deadline including all creation waits (sim s), >0; 0 is invalid. |
+| `rgl.Scene.MaxMovableEntityChangesPerUpdate` | `-rgl-scene-max-movable-entity-changes-per-update=` | 512 | WP only: entity additions/removals per Update, including cached regular meshes and individual ISM instances; ≥0, 0 = no count cap. Adds of parts already inside a range when the queue is built bypass caps. |
+| `rgl.Scene.MovableEntityBudgetMs` | `-rgl-scene-movable-entity-budget-ms=` | 4.0 | WP only: wall-time budget (ms) for those changes after the first one; ≥0, 0 = no ms cap. Adds of parts already inside a range when the queue is built bypass budgets. |
+| `rgl.Scene.Audit` | `-rgl-scene-audit=` | 0 | Read-only audit: N >= 1 prints an `rgl_scene_audit` line every N-th scene Update (at most one per frame). Scans every actor, so leave it off when timing frames. |
+| `rgl.Debug.HitDumpDir` | `-rgl-debug-hit-dump=` | (empty) | Debug: directory that receives one file of hit points per dumped scan. Empty = off. |
+| `rgl.Debug.HitDumpEvery` | `-rgl-debug-hit-dump-every=` | 10 | Debug: with a dump directory set, dump each sensor's first scan and then every N-th one. |
+
+Invalid values of the WP, sync-clock and range-edge controls (including non-finite floats or negative count limits) produce a warning and fall back to their defaults, except that a `rgl.Scene.SyncIntervalSeconds` below 0.1 is raised to 0.1 (a non-finite one falls back to 1.0). The five older controls (`MaxMeshCreatesPerUpdate`, `CreateBudgetMs`, `UnloadDistanceFactor`, `IdleMeshCacheMax`, `MaxIsmInstanceChangesPerUpdate`) are clamped to their ranges without a warning. A live enable change is reconciled at the next WP sync; use a fresh server for off/on comparisons. Horizon input changes force re-evaluation.
+
+The sync-clock and range-edge controls close a gap at the edge of a sensor's range. A sensor registers the Static parts within its registration radius R = max(50 m, range + 20 m). With the legacy values (the Update clock and a distance trigger of 0.2 R, 44 m for a 200 m lidar), a part beyond R at one sync could enter the range before the next sync and stay missing until then, and the create budget could hold it in the queue for a few more Updates. Each sensor's numbers are printed once, at its first sync, on an `rgl_scene_sensor` line (`registration_m`, `range_m`, `trigger_m`); the sync line carries `in_range_creates` and `in_range_ms` for that Update's create step. The legacy values restore the original behaviour:
+
+```text
+-rgl-scene-sync-clock=0 -rgl-scene-sync-interval-seconds=1 -rgl-scene-sync-trigger-ratio=0.2 -rgl-scene-sync-trigger-margin-slack-m=-1 -rgl-scene-in-range-creates-per-update=0
+```
+
+### ISM re-evaluation keys on the log lines
+
+Two keys on different lines have similar names and count the same queue at different
+moments: the queue of Static instanced static mesh (ISM) groups waiting to have their
+instances compared with the sensor spheres. Every sync refills the queue with all
+registered Static ISM groups; the Updates without a sync work through it, capped by
+`rgl.Scene.MaxIsmInstanceChangesPerUpdate`. When a sync Update follows another sync Update
+(every Update syncs, for example when all RGL sensors tick no more often than the sync
+interval), that sync Update takes the same capped step after its sync, so the round still
+progresses.
+
+| Line | Key | Meaning |
+|---|---|---|
+| `rgl_scene_sync` | `ism_pending` | Entries left in the queue when this sync refilled it: groups the previous round had not reached. Non-zero when the steps since the previous sync did not finish the round: the cap stopped it, or the syncs came back to back (then only one capped step ran between them). |
+| `rgl_scene_audit` | `pending_ism` | Entries in the queue at the audited frame: groups not yet compared with the current sensor spheres. |
+
+Both counts include the entries of components that have been removed since they were
+queued; such an entry is dropped when the queue reaches it.
+
+The WP non-Static queue is separate: `wp_pending` is its current job count and `wp_queue_age_max_s` the current oldest pending creation age in sim seconds. `wp_check_n`, `wp_check_instances`, `wp_check_ms`, `wp_entity_added`, `wp_entity_removed` and `wp_entity_ms` accumulate since the previous sync log line; `wp_check_max_ms` is the largest single check in that interval. `wp_inrange_added`/`wp_inrange_ms` describe only this Update's adds of parts already inside some sensor's raw range when the queue was built, including upload and the first API wait. `wp_sync_bound_s`/`wp_create_latency_s`/`wp_margin_m` describe this sync's horizon; `wp_violations` counts violations since the previous line, while `wp_deadline_syncs` is cumulative. `wp_promoted` is the current promoted-candidate count. `wp_entities_total` counts regular + all ISM instances + live skeletal entities (excluding synthetic ground); `wp_nonstatic_registered` counts regular/ISM non-Static entities including Stationary, excluding skeletal. The old `entities` key remains the regular entity-map count. Audit `missing_wp_culled_in_range` counts known WP candidates missing within raw range, including pending jobs; it is not a Static mesh creation queue count.

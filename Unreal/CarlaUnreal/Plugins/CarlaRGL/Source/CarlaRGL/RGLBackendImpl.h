@@ -70,6 +70,14 @@ struct FRGLSession
     float SelfCutoutMinElevationDeg = 0.0f;    // vertical field of view of the ray pattern
     float SelfCutoutMaxElevationDeg = 0.0f;
 
+    // ---- The sensor's carrier (see IRGLBackend::SetAuditParent; the audit and the scene sync use it) ----
+    TWeakObjectPtr<AActor> AuditParent;        // root of the sensor's attach chain; null = not attached
+
+    // ---- Debug hit dump (rgl.Debug.HitDumpDir) ----
+    uint64 HitDumpScans = 0;                   // raytraces seen while the dump is on
+    bool bHitDumpReported = false;             // first written file announced
+    bool bHitDumpFailureReported = false;      // first failure announced
+
     bool AllNodesValid() const
     {
         return UseRaysNode && SetRangeNode && RaysTransformNode && RaytraceNode &&
@@ -98,6 +106,7 @@ public:
         bool bNeedResults,
         bool bNeedWorldPoints) override;
     virtual void SetSelfCutout(FRGLSessionHandle Handle, AActor* Vehicle, float RadiusCm) override;
+    virtual void SetAuditParent(FRGLSessionHandle Handle, AActor* RootParent) override;
 
 private:
     double SimulationTime = -1.0;  // Elapsed since episode start; -1 = not set
