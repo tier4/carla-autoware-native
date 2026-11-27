@@ -62,14 +62,18 @@ public:
 
   virtual void PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaTime) override;
 
-  /// Publish a single sample (ROS2 + streaming) with a per-sample timestamp
-  /// offset (seconds before the frame stamp). Public so that the file-local
-  /// ZOH helper can call it without requiring a friend declaration.
+  /// Publish a single sample with a per-sample timestamp offset (seconds
+  /// before the frame stamp) to ROS 2 and the raw sink. The client stream
+  /// (listen()) gets it only when bSendToClient is set: one sample per sensor
+  /// tick (the newest), as for every other sensor, so that sensor_tick holds
+  /// for clients. Public so that the file-local ZOH helper can call it
+  /// without requiring a friend declaration.
   void PublishSubstepSample(
       double TimeOffsetSeconds,
       const carla::geom::Vector3D &Accelerometer,
       const carla::geom::Vector3D &Gyroscope,
-      float Compass);
+      float Compass,
+      bool bSendToClient);
 
 protected:
 
