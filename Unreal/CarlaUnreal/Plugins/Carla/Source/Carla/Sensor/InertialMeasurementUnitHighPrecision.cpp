@@ -313,7 +313,8 @@ void AInertialMeasurementUnitHighPrecision::PublishSubstepSample(
     double TimeOffsetSeconds,
     const carla::geom::Vector3D &Accelerometer,
     const carla::geom::Vector3D &Gyroscope,
-    float Compass)
+    float Compass,
+    bool bSendToClient)
 {
   auto DataStream = GetDataStream(*this);
 
@@ -378,6 +379,10 @@ void AInertialMeasurementUnitHighPrecision::PublishSubstepSample(
   }
   #endif
 
+  // The client stream carries one sample per sensor tick (sensor_tick holds,
+  // as for every other sensor); the samples between ticks go to ROS 2 and the
+  // raw sink only.
+  if (bSendToClient)
   {
     TRACE_CPUPROFILER_EVENT_SCOPE(AInertialMeasurementUnitHighPrecision::SerializeAndSend);
     DataStream.SerializeAndSend(*this, Accelerometer, Gyroscope, Compass);
@@ -405,7 +410,7 @@ static void EmitZOHSamples(
     // sample k=N-1 is the most recent (at the frame stamp).
     const double tOffset =
         static_cast<double>(N - 1 - k) * static_cast<double>(DeltaTime) / N;
-    Sensor->PublishSubstepSample(tOffset, A, G, Compass);
+    Sensor->PublishSubstepSample(tOffset, A, G, Compass, k == N - 1);
   }
 }
 
@@ -659,7 +664,7 @@ void AInertialMeasurementUnitHighPrecision::PostPhysTickSamples(
 
     // Per-substep timestamp: use accumulated suffix dt for accuracy with
     // non-uniform substep sizes (robust to variable substep dt).
-    PublishSubstepSample(SuffixDt[k], Accel, Gyro, Compass);
+    PublishSubstepSample(SuffixDt[k], Accel, Gyro, Compass, k == N - 1);
 
     // Advance integration state.
     PrevImuRot = ImuRot;
